@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -20,10 +21,12 @@ import MapView, {
   PROVIDER_GOOGLE,
 } from "react-native-maps";
 
+import RetningVelger from "@/components/RetningVelger";
 import {
-  deleteCamera,
+  deactivateCamera,
   saveCamera,
-  subscribeToMyCameras,
+  subscribeToVisibleCameras,
+  updateCamera,
   type Viltkamera,
 } from "@/src/services/cameras";
 import {
@@ -36,9 +39,16 @@ import { getAktivtJaktlagId } from "@/src/services/jaktlag";
 import {
   saveObservation,
   subscribeToNearbyObservations,
+  subscribeToObservationsByCamera,
 } from "@/src/services/observations";
+import {
+  KART_PUNKT_TYPER,
+  saveMapPoint,
+  subscribeToVisibleMapPoints,
+  type MapPoint,
+} from "@/src/services/mapPoints";
 import { getSettings } from "@/src/services/settings";
-import type { Observasjon } from "@/src/types/observation";
+import type { Observasjon, SporType } from "@/src/types/observation";
 import {
   dyrEmoji,
   hentRelativTid,
@@ -48,7 +58,6 @@ import {
   anonymiserPosisjon,
   buildSector,
   calcBearing,
-  distanceMeters,
   movePoint,
 } from "@/src/lib/geo";
 
@@ -75,11 +84,18 @@ type AktivSone = {
   type: "nå" | "snart";
 };
 
+type PinAction = "menu" | "kamera" | "dyr" | "spor" | "annet";
+type CameraView = "info" | "observasjon" | "rediger";
+
 // ─── Konstanter ───────────────────────────────────────────────────────────────
 
 const dyrListe    = ["Rådyr", "Elg", "Hjort", "Rev"];
-const typeListe   = ["Sett dyr", "Spor", "Kamera"];
 const dyrFilter   = ["Alle", ...dyrListe];
+const sporTypeListe: SporType[] = [
+  "Fotspor", "Avføring", "Beitespor", "Liggeplass", "Feiing", "Annet",
+];
+const kjonnListe = ["Hann", "Hunn"];
+const alderListe = ["Kalv", "Ungdyr", "Voksen"];
 
 const retningListe = [
   { label: "N",  grader: 0   },
@@ -231,6 +247,70 @@ function scoreEtikett(score: number): string {
   return "Lavt";
 }
 
+function formatDato(verdi?: any): string {
+  if (!verdi) return "Ukjent dato";
+  let dato: Date;
+  if (typeof verdi === "string") {
+    dato = new Date(verdi);
+  } else if (typeof verdi?.toDate === "function") {
+    dato = verdi.toDate();
+  } else {
+    return "Ukjent dato";
+  }
+  if (Number.isNaN(dato.getTime())) return "Ukjent dato";
+  return dato.toLocaleDateString("no-NO", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function installertVarighet(verdi?: any): string {
+  if (!verdi) return "Ukjent";
+  const dato: Date = typeof verdi === "string" ? new Date(verdi)
+    : typeof verdi?.toDate === "function" ? verdi.toDate() : new Date(NaN);
+  if (Number.isNaN(dato.getTime())) return "Ukjent";
+  const dager = Math.floor((Date.now() - dato.getTime()) / 86400000);
+  if (dager <= 0) return "Satt opp i dag";
+  if (dager === 1) return "1 dag";
+  return `${dager} dager`;
+}
+
+// Enkel +/- steg-velger for antall dyr i en observasjon.
+function AntallStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <View style={styles.stepperRow}>
+      <Pressable onPress={() => onChange(Math.max(1, value - 1))} style={styles.stepperBtn}>
+        <Ionicons name="remove" size={16} color="#CFE7DB" />
+      </Pressable>
+      <Text style={styles.stepperValue}>{value}</Text>
+      <Pressable onPress={() => onChange(value + 1)} style={styles.stepperBtn}>
+        <Ionicons name="add" size={16} color="#CFE7DB" />
+      </Pressable>
+    </View>
+  );
+}
+
+// Delt header for bunnark-underskjemaer — tilbake til meny + lukk helt.
+function FormHeader({
+  title, sub, onBack, onClose,
+}: { title: string; sub?: string; onBack?: () => void; onClose: () => void }) {
+  return (
+    <View style={styles.pinHeader}>
+      <View style={styles.pinHeaderLeft}>
+        {onBack && (
+          <Pressable onPress={onBack} style={styles.backStepBtn}>
+            <Ionicons name="chevron-back" size={18} color="#CFE7DB" />
+          </Pressable>
+        )}
+        <View>
+          <Text style={styles.pinTitle}>{title}</Text>
+          {!!sub && <Text style={styles.pinSub}>{sub}</Text>}
+        </View>
+      </View>
+      <Pressable onPress={onClose} style={styles.closeBtn}>
+        <Ionicons name="close" size={18} color="#9CA3AF" />
+      </Pressable>
+    </View>
+  );
+}
+
 // ─── Hovedkomponent ───────────────────────────────────────────────────────────
 
 export default function KartScreen() {
@@ -251,23 +331,56 @@ export default function KartScreen() {
   const [userLocation, setUserLocation] = useState<UserPosition | null>(null);
   const [observasjoner, setObservasjoner] = useState<Observasjon[]>([]);
   const [kameraer,     setKameraer]     = useState<Viltkamera[]>([]);
-  const [selectedPin,  setSelectedPin]  = useState<MapPin | null>(null);
-  const [valgtDyr,     setValgtDyr]     = useState("Rådyr");
-  const [valgtType,    setValgtType]    = useState("Sett dyr");
-  const [retningPin,   setRetningPin]   = useState<number | null>(null);
-  const [filterOpen,   setFilterOpen]   = useState(false);
+  const [mapPoints,    setMapPoints]    = useState<MapPoint[]>([]);
+  const [filterOpen,   filterOpenSet]   = useState(false);
   const [aktivtFilter,   setAktivtFilter]   = useState(params.filter || "Alle");
-  const [selectedCamera, setSelectedCamera] = useState<Viltkamera | null>(null);
   const [visPrediksjon,  setVisPrediksjon]  = useState(false);
   const [visKameraer,    setVisKameraer]    = useState(true);
   const [visAktiveSoner, setVisAktiveSoner] = useState(false);
+  const [visSporAnnet,   setVisSporAnnet]   = useState(true);
   const [medlsPosisjon,  setMedlsPosisjon]  = useState<MedlemPosisjon[]>([]);
+
+  // ── Langtrykk-meny og nye punkter ──
+  const [selectedPin,  setSelectedPin]  = useState<MapPin | null>(null);
+  const [pinAction,    setPinAction]    = useState<PinAction | null>(null);
+
+  const [valgtDyr,   setValgtDyr]   = useState("Rådyr");
+  const [antallPin,  setAntallPin]  = useState(1);
+  const [retningPin, setRetningPin] = useState<number | null>(null);
+
+  const [kameraNavn,     setKameraNavn]     = useState("");
+  const [kameraRetningNy, setKameraRetningNy] = useState(0);
+
+  const [sporDyr,        setSporDyr]        = useState<string | null>(null);
+  const [sporTypeValgt,  setSporTypeValgt]  = useState<SporType>("Fotspor");
+  const [sporKommentar,  setSporKommentar]  = useState("");
+
+  const [annetType,      setAnnetType]      = useState<string>(KART_PUNKT_TYPER[0]);
+  const [annetNavn,      setAnnetNavn]      = useState("");
+  const [annetKommentar, setAnnetKommentar] = useState("");
+
+  // ── Valgt eksisterende kamera ──
+  const [selectedCamera, setSelectedCamera] = useState<Viltkamera | null>(null);
+  const [cameraView,     setCameraView]     = useState<CameraView>("info");
+  const [cameraObsListe, setCameraObsListe] = useState<Observasjon[]>([]);
+  const [savingCameraAction, setSavingCameraAction] = useState(false);
+
+  const [regDyr,       setRegDyr]       = useState("Rådyr");
+  const [regAntall,    setRegAntall]    = useState(1);
+  const [regKjonn,     setRegKjonn]     = useState<string | null>(null);
+  const [regAlder,     setRegAlder]     = useState<string | null>(null);
+  const [regKommentar, setRegKommentar] = useState("");
+
+  const [editNavn,     setEditNavn]     = useState("");
+  const [editRetning,  setEditRetning]  = useState(0);
+  const [editNotat,    setEditNotat]    = useState("");
 
   // ─── Initialisering ───────────────────────────────────────────────────────
 
   useEffect(() => {
     let unsubObs: (() => void) | null = null;
     let unsubCam: (() => void) | null = null;
+    let unsubPts: (() => void) | null = null;
     let unsubLoc: (() => void) | null = null;
 
     (async () => {
@@ -276,15 +389,25 @@ export default function KartScreen() {
         const settings = await getSettings();
         setRadiusKm(settings.radiusKm);
 
-        // Kameralytter (Firestore)
+        const aktivtJaktlagId = await getAktivtJaktlagId();
+
+        // Kamera- og kartpunktlyttere (Firestore) — egne + jaktlagets
         try {
-          unsubCam = subscribeToMyCameras((items) => setKameraer(items));
+          unsubCam = subscribeToVisibleCameras(
+            aktivtJaktlagId,
+            (items) => setKameraer(items.filter((k) => k.active)),
+            () => { /* stille — kartet fungerer uten kameraer */ }
+          );
+          unsubPts = subscribeToVisibleMapPoints(
+            aktivtJaktlagId,
+            (items) => setMapPoints(items),
+            () => { /* stille */ }
+          );
         } catch { /* ikke innlogget ennå */ }
 
         // Jaktlag-medlemmers live-posisjoner
-        const jaktlagId = await getAktivtJaktlagId();
-        if (jaktlagId) {
-          unsubLoc = subscribeToJaktlagLocations(jaktlagId, setMedlsPosisjon);
+        if (aktivtJaktlagId) {
+          unsubLoc = subscribeToJaktlagLocations(aktivtJaktlagId, setMedlsPosisjon);
         }
 
         const perm = await Location.requestForegroundPermissionsAsync();
@@ -325,36 +448,85 @@ export default function KartScreen() {
     return () => {
       if (unsubObs) unsubObs();
       if (unsubCam) unsubCam();
+      if (unsubPts) unsubPts();
       if (unsubLoc) unsubLoc();
     };
   }, []);
+
+  // Observasjoner registrert på det valgte kameraet (via cameraId)
+  useEffect(() => {
+    if (!selectedCamera) { setCameraObsListe([]); return; }
+    const unsub = subscribeToObservationsByCamera(
+      selectedCamera.id,
+      selectedCamera.jaktlagId,
+      (items) => setCameraObsListe(items),
+      () => setCameraObsListe([])
+    );
+    return () => unsub();
+  }, [selectedCamera]);
 
   // ─── Kartevent ────────────────────────────────────────────────────────────
 
   function handleMapLongPress(e: LongPressEvent) {
     setSelectedPin(e.nativeEvent.coordinate);
+    setPinAction("menu");
+    setValgtDyr("Rådyr");
+    setAntallPin(1);
     setRetningPin(null);
-    setFilterOpen(false);
+    setKameraNavn("");
+    setKameraRetningNy(0);
+    setSporDyr(null);
+    setSporTypeValgt("Fotspor");
+    setSporKommentar("");
+    setAnnetType(KART_PUNKT_TYPER[0]);
+    setAnnetNavn("");
+    setAnnetKommentar("");
+    filterOpenSet(false);
     setSelectedCamera(null);
   }
 
-  // ─── Lagre observasjon fra pin ────────────────────────────────────────────
+  function closePinPanel() {
+    setSelectedPin(null);
+    setPinAction(null);
+  }
 
-  async function lagreObservasjonFraPin() {
+  // ─── Lagre fra langtrykk-meny ──────────────────────────────────────────────
+
+  async function lagreKameraFraMeny() {
+    if (!selectedPin || savingPin) return;
+    try {
+      setSavingPin(true);
+      await saveCamera({
+        name:      kameraNavn.trim() || `Viltkamera ${kameraer.length + 1}`,
+        latitude:  selectedPin.latitude,
+        longitude: selectedPin.longitude,
+        directionDegrees: kameraRetningNy,
+      });
+      closePinPanel();
+      Alert.alert("Kamera lagret", "Viltkameraet er plassert på kartet.");
+    } catch (e: any) {
+      Alert.alert("Feil", e?.message || "Klarte ikke lagre kamera.");
+    } finally {
+      setSavingPin(false);
+    }
+  }
+
+  async function lagreDyrFraMeny() {
     if (!selectedPin || savingPin) return;
     try {
       setSavingPin(true);
       await saveObservation({
         dyr:      valgtDyr,
-        type:     valgtType,
+        type:     "Sett dyr",
         kommentar: "Lagt inn fra kart",
         tid:      new Date().toISOString(),
         latitude:  selectedPin.latitude,
         longitude: selectedPin.longitude,
         retning:  retningPin,
+        antall:   antallPin,
+        observationSource: "manual",
       });
-      setSelectedPin(null);
-      setRetningPin(null);
+      closePinPanel();
       Alert.alert("Lagret", "Observasjonen er lagret.");
     } catch (e: any) {
       Alert.alert("Feil", e?.message || "Klarte ikke lagre observasjon.");
@@ -363,39 +535,124 @@ export default function KartScreen() {
     }
   }
 
-  // ─── Lagre viltkamera fra pin ─────────────────────────────────────────────
-
-  async function lagreKameraFraPin() {
+  async function lagreSporFraMeny() {
     if (!selectedPin || savingPin) return;
     try {
       setSavingPin(true);
-      await saveCamera({
-        name:      `Viltkamera ${kameraer.length + 1}`,
+      await saveObservation({
+        dyr:      sporDyr ?? "Ukjent",
+        type:     "Spor",
+        kommentar: sporKommentar.trim() || "Spor registrert fra kart",
+        tid:      new Date().toISOString(),
         latitude:  selectedPin.latitude,
         longitude: selectedPin.longitude,
+        retning:  null,
+        observationSource: "track",
+        sporType: sporTypeValgt,
       });
-      setSelectedPin(null);
-      setRetningPin(null);
-      Alert.alert("Lagret", `Viltkamera ${kameraer.length + 1} er plassert på kartet.`);
+      closePinPanel();
+      Alert.alert("Spor lagret", "Sporet er registrert på kartet.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke lagre kamera.");
+      Alert.alert("Feil", e?.message || "Klarte ikke lagre spor.");
     } finally {
       setSavingPin(false);
     }
   }
 
-  // ─── Slett kamera ─────────────────────────────────────────────────────────
-
-  async function slettKamera(id: string) {
+  async function lagreAnnetFraMeny() {
+    if (!selectedPin || savingPin) return;
     try {
-      await deleteCamera(id);
-      setSelectedCamera(null);
+      setSavingPin(true);
+      await saveMapPoint({
+        latitude:  selectedPin.latitude,
+        longitude: selectedPin.longitude,
+        pointType: annetType,
+        label:     annetNavn,
+        kommentar: annetKommentar,
+      });
+      closePinPanel();
+      Alert.alert("Lagret", "Punktet er lagret på kartet.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke slette kamera.");
+      Alert.alert("Feil", e?.message || "Klarte ikke lagre punktet.");
+    } finally {
+      setSavingPin(false);
     }
   }
 
-  // ─── Sporpunkt (rask spor-observasjon ved GPS-posisjon) ───────────────────
+  // ─── Handlinger på eksisterende kamera ─────────────────────────────────────
+
+  async function lagreObservasjonFraKamera() {
+    if (!selectedCamera || savingCameraAction) return;
+    try {
+      setSavingCameraAction(true);
+      await saveObservation({
+        dyr:      regDyr,
+        type:     "Sett dyr",
+        kommentar: regKommentar.trim() || "Registrert fra viltkamera",
+        tid:      new Date().toISOString(),
+        latitude:  null,
+        longitude: null,
+        retning:  null,
+        antall:   regAntall,
+        observationSource: "camera",
+        cameraId: selectedCamera.id,
+        kjonn:    regKjonn,
+        alder:    regAlder,
+      });
+      setCameraView("info");
+      Alert.alert("Lagret", "Observasjonen er registrert på kameraet.");
+    } catch (e: any) {
+      Alert.alert("Feil", e?.message || "Klarte ikke lagre observasjon.");
+    } finally {
+      setSavingCameraAction(false);
+    }
+  }
+
+  async function redigerKamera() {
+    if (!selectedCamera || savingCameraAction) return;
+    try {
+      setSavingCameraAction(true);
+      await updateCamera(selectedCamera.id, {
+        name: editNavn.trim() || selectedCamera.name,
+        directionDegrees: editRetning,
+        notes: editNotat,
+      });
+      setCameraView("info");
+      Alert.alert("Lagret", "Kameraet er oppdatert.");
+    } catch (e: any) {
+      Alert.alert("Feil", e?.message || "Klarte ikke oppdatere kamera.");
+    } finally {
+      setSavingCameraAction(false);
+    }
+  }
+
+  async function fjernKamera(id: string) {
+    try {
+      await deactivateCamera(id);
+      setSelectedCamera(null);
+      setCameraView("info");
+    } catch (e: any) {
+      Alert.alert("Feil", e?.message || "Klarte ikke fjerne kamera.");
+    }
+  }
+
+  function bekreftFjernKamera() {
+    if (!selectedCamera) return;
+    Alert.alert(
+      "Fjerne viltkamera?",
+      "Kameraet fjernes fra kartet, men tidligere observasjoner og statistikk beholdes.",
+      [
+        { text: "Avbryt", style: "cancel" },
+        {
+          text: "Fjern kamera",
+          style: "destructive",
+          onPress: () => fjernKamera(selectedCamera.id),
+        },
+      ]
+    );
+  }
+
+  // ─── Sporpunkt (rask spor-registrering ved GPS-posisjon) ───────────────────
 
   async function lagreSporpunkt() {
     if (!userLocation || sporpunktLaster) return;
@@ -410,6 +667,8 @@ export default function KartScreen() {
         latitude:  p.latitude,
         longitude: p.longitude,
         retning:  null,
+        observationSource: "track",
+        sporType: "Fotspor",
       });
       Alert.alert("Sporpunkt lagret", `${dyrEmoji(valgtDyr)} ${valgtDyr} · Spor registrert her.`);
     } catch (e: any) {
@@ -431,6 +690,18 @@ export default function KartScreen() {
     [filtrerteObs]
   );
 
+  // Vanlige dyreobservasjoner (manuelt/kamera) — vises som dyrebobler
+  const dyrObsMedGps = useMemo(
+    () => obsMedGps.filter((o) => o.observationSource !== "track"),
+    [obsMedGps]
+  );
+
+  // Sporregistreringer — vises med eget ikon, kan skjules
+  const sporObsMedGps = useMemo(
+    () => obsMedGps.filter((o) => o.observationSource === "track"),
+    [obsMedGps]
+  );
+
   const heatZones = useMemo(() => buildHeatZones(obsMedGps), [obsMedGps]);
 
   const bestZone = heatZones[0] ?? null;
@@ -450,6 +721,16 @@ export default function KartScreen() {
       sektorBearing
     );
   }, [bestZone, sektorBearing]);
+
+  const kameraSektorCoords = useMemo(() => {
+    if (!selectedCamera) return null;
+    return buildSector(
+      { latitude: selectedCamera.latitude, longitude: selectedCamera.longitude },
+      140,
+      selectedCamera.directionDegrees,
+      70
+    );
+  }, [selectedCamera]);
 
   const sisteObs = useMemo(() => filtrerteObs.slice(0, 3), [filtrerteObs]);
 
@@ -544,7 +825,7 @@ export default function KartScreen() {
             showsUserLocation
             showsMyLocationButton={false}
             onLongPress={handleMapLongPress}
-            onPress={() => { setSelectedCamera(null); setFilterOpen(false); }}
+            onPress={() => { setSelectedCamera(null); filterOpenSet(false); }}
           >
             {/* Radius-sirkel */}
             <Circle
@@ -555,12 +836,22 @@ export default function KartScreen() {
               fillColor="rgba(44,195,107,0.04)"
             />
 
-            {/* Sektoroverlegg */}
+            {/* Sektoroverlegg — beste sone */}
             {sektorCoords && (
               <Polygon
                 coordinates={sektorCoords}
                 fillColor="rgba(59,130,246,0.22)"
                 strokeColor="rgba(59,130,246,0.55)"
+                strokeWidth={1.5}
+              />
+            )}
+
+            {/* Sektoroverlegg — valgt kameras retningsfelt */}
+            {kameraSektorCoords && (
+              <Polygon
+                coordinates={kameraSektorCoords}
+                fillColor="rgba(96,165,250,0.20)"
+                strokeColor="rgba(96,165,250,0.55)"
                 strokeWidth={1.5}
               />
             )}
@@ -609,15 +900,61 @@ export default function KartScreen() {
               </Marker>
             )}
 
-            {/* Observasjonsmarkører */}
-            {obsMedGps.filter((o) => !bestZone || o.latitude !== bestZone.latitude).map((o) => (
+            {/* Observasjonsmarkører — dyr sett (manuelt/kamera) */}
+            {dyrObsMedGps.filter((o) => !bestZone || o.latitude !== bestZone.latitude).map((o) => (
               <Marker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
+                anchor={{ x: 0.5, y: 1 }}
+                tracksViewChanges={false}
                 title={`${o.dyr} · ${o.type}`}
                 description={o.kommentar || undefined}
-                pinColor={o.dyr === "Rev" ? "#FB923C" : "#FCD34D"}
-              />
+              >
+                <View style={styles.obsPinWrap}>
+                  <View style={[styles.obsPinBubble, o.dyr === "Rev" && styles.obsPinBubbleRev]}>
+                    <Text style={styles.obsPinEmoji}>{dyrEmoji(o.dyr)}</Text>
+                  </View>
+                  <View style={[styles.obsPinArrow, o.dyr === "Rev" && styles.obsPinArrowRev]} />
+                </View>
+              </Marker>
+            ))}
+
+            {/* Sporregistreringer */}
+            {visSporAnnet && sporObsMedGps.map((o) => (
+              <Marker
+                key={o.id}
+                coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
+                anchor={{ x: 0.5, y: 1 }}
+                tracksViewChanges={false}
+                title={`Spor${o.sporType ? " · " + o.sporType : ""}`}
+                description={o.kommentar || undefined}
+              >
+                <View style={styles.sporPinWrap}>
+                  <View style={styles.sporPinBubble}>
+                    <Ionicons name="paw-outline" size={14} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.sporPinArrow} />
+                </View>
+              </Marker>
+            ))}
+
+            {/* "Annet"-kartpunkter */}
+            {visSporAnnet && mapPoints.map((p) => (
+              <Marker
+                key={p.id}
+                coordinate={{ latitude: p.latitude, longitude: p.longitude }}
+                anchor={{ x: 0.5, y: 1 }}
+                tracksViewChanges={false}
+                title={p.label || p.pointType}
+                description={p.kommentar || undefined}
+              >
+                <View style={styles.annetPinWrap}>
+                  <View style={styles.annetPinBubble}>
+                    <Ionicons name="pricetag-outline" size={14} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.annetPinArrow} />
+                </View>
+              </Marker>
             ))}
 
             {/* Kameramarkører */}
@@ -627,9 +964,21 @@ export default function KartScreen() {
                 coordinate={{ latitude: k.latitude, longitude: k.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
                 tracksViewChanges={false}
-                onPress={() => { setSelectedCamera(k); setSelectedPin(null); }}
+                onPress={() => {
+                  setSelectedCamera(k);
+                  setCameraView("info");
+                  setSelectedPin(null);
+                }}
               >
                 <View style={styles.cameraPinWrap}>
+                  <View style={styles.cameraDirArrowWrap} pointerEvents="none">
+                    <Ionicons
+                      name="navigate"
+                      size={14}
+                      color="#93C5FD"
+                      style={{ transform: [{ rotate: `${k.directionDegrees}deg` }] }}
+                    />
+                  </View>
                   <View style={styles.cameraPinBubble}>
                     <Ionicons name="camera" size={16} color="#FFFFFF" />
                   </View>
@@ -716,7 +1065,7 @@ export default function KartScreen() {
             {/* Filter */}
             <Pressable
               style={[styles.floatBtn, filterOpen && styles.floatBtnActive]}
-              onPress={() => setFilterOpen((v) => !v)}
+              onPress={() => filterOpenSet((v) => !v)}
             >
               <Ionicons name="filter" size={20} color="#D1FAE5" />
             </Pressable>
@@ -736,6 +1085,14 @@ export default function KartScreen() {
               disabled={sporpunktLaster || !userLocation}
             >
               <Ionicons name="footsteps-outline" size={20} color="#D1FAE5" />
+            </Pressable>
+
+            {/* Vis/skjul spor- og "annet"-punkter */}
+            <Pressable
+              style={[styles.floatBtn, visSporAnnet && styles.floatBtnActiveYellow]}
+              onPress={() => setVisSporAnnet((v) => !v)}
+            >
+              <Ionicons name="layers-outline" size={20} color={visSporAnnet ? "#FCD34D" : "#D1FAE5"} />
             </Pressable>
 
             {/* Prediksjon (48t) */}
@@ -807,7 +1164,7 @@ export default function KartScreen() {
               return (
                 <Pressable
                   key={dyr}
-                  onPress={() => { setAktivtFilter(dyr); setFilterOpen(false); }}
+                  onPress={() => { setAktivtFilter(dyr); filterOpenSet(false); }}
                   style={[styles.filterItem, active && styles.filterItemActive]}
                 >
                   <Text style={[styles.filterItemText, active && styles.filterItemTextActive]}>
@@ -819,133 +1176,272 @@ export default function KartScreen() {
           </View>
         )}
 
-        {/* ── Kameradetaljpanel ── */}
-        {selectedCamera && !selectedPin && (() => {
-          const kameraHistorikk = observasjoner
-            .filter((o) =>
-              o.latitude != null &&
-              o.longitude != null &&
-              distanceMeters(selectedCamera, {
-                latitude:  o.latitude  as number,
-                longitude: o.longitude as number,
-              }) <= 300
-            )
-            .slice(0, 5);
-
-          return (
-            <ScrollView
-              style={styles.cameraPanel}
-              contentContainerStyle={styles.cameraPanelContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              <View style={styles.cameraPanelHeader}>
-                <View style={styles.cameraPanelLeft}>
-                  <View style={styles.cameraIconBadge}>
-                    <Ionicons name="camera" size={18} color="#60A5FA" />
-                  </View>
-                  <View>
-                    <Text style={styles.cameraPanelTitle}>{selectedCamera.name}</Text>
-                    <Text style={styles.cameraPanelCoord}>
-                      {selectedCamera.latitude.toFixed(4)}, {selectedCamera.longitude.toFixed(4)}
-                    </Text>
-                  </View>
-                </View>
-                <Pressable onPress={() => setSelectedCamera(null)} style={styles.closeBtn}>
-                  <Ionicons name="close" size={18} color="#6B8A76" />
-                </Pressable>
-              </View>
-
-              <View style={styles.cameraPanelStats}>
-                <View style={styles.cameraStat}>
-                  <Text style={styles.cameraStatLabel}>Batteri</Text>
-                  <Text style={styles.cameraStatValue}>{selectedCamera.batteryStatus}</Text>
-                </View>
-                <View style={styles.cameraStat}>
-                  <Text style={styles.cameraStatLabel}>Minnekort</Text>
-                  <Text style={styles.cameraStatValue}>{selectedCamera.memoryCardStatus}</Text>
-                </View>
-                <View style={styles.cameraStat}>
-                  <Text style={styles.cameraStatLabel}>Åte</Text>
-                  <Text style={styles.cameraStatValue}>{selectedCamera.baitStatus}</Text>
-                </View>
-              </View>
-
-              <View style={styles.cameraHistSection}>
-                <View style={styles.cameraHistHeader}>
-                  <Text style={styles.cameraHistTitle}>Observasjoner i nærheten</Text>
-                  <View style={styles.cameraHistBadge}>
-                    <Text style={styles.cameraHistBadgeText}>{kameraHistorikk.length}</Text>
-                  </View>
-                </View>
-
-                {kameraHistorikk.length === 0 ? (
-                  <Text style={styles.cameraHistEmpty}>
-                    Ingen registrerte observasjoner innen 300 m av dette kameraet.
-                  </Text>
-                ) : (
-                  kameraHistorikk.map((obs) => (
-                    <View key={obs.id} style={styles.cameraHistRow}>
-                      <Text style={styles.cameraHistEmoji}>
-                        {obs.dyr === "Rev" ? "🦊" : "🦌"}
-                      </Text>
-                      <View style={styles.cameraHistBody}>
-                        <Text style={styles.cameraHistAnimal}>
-                          {obs.dyr}
-                          <Text style={styles.cameraHistType}> · {obs.type}</Text>
-                        </Text>
-                        <Text style={styles.cameraHistTime}>{hentRelativTid(obs.tid)}</Text>
-                      </View>
-                      {obs.retning != null && (
-                        <Ionicons
-                          name="navigate"
-                          size={13}
-                          color="#2CC36B"
-                          style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
-                        />
-                      )}
+        {/* ── Kameradetaljpanel (bunn-ark) ── */}
+        {selectedCamera && !selectedPin && (
+          <ScrollView
+            style={styles.cameraPanel}
+            contentContainerStyle={styles.cameraPanelContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {cameraView === "info" && (
+              <>
+                <View style={styles.cameraPanelHeader}>
+                  <View style={styles.cameraPanelLeft}>
+                    <View style={styles.cameraIconBadge}>
+                      <Ionicons name="camera" size={18} color="#60A5FA" />
                     </View>
-                  ))
-                )}
-              </View>
+                    <View>
+                      <Text style={styles.cameraPanelTitle}>{selectedCamera.name}</Text>
+                      <Text style={styles.cameraPanelCoord}>
+                        {selectedCamera.latitude.toFixed(4)}, {selectedCamera.longitude.toFixed(4)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable onPress={() => setSelectedCamera(null)} style={styles.closeBtn}>
+                    <Ionicons name="close" size={18} color="#6B8A76" />
+                  </Pressable>
+                </View>
 
-              <View style={styles.cameraPanelActions}>
-                <Pressable
-                  onPress={() => router.push(`/kamera/${selectedCamera.id}`)}
-                  style={styles.detailsCameraBtn}
-                >
-                  <Ionicons name="open-outline" size={15} color="#60A5FA" />
-                  <Text style={styles.detailsCameraBtnText}>Detaljer</Text>
-                </Pressable>
+                <View style={styles.cameraPanelStats}>
+                  <View style={styles.cameraStat}>
+                    <Text style={styles.cameraStatLabel}>Satt opp</Text>
+                    <Text style={styles.cameraStatValue}>{formatDato(selectedCamera.installedAt)}</Text>
+                  </View>
+                  <View style={styles.cameraStat}>
+                    <Text style={styles.cameraStatLabel}>Aktivt</Text>
+                    <Text style={styles.cameraStatValue}>{installertVarighet(selectedCamera.installedAt)}</Text>
+                  </View>
+                  <View style={styles.cameraStat}>
+                    <Text style={styles.cameraStatLabel}>Obs.</Text>
+                    <Text style={styles.cameraStatValue}>{cameraObsListe.length}</Text>
+                  </View>
+                </View>
 
-                <Pressable
-                  onPress={() =>
-                    Alert.alert(
-                      "Slett kamera",
-                      `Vil du slette ${selectedCamera.name}?`,
-                      [
-                        { text: "Avbryt", style: "cancel" },
-                        {
-                          text: "Slett",
-                          style: "destructive",
-                          onPress: () => slettKamera(selectedCamera.id),
-                        },
-                      ]
-                    )
-                  }
-                  style={[styles.deleteCameraBtn, { flex: 1 }]}
-                >
-                  <Ionicons name="trash-outline" size={15} color="#F87171" />
-                  <Text style={styles.deleteCameraBtnText}>Slett kamera</Text>
-                </Pressable>
-              </View>
-            </ScrollView>
-          );
-        })()}
+                <View style={styles.cameraPanelStats}>
+                  <View style={styles.cameraStat}>
+                    <Text style={styles.cameraStatLabel}>Batteri</Text>
+                    <Text style={styles.cameraStatValue}>{selectedCamera.batteryStatus}</Text>
+                  </View>
+                  <View style={styles.cameraStat}>
+                    <Text style={styles.cameraStatLabel}>Minnekort</Text>
+                    <Text style={styles.cameraStatValue}>{selectedCamera.memoryCardStatus}</Text>
+                  </View>
+                  <View style={styles.cameraStat}>
+                    <Text style={styles.cameraStatLabel}>Åte</Text>
+                    <Text style={styles.cameraStatValue}>{selectedCamera.baitStatus}</Text>
+                  </View>
+                </View>
 
-        {/* ── Ny-pin panel ── */}
-        {selectedPin && (
-          <View style={styles.pinPanel}>
+                <View style={styles.cameraHistSection}>
+                  <View style={styles.cameraHistHeader}>
+                    <Text style={styles.cameraHistTitle}>Siste registreringer</Text>
+                    <View style={styles.cameraHistBadge}>
+                      <Text style={styles.cameraHistBadgeText}>{cameraObsListe.length}</Text>
+                    </View>
+                  </View>
+
+                  {cameraObsListe.length === 0 ? (
+                    <Text style={styles.cameraHistEmpty}>
+                      Ingen observasjoner registrert på dette kameraet ennå.
+                    </Text>
+                  ) : (
+                    cameraObsListe.slice(0, 5).map((obs) => (
+                      <View key={obs.id} style={styles.cameraHistRow}>
+                        <Text style={styles.cameraHistEmoji}>{dyrEmoji(obs.dyr)}</Text>
+                        <View style={styles.cameraHistBody}>
+                          <Text style={styles.cameraHistAnimal}>
+                            {obs.dyr}{obs.antall > 1 ? ` ×${obs.antall}` : ""}
+                            <Text style={styles.cameraHistType}> · {obs.type}</Text>
+                          </Text>
+                          <Text style={styles.cameraHistTime}>{hentRelativTid(obs.tid)}</Text>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </View>
+
+                <View style={styles.cameraActionsGrid}>
+                  <Pressable
+                    onPress={() => {
+                      setRegDyr("Rådyr"); setRegAntall(1);
+                      setRegKjonn(null); setRegAlder(null); setRegKommentar("");
+                      setCameraView("observasjon");
+                    }}
+                    style={styles.cameraActionBtn}
+                  >
+                    <Ionicons name="paw-outline" size={16} color="#2CC36B" />
+                    <Text style={styles.cameraActionBtnText}>Registrer observasjon</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => router.push(`/kamera/${selectedCamera.id}`)}
+                    style={styles.cameraActionBtn}
+                  >
+                    <Ionicons name="stats-chart-outline" size={16} color="#60A5FA" />
+                    <Text style={styles.cameraActionBtnText}>Se statistikk</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => {
+                      setEditNavn(selectedCamera.name);
+                      setEditRetning(selectedCamera.directionDegrees);
+                      setEditNotat(selectedCamera.notes);
+                      setCameraView("rediger");
+                    }}
+                    style={styles.cameraActionBtn}
+                  >
+                    <Ionicons name="create-outline" size={16} color="#FCD34D" />
+                    <Text style={styles.cameraActionBtnText}>Rediger kamera</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={bekreftFjernKamera}
+                    style={[styles.cameraActionBtn, styles.cameraActionBtnDanger]}
+                  >
+                    <Ionicons name="trash-outline" size={16} color="#F87171" />
+                    <Text style={styles.cameraActionBtnTextDanger}>Fjern kamera</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+            {cameraView === "observasjon" && (
+              <>
+                <FormHeader
+                  title="Registrer observasjon"
+                  sub={selectedCamera.name}
+                  onBack={() => setCameraView("info")}
+                  onClose={() => setSelectedCamera(null)}
+                />
+
+                <Text style={styles.pinLabel}>Dyr</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.chipRow}>
+                    {dyrListe.map((dyr) => {
+                      const a = regDyr === dyr;
+                      return (
+                        <Pressable key={dyr} onPress={() => setRegDyr(dyr)}
+                          style={[styles.pinChip, a && styles.pinChipActive]}>
+                          <Text style={[styles.pinChipText, a && styles.pinChipTextActive]}>
+                            {dyrEmoji(dyr)} {dyr}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+
+                <Text style={styles.pinLabel}>Antall</Text>
+                <AntallStepper value={regAntall} onChange={setRegAntall} />
+
+                <Text style={styles.pinLabel}>Kjønn (valgfritt)</Text>
+                <View style={styles.chipRow}>
+                  {kjonnListe.map((kj) => {
+                    const a = regKjonn === kj;
+                    return (
+                      <Pressable key={kj} onPress={() => setRegKjonn((p) => (p === kj ? null : kj))}
+                        style={[styles.pinChip, a && styles.pinChipActive]}>
+                        <Text style={[styles.pinChipText, a && styles.pinChipTextActive]}>{kj}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={styles.pinLabel}>Alder (valgfritt)</Text>
+                <View style={styles.chipRow}>
+                  {alderListe.map((al) => {
+                    const a = regAlder === al;
+                    return (
+                      <Pressable key={al} onPress={() => setRegAlder((p) => (p === al ? null : al))}
+                        style={[styles.pinChip, a && styles.pinChipActive]}>
+                        <Text style={[styles.pinChipText, a && styles.pinChipTextActive]}>{al}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={styles.pinLabel}>Kommentar (valgfritt)</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textInputMultiline]}
+                  multiline
+                  placeholder="Notat om observasjonen"
+                  placeholderTextColor="#4D6858"
+                  value={regKommentar}
+                  onChangeText={setRegKommentar}
+                />
+
+                <View style={styles.pinActions}>
+                  <Pressable
+                    onPress={lagreObservasjonFraKamera}
+                    disabled={savingCameraAction}
+                    style={[styles.pinPrimaryBtn, savingCameraAction && styles.disabled]}
+                  >
+                    <Ionicons name="paw-outline" size={16} color="#060E08" />
+                    <Text style={styles.pinPrimaryText}>
+                      {savingCameraAction ? "Lagrer..." : "Lagre observasjon"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+            {cameraView === "rediger" && (
+              <>
+                <FormHeader
+                  title="Rediger kamera"
+                  sub={selectedCamera.name}
+                  onBack={() => setCameraView("info")}
+                  onClose={() => setSelectedCamera(null)}
+                />
+
+                <Text style={styles.pinLabel}>Navn</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={editNavn}
+                  onChangeText={setEditNavn}
+                  placeholder="Navn på kamera"
+                  placeholderTextColor="#4D6858"
+                />
+
+                <View style={{ marginTop: 16, alignItems: "center" }}>
+                  <RetningVelger value={editRetning} onChange={setEditRetning} label="Kameraretning" />
+                </View>
+
+                <Text style={styles.pinLabel}>Notater</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textInputMultiline]}
+                  multiline
+                  value={editNotat}
+                  onChangeText={setEditNotat}
+                  placeholder="Notater om kameraet"
+                  placeholderTextColor="#4D6858"
+                />
+
+                <View style={styles.pinActions}>
+                  <Pressable
+                    onPress={redigerKamera}
+                    disabled={savingCameraAction}
+                    style={[styles.pinPrimaryBtn, savingCameraAction && styles.disabled]}
+                  >
+                    <Ionicons name="checkmark" size={16} color="#060E08" />
+                    <Text style={styles.pinPrimaryText}>
+                      {savingCameraAction ? "Lagrer..." : "Lagre endringer"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        )}
+
+        {/* ── Ny-pin: handlingsmeny ── */}
+        {selectedPin && pinAction === "menu" && (
+          <ScrollView
+            style={styles.pinPanel}
+            contentContainerStyle={styles.pinPanelContent}
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.pinHeader}>
               <View>
                 <Text style={styles.pinTitle}>Nytt punkt</Text>
@@ -953,12 +1449,101 @@ export default function KartScreen() {
                   {selectedPin.latitude.toFixed(5)}, {selectedPin.longitude.toFixed(5)}
                 </Text>
               </View>
-              <Pressable onPress={() => { setSelectedPin(null); setRetningPin(null); }} style={styles.closeBtn}>
+              <Pressable onPress={closePinPanel} style={styles.closeBtn}>
                 <Ionicons name="close" size={18} color="#9CA3AF" />
               </Pressable>
             </View>
 
-            {/* Dyr */}
+            <Pressable style={styles.pinMenuBtn} onPress={() => setPinAction("kamera")}>
+              <View style={styles.pinMenuIconBadge}>
+                <Ionicons name="camera-outline" size={18} color="#60A5FA" />
+              </View>
+              <Text style={styles.pinMenuText}>Sett ned viltkamera</Text>
+              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+            </Pressable>
+
+            <Pressable style={styles.pinMenuBtn} onPress={() => setPinAction("dyr")}>
+              <View style={styles.pinMenuIconBadge}>
+                <Ionicons name="paw-outline" size={18} color="#2CC36B" />
+              </View>
+              <Text style={styles.pinMenuText}>Registrer dyr</Text>
+              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+            </Pressable>
+
+            <Pressable style={styles.pinMenuBtn} onPress={() => setPinAction("spor")}>
+              <View style={styles.pinMenuIconBadge}>
+                <Ionicons name="footsteps-outline" size={18} color="#FCD34D" />
+              </View>
+              <Text style={styles.pinMenuText}>Registrer spor</Text>
+              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+            </Pressable>
+
+            <Pressable style={[styles.pinMenuBtn, { marginBottom: 0 }]} onPress={() => setPinAction("annet")}>
+              <View style={styles.pinMenuIconBadge}>
+                <Ionicons name="pricetag-outline" size={18} color="#A78BFA" />
+              </View>
+              <Text style={styles.pinMenuText}>Annet</Text>
+              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+            </Pressable>
+          </ScrollView>
+        )}
+
+        {/* ── Ny-pin: sett ned viltkamera ── */}
+        {selectedPin && pinAction === "kamera" && (
+          <ScrollView
+            style={styles.pinPanel}
+            contentContainerStyle={styles.pinPanelContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <FormHeader
+              title="Sett ned viltkamera"
+              sub={`${selectedPin.latitude.toFixed(5)}, ${selectedPin.longitude.toFixed(5)}`}
+              onBack={() => setPinAction("menu")}
+              onClose={closePinPanel}
+            />
+
+            <Text style={styles.pinLabel}>Navn (valgfritt)</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder={`Viltkamera ${kameraer.length + 1}`}
+              placeholderTextColor="#4D6858"
+              value={kameraNavn}
+              onChangeText={setKameraNavn}
+            />
+
+            <View style={{ marginTop: 16, alignItems: "center" }}>
+              <RetningVelger value={kameraRetningNy} onChange={setKameraRetningNy} label="Kameraretning" />
+            </View>
+
+            <View style={styles.pinActions}>
+              <Pressable
+                onPress={lagreKameraFraMeny}
+                disabled={savingPin}
+                style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
+              >
+                <Ionicons name="camera" size={16} color="#060E08" />
+                <Text style={styles.pinPrimaryText}>{savingPin ? "Lagrer..." : "Lagre kamera"}</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        )}
+
+        {/* ── Ny-pin: registrer dyr ── */}
+        {selectedPin && pinAction === "dyr" && (
+          <ScrollView
+            style={styles.pinPanel}
+            contentContainerStyle={styles.pinPanelContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <FormHeader
+              title="Registrer dyr"
+              sub={`${selectedPin.latitude.toFixed(5)}, ${selectedPin.longitude.toFixed(5)}`}
+              onBack={() => setPinAction("menu")}
+              onClose={closePinPanel}
+            />
+
             <Text style={styles.pinLabel}>Dyr</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.chipRow}>
@@ -976,25 +1561,9 @@ export default function KartScreen() {
               </View>
             </ScrollView>
 
-            {/* Type */}
-            <Text style={styles.pinLabel}>Type</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.chipRow}>
-                {typeListe.map((type) => {
-                  const a = valgtType === type;
-                  return (
-                    <Pressable key={type} onPress={() => setValgtType(type)}
-                      style={[styles.pinChipAlt, a && styles.pinChipAltActive]}>
-                      <Text style={[styles.pinChipText, a && styles.pinChipAltTextActive]}>
-                        {type}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </ScrollView>
+            <Text style={styles.pinLabel}>Antall</Text>
+            <AntallStepper value={antallPin} onChange={setAntallPin} />
 
-            {/* Retning */}
             <Text style={styles.pinLabel}>Retning dyret gikk</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.chipRow}>
@@ -1025,7 +1594,7 @@ export default function KartScreen() {
 
             <View style={styles.pinActions}>
               <Pressable
-                onPress={lagreObservasjonFraPin}
+                onPress={lagreDyrFraMeny}
                 disabled={savingPin}
                 style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
               >
@@ -1034,16 +1603,140 @@ export default function KartScreen() {
                   {savingPin ? "Lagrer..." : "Lagre observasjon"}
                 </Text>
               </Pressable>
+            </View>
+          </ScrollView>
+        )}
+
+        {/* ── Ny-pin: registrer spor ── */}
+        {selectedPin && pinAction === "spor" && (
+          <ScrollView
+            style={styles.pinPanel}
+            contentContainerStyle={styles.pinPanelContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <FormHeader
+              title="Registrer spor"
+              sub={`${selectedPin.latitude.toFixed(5)}, ${selectedPin.longitude.toFixed(5)}`}
+              onBack={() => setPinAction("menu")}
+              onClose={closePinPanel}
+            />
+
+            <Text style={styles.pinLabel}>Dyr (valgfritt)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.chipRow}>
+                {dyrListe.map((dyr) => {
+                  const a = sporDyr === dyr;
+                  return (
+                    <Pressable key={dyr} onPress={() => setSporDyr((p) => (p === dyr ? null : dyr))}
+                      style={[styles.pinChip, a && styles.pinChipActive]}>
+                      <Text style={[styles.pinChipText, a && styles.pinChipTextActive]}>
+                        {dyrEmoji(dyr)} {dyr}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <Text style={styles.pinLabel}>Sportype</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.chipRow}>
+                {sporTypeListe.map((st) => {
+                  const a = sporTypeValgt === st;
+                  return (
+                    <Pressable key={st} onPress={() => setSporTypeValgt(st)}
+                      style={[styles.pinChip, a && styles.pinChipActive]}>
+                      <Text style={[styles.pinChipText, a && styles.pinChipTextActive]}>{st}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <Text style={styles.pinLabel}>Kommentar (valgfritt)</Text>
+            <TextInput
+              style={[styles.textInput, styles.textInputMultiline]}
+              multiline
+              placeholder="Beskriv sporet"
+              placeholderTextColor="#4D6858"
+              value={sporKommentar}
+              onChangeText={setSporKommentar}
+            />
+
+            <View style={styles.pinActions}>
               <Pressable
-                onPress={lagreKameraFraPin}
+                onPress={lagreSporFraMeny}
                 disabled={savingPin}
-                style={[styles.pinSecondaryBtn, savingPin && styles.disabled]}
+                style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
               >
-                <Ionicons name="camera-outline" size={16} color="#CFE7DB" />
-                <Text style={styles.pinSecondaryText}>Kamera</Text>
+                <Ionicons name="paw-outline" size={16} color="#060E08" />
+                <Text style={styles.pinPrimaryText}>{savingPin ? "Lagrer..." : "Lagre spor"}</Text>
               </Pressable>
             </View>
-          </View>
+          </ScrollView>
+        )}
+
+        {/* ── Ny-pin: annet ── */}
+        {selectedPin && pinAction === "annet" && (
+          <ScrollView
+            style={styles.pinPanel}
+            contentContainerStyle={styles.pinPanelContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <FormHeader
+              title="Annet punkt"
+              sub={`${selectedPin.latitude.toFixed(5)}, ${selectedPin.longitude.toFixed(5)}`}
+              onBack={() => setPinAction("menu")}
+              onClose={closePinPanel}
+            />
+
+            <Text style={styles.pinLabel}>Type</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.chipRow}>
+                {KART_PUNKT_TYPER.map((t) => {
+                  const a = annetType === t;
+                  return (
+                    <Pressable key={t} onPress={() => setAnnetType(t)}
+                      style={[styles.pinChip, a && styles.pinChipActive]}>
+                      <Text style={[styles.pinChipText, a && styles.pinChipTextActive]}>{t}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <Text style={styles.pinLabel}>Navn (valgfritt)</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="F.eks. Saltstein ved bekken"
+              placeholderTextColor="#4D6858"
+              value={annetNavn}
+              onChangeText={setAnnetNavn}
+            />
+
+            <Text style={styles.pinLabel}>Kommentar (valgfritt)</Text>
+            <TextInput
+              style={[styles.textInput, styles.textInputMultiline]}
+              multiline
+              placeholder="Notat"
+              placeholderTextColor="#4D6858"
+              value={annetKommentar}
+              onChangeText={setAnnetKommentar}
+            />
+
+            <View style={styles.pinActions}>
+              <Pressable
+                onPress={lagreAnnetFraMeny}
+                disabled={savingPin}
+                style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
+              >
+                <Ionicons name="pricetag-outline" size={16} color="#060E08" />
+                <Text style={styles.pinPrimaryText}>{savingPin ? "Lagrer..." : "Lagre punkt"}</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
         )}
 
         {/* ── Bunnkort ── */}
@@ -1136,7 +1829,7 @@ const styles = StyleSheet.create({
   toggleText:       { color: "#8EA0AA", fontSize: 13, fontWeight: "700" },
   toggleTextActive: { color: "#060E08", fontWeight: "900" },
 
-  leftButtons: { position: "absolute", left: 14, top: "38%", gap: 10 },
+  leftButtons: { position: "absolute", left: 14, top: "30%", gap: 10 },
   floatBtn: {
     width: 46, height: 46, borderRadius: 13,
     backgroundColor: "rgba(8,14,10,0.90)",
@@ -1147,6 +1840,7 @@ const styles = StyleSheet.create({
   floatBtnActive:      { backgroundColor: "rgba(44,195,107,0.2)",  borderColor: "#2CC36B" },
   floatBtnActiveBlue:  { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "#3B82F6" },
   floatBtnActiveCyan:  { backgroundColor: "rgba(34,211,238,0.18)", borderColor: "#22D3EE" },
+  floatBtnActiveYellow: { backgroundColor: "rgba(252,211,77,0.18)", borderColor: "#FCD34D" },
   locateBtn: {
     position: "absolute", right: 14, top: "38%",
     width: 50, height: 50, borderRadius: 25,
@@ -1157,7 +1851,7 @@ const styles = StyleSheet.create({
   },
 
   filterPanel: {
-    position: "absolute", left: 68, top: "30%",
+    position: "absolute", left: 68, top: "26%",
     backgroundColor: "rgba(8,14,10,0.98)",
     borderRadius: 16, padding: 6,
     borderWidth: 1, borderColor: "#1E3028",
@@ -1174,6 +1868,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,12,10,0.97)",
     borderRadius: 24, padding: 16,
     borderWidth: 1, borderColor: "#224A60",
+    maxHeight: "82%",
   },
   cameraPanelContent: { paddingBottom: 8 },
   cameraPanelHeader:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
@@ -1192,25 +1887,24 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(96,165,250,0.12)",
     alignItems: "center", justifyContent: "center",
   },
-  cameraPanelActions: { flexDirection: "row", gap: 10 },
-  detailsCameraBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, paddingVertical: 12,
+
+  cameraActionsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  cameraActionBtn: {
+    flexBasis: "47%", flexGrow: 1,
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 12, paddingHorizontal: 8,
     borderWidth: 1, borderColor: "rgba(96,165,250,0.25)", borderRadius: 14,
     backgroundColor: "rgba(96,165,250,0.08)",
   },
-  detailsCameraBtnText: { color: "#60A5FA", fontSize: 14, fontWeight: "800" },
-  deleteCameraBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, paddingVertical: 12,
-    borderWidth: 1, borderColor: "#3B1A1A", borderRadius: 14,
-    backgroundColor: "rgba(239,68,68,0.08)",
+  cameraActionBtnText: { color: "#CFE7DB", fontSize: 13, fontWeight: "800", textAlign: "center" },
+  cameraActionBtnDanger: {
+    borderColor: "#3B1A1A", backgroundColor: "rgba(239,68,68,0.08)",
   },
-  deleteCameraBtnText: { color: "#F87171", fontSize: 14, fontWeight: "800" },
+  cameraActionBtnTextDanger: { color: "#F87171", fontSize: 13, fontWeight: "800", textAlign: "center" },
 
   cameraHistSection: {
     borderTopWidth: 1, borderTopColor: "#1A2B20",
-    paddingTop: 14, marginTop: 4, marginBottom: 12,
+    paddingTop: 14, marginTop: 4, marginBottom: 16,
   },
   cameraHistHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
   cameraHistTitle:  { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
@@ -1237,8 +1931,16 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,12,10,0.98)",
     borderRadius: 26, padding: 16,
     borderWidth: 1, borderColor: "#243620",
+    maxHeight: "82%",
   },
+  pinPanelContent: { paddingBottom: 8 },
   pinHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  pinHeaderLeft: { flexDirection: "row", alignItems: "center", flex: 1 },
+  backStepBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: "#111827", alignItems: "center", justifyContent: "center",
+    marginRight: 10,
+  },
   pinTitle:  { color: "#FFFFFF", fontSize: 17, fontWeight: "900" },
   pinSub:    { color: "#6B8A76", fontSize: 12, marginTop: 3 },
   pinLabel: {
@@ -1246,17 +1948,12 @@ const styles = StyleSheet.create({
     textTransform: "uppercase", letterSpacing: 1,
     marginTop: 10, marginBottom: 8,
   },
-  chipRow:  { flexDirection: "row", gap: 8, paddingRight: 16 },
+  chipRow:  { flexDirection: "row", gap: 8, paddingRight: 16, flexWrap: "wrap" },
   pinChip: {
     backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
     borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10,
   },
   pinChipActive:    { backgroundColor: "#163222", borderColor: "#2CC36B" },
-  pinChipAlt: {
-    backgroundColor: "#141210", borderWidth: 1, borderColor: "#2A2010",
-    borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10,
-  },
-  pinChipAltActive:     { backgroundColor: "#33280D", borderColor: "#6B5520" },
   pinChipRetning: {
     backgroundColor: "#0E1618", borderWidth: 1, borderColor: "#1A2B30",
     borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, minWidth: 42, alignItems: "center",
@@ -1269,25 +1966,46 @@ const styles = StyleSheet.create({
   },
   pinChipText:          { color: "#C8D8D0", fontSize: 13, fontWeight: "700" },
   pinChipTextActive:    { color: "#A9F2BF" },
-  pinChipAltTextActive: { color: "#FDE68A" },
   pinActions:      { flexDirection: "row", gap: 10, marginTop: 16 },
   pinPrimaryBtn: {
-    flex: 1.35, backgroundColor: "#2CC36B", borderRadius: 18,
+    flex: 1, backgroundColor: "#2CC36B", borderRadius: 18,
     paddingVertical: 13, alignItems: "center",
     flexDirection: "row", justifyContent: "center", gap: 7,
   },
   pinPrimaryText:  { color: "#060E08", fontSize: 14, fontWeight: "900" },
-  pinSecondaryBtn: {
-    flex: 1, backgroundColor: "#0F1716", borderWidth: 1, borderColor: "#1E2C25",
-    borderRadius: 18, paddingVertical: 13,
-    alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 7,
-  },
-  pinSecondaryText: { color: "#CFE7DB", fontSize: 14, fontWeight: "900" },
   closeBtn: {
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: "#111827", alignItems: "center", justifyContent: "center",
   },
   disabled: { opacity: 0.55 },
+
+  stepperRow: { flexDirection: "row", alignItems: "center", gap: 14 },
+  stepperBtn: {
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
+    alignItems: "center", justifyContent: "center",
+  },
+  stepperValue: { color: "#FFFFFF", fontSize: 17, fontWeight: "900", minWidth: 24, textAlign: "center" },
+
+  textInput: {
+    backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
+    color: "#FFFFFF", fontSize: 14,
+  },
+  textInputMultiline: { minHeight: 70, textAlignVertical: "top", marginTop: 4 },
+
+  pinMenuBtn: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
+    borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14,
+    marginBottom: 10,
+  },
+  pinMenuIconBadge: {
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: "rgba(44,195,107,0.10)",
+    alignItems: "center", justifyContent: "center",
+  },
+  pinMenuText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", flex: 1 },
 
   moosePinWrap:   { alignItems: "center" },
   moosePinBubble: {
@@ -1306,7 +2024,58 @@ const styles = StyleSheet.create({
     borderTopColor: "#B45309",
   },
 
+  obsPinWrap:   { alignItems: "center" },
+  obsPinBubble: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: "#EAB308",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#A16207",
+  },
+  obsPinBubbleRev: { backgroundColor: "#FB923C", borderColor: "#C2410C" },
+  obsPinEmoji: { fontSize: 15 },
+  obsPinArrow: {
+    width: 0, height: 0,
+    borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
+    borderStyle: "solid",
+    borderLeftColor: "transparent", borderRightColor: "transparent",
+    borderTopColor: "#A16207",
+  },
+  obsPinArrowRev: { borderTopColor: "#C2410C" },
+
+  sporPinWrap:   { alignItems: "center" },
+  sporPinBubble: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: "#78716C",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#44403C",
+  },
+  sporPinArrow: {
+    width: 0, height: 0,
+    borderLeftWidth: 4, borderRightWidth: 4, borderTopWidth: 7,
+    borderStyle: "solid",
+    borderLeftColor: "transparent", borderRightColor: "transparent",
+    borderTopColor: "#44403C",
+  },
+
+  annetPinWrap:   { alignItems: "center" },
+  annetPinBubble: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: "#A78BFA",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#7C3AED",
+  },
+  annetPinArrow: {
+    width: 0, height: 0,
+    borderLeftWidth: 4, borderRightWidth: 4, borderTopWidth: 7,
+    borderStyle: "solid",
+    borderLeftColor: "transparent", borderRightColor: "transparent",
+    borderTopColor: "#7C3AED",
+  },
+
   cameraPinWrap:   { alignItems: "center" },
+  cameraDirArrowWrap: {
+    position: "absolute", top: -17, alignItems: "center", justifyContent: "center", zIndex: 1,
+  },
   cameraPinBubble: {
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: "#2563EB",
