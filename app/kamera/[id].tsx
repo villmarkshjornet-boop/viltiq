@@ -16,7 +16,7 @@ import MapView, { Circle, Marker, Polygon } from "react-native-maps";
 import BottomDock from "../../components/BottomDock";
 
 import { auth } from "../../src/config/firebase";
-import { hentTidsvekt } from "../../src/lib/aktivitet";
+import { hentNivå, hentTidsvekt } from "../../src/lib/aktivitet";
 import { buildSector, distanceMeters } from "../../src/lib/geo";
 import {
   deleteCamera,
@@ -271,11 +271,7 @@ export default function KameraDetaljScreen() {
     return observasjonerINaerheten.reduce((sum, obs) => sum + hentTidsvekt(obs.tid), 0);
   }, [observasjonerINaerheten]);
 
-  const aktivitetsNivaa = useMemo(() => {
-    if (aktivitetScore >= 12) return "Høy";
-    if (aktivitetScore >= 6) return "Medium";
-    return "Lav";
-  }, [aktivitetScore]);
+  const aktivitetsNivaa = useMemo(() => hentNivå(aktivitetScore), [aktivitetScore]);
 
   const sisteObservasjon = useMemo(() => {
     return observasjonerINaerheten[0] || null;
