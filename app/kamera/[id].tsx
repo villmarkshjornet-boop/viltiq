@@ -14,19 +14,32 @@ import {
 } from "react-native";
 import MapView, { Circle, Marker, Polygon } from "react-native-maps";
 import BottomDock from "../../components/BottomDock";
+import RetningVelger from "../../components/RetningVelger";
 
 import { auth } from "../../src/config/firebase";
-import { hentNivå, hentTidsvekt } from "../../src/lib/aktivitet";
-import { buildSector, distanceMeters } from "../../src/lib/geo";
+import { hentTidsvekt } from "../../src/lib/aktivitet";
 import {
-  deleteCamera,
+  calculateCameraActivity,
+  formaterPeriode,
+  LAV_KONFIDENS_TERSKEL,
+  type CameraActivityLevel,
+} from "../../src/lib/cameraActivity";
+import { buildSector, distanceMeters, vindRetningLabel } from "../../src/lib/geo";
+import {
+  genererKameraOppsummering,
+  type KameraOppsummeringInput,
+} from "../../src/lib/kameraOppsummering";
+import {
+  deactivateCamera,
   subscribeToCamera,
   updateCamera,
   type Viltkamera,
 } from "../../src/services/cameras";
 import {
   deleteObservation,
+  saveObservation,
   subscribeToNearbyObservations,
+  subscribeToObservationsByCamera,
 } from "../../src/services/observations";
 import type { Observasjon } from "../../src/types/observation";
 
@@ -40,9 +53,31 @@ type HeatSone = {
   score: number;
 };
 
+type Tidsvindu = "morgen" | "dag" | "kveld" | "natt";
+
 const AKTIVITET_RADIUS_METER = 300;
 const AKTIVITET_RADIUS_KM = AKTIVITET_RADIUS_METER / 1000;
-const DIRECTIONS = ["N", "NØ", "Ø", "SØ", "S", "SV", "V", "NV"];
+
+// Under dette antallet observasjoner er et fordelt tidsmønster ikke
+// pålitelig — vis "for lite data" i stedet for å fabrikere et mønster.
+const TIDSMØNSTER_MIN_OBS = 5;
+
+const OBS_DYR_LISTE = ["Rådyr", "Elg", "Hjort", "Rev", "Annet"];
+const OBS_KJØNN = ["Ukjent", "Hannkjønn", "Hunkjønn"] as const;
+const OBS_ALDER = ["Ukjent", "Kalv/kje", "Ungdyr", "Voksen"] as const;
+
+const NIVÅ_LABEL: Record<CameraActivityLevel, string> = {
+  low: "Lav",
+  medium: "Medium",
+  high: "Høy",
+};
+
+const TIDSVINDU_LABEL: Record<Tidsvindu, string> = {
+  morgen: "Morgen (05–10)",
+  dag: "Dag (10–17)",
+  kveld: "Kveld (17–23)",
+  natt: "Natt (23–05)",
+};
 
 function formatDato(verdi?: any) {
   if (!verdi) return "Ikke registrert";
@@ -62,6 +97,17 @@ function formatDato(verdi?: any) {
   return dato.toLocaleString("no-NO");
 }
 
+/** Firestore Timestamp, ISO-streng eller udefinert → Date, evt. null. */
+function timestampTilDato(verdi: any): Date | null {
+  if (!verdi) return null;
+  if (typeof verdi?.toDate === "function") return verdi.toDate();
+  if (typeof verdi === "string") {
+    const dato = new Date(verdi);
+    return Number.isNaN(dato.getTime()) ? null : dato;
+  }
+  return null;
+}
+
 function normaliserKamera(kamera: Viltkamera): Viltkamera {
   return {
     ...kamera,
@@ -69,24 +115,8 @@ function normaliserKamera(kamera: Viltkamera): Viltkamera {
     batteryStatus: kamera.batteryStatus || "Ukjent",
     memoryCardStatus: kamera.memoryCardStatus || "Ukjent",
     baitStatus: kamera.baitStatus || "Ukjent",
-    direction: kamera.direction || "",
     notes: kamera.notes || "",
   };
-}
-
-function retningTilGrader(direction: string) {
-  const map: Record<string, number> = {
-    N: 0,
-    NØ: 45,
-    Ø: 90,
-    SØ: 135,
-    S: 180,
-    SV: 225,
-    V: 270,
-    NV: 315,
-  };
-
-  return map[direction] ?? null;
 }
 
 function byggHeatmap(data: ObservasjonMedDistance[]): HeatSone[] {
@@ -125,15 +155,15 @@ function hentHeatFarge(score: number) {
   return "rgba(34,197,94,0.12)";
 }
 
-function hentAktivitetsBadgeStyle(nivå: string) {
-  if (nivå === "Høy") {
+function hentAktivitetsBadgeStyle(nivå: CameraActivityLevel) {
+  if (nivå === "high") {
     return {
       bg: styles.levelHighBg,
       text: styles.levelHighText,
     };
   }
 
-  if (nivå === "Medium") {
+  if (nivå === "medium") {
     return {
       bg: styles.levelMediumBg,
       text: styles.levelMediumText,
@@ -151,12 +181,16 @@ export default function KameraDetaljScreen() {
   const router = useRouter();
 
   const [kamera, setKamera] = useState<Viltkamera | null>(null);
-  const [observasjoner, setObservasjoner] = useState<Observasjon[]>([]);
+  // Presist koblet via cameraId — driver all statistikk under.
+  const [kameraObservasjoner, setKameraObservasjoner] = useState<Observasjon[]>([]);
+  // Radius-basert nærhetsheuristikk — kun til kartpreview/heatmap og en
+  // sekundær "andre observasjoner i nærheten"-seksjon.
+  const [nearbyObservasjoner, setNearbyObservasjoner] = useState<Observasjon[]>([]);
   const [laster, setLaster] = useState(true);
 
   const [editMode, setEditMode] = useState(false);
   const [name, setName] = useState("");
-  const [direction, setDirection] = useState("");
+  const [directionDegrees, setDirectionDegrees] = useState(0);
   const [notes, setNotes] = useState("");
 
   const [checkModal, setCheckModal] = useState(false);
@@ -164,6 +198,14 @@ export default function KameraDetaljScreen() {
   const [memory, setMemory] = useState("OK");
   const [bait, setBait] = useState("Nei");
   const [checkNote, setCheckNote] = useState("");
+
+  const [obsModal, setObsModal] = useState(false);
+  const [obsDyr, setObsDyr] = useState(OBS_DYR_LISTE[0]);
+  const [obsAntall, setObsAntall] = useState("1");
+  const [obsKjønn, setObsKjønn] = useState<(typeof OBS_KJØNN)[number]>("Ukjent");
+  const [obsAlder, setObsAlder] = useState<(typeof OBS_ALDER)[number]>("Ukjent");
+  const [obsKommentar, setObsKommentar] = useState("");
+  const [obsLagrer, setObsLagrer] = useState(false);
 
   const initialisertForId = useRef<string | null>(null);
 
@@ -174,7 +216,8 @@ export default function KameraDetaljScreen() {
     }
 
     let aktiv = true;
-    let obsUnsubscribe: undefined | (() => void);
+    let kameraObsUnsubscribe: undefined | (() => void);
+    let nearbyObsUnsubscribe: undefined | (() => void);
     let obsAbonnementStartet = false;
 
     const kameraUnsubscribe = subscribeToCamera(
@@ -193,7 +236,23 @@ export default function KameraDetaljScreen() {
         if (!obsAbonnementStartet) {
           obsAbonnementStartet = true;
 
-          obsUnsubscribe = subscribeToNearbyObservations(
+          kameraObsUnsubscribe = subscribeToObservationsByCamera(
+            normalisert.id,
+            normalisert.jaktlagId,
+            (liste: Observasjon[]) => {
+              if (!aktiv) return;
+              setKameraObservasjoner(liste);
+              setLaster(false);
+            },
+            (error: Error) => {
+              console.log("Feil ved lasting av kameraobservasjoner:", error);
+              if (!aktiv) return;
+              setKameraObservasjoner([]);
+              setLaster(false);
+            }
+          );
+
+          nearbyObsUnsubscribe = subscribeToNearbyObservations(
             {
               center: {
                 latitude: normalisert.latitude,
@@ -203,18 +262,12 @@ export default function KameraDetaljScreen() {
             },
             (liste: Observasjon[]) => {
               if (!aktiv) return;
-              setObservasjoner(
-                [...liste].sort(
-                  (a, b) => new Date(b.tid).getTime() - new Date(a.tid).getTime()
-                )
-              );
-              setLaster(false);
+              setNearbyObservasjoner(liste);
             },
             (error: Error) => {
               console.log("Feil ved lasting av observasjoner rundt kamera:", error);
               if (!aktiv) return;
-              setObservasjoner([]);
-              setLaster(false);
+              setNearbyObservasjoner([]);
             }
           );
         }
@@ -230,7 +283,8 @@ export default function KameraDetaljScreen() {
     return () => {
       aktiv = false;
       kameraUnsubscribe();
-      if (obsUnsubscribe) obsUnsubscribe();
+      if (kameraObsUnsubscribe) kameraObsUnsubscribe();
+      if (nearbyObsUnsubscribe) nearbyObsUnsubscribe();
     };
   }, [id]);
 
@@ -243,14 +297,14 @@ export default function KameraDetaljScreen() {
 
     initialisertForId.current = kamera.id;
     setName(kamera.name || "");
-    setDirection(kamera.direction || "");
+    setDirectionDegrees(kamera.directionDegrees);
     setNotes(kamera.notes || "");
   }, [kamera]);
 
   const observasjonerINaerheten = useMemo<ObservasjonMedDistance[]>(() => {
     if (!kamera) return [];
 
-    return observasjoner
+    return nearbyObservasjoner
       .filter((obs) => obs.latitude != null && obs.longitude != null)
       .map((obs) => {
         const distance = distanceMeters(
@@ -265,35 +319,125 @@ export default function KameraDetaljScreen() {
       })
       .filter((obs) => obs.distance <= AKTIVITET_RADIUS_METER)
       .sort((a, b) => new Date(b.tid).getTime() - new Date(a.tid).getTime());
-  }, [kamera, observasjoner]);
+  }, [kamera, nearbyObservasjoner]);
 
-  const aktivitetScore = useMemo(() => {
-    return observasjonerINaerheten.reduce((sum, obs) => sum + hentTidsvekt(obs.tid), 0);
-  }, [observasjonerINaerheten]);
-
-  const aktivitetsNivaa = useMemo(() => hentNivå(aktivitetScore), [aktivitetScore]);
-
-  const sisteObservasjon = useMemo(() => {
-    return observasjonerINaerheten[0] || null;
-  }, [observasjonerINaerheten]);
-
-  const dyreFordeling = useMemo(() => {
-    const teller: Record<string, number> = {};
-
-    observasjonerINaerheten.forEach((obs) => {
-      teller[obs.dyr] = (teller[obs.dyr] || 0) + 1;
-    });
-
-    return Object.entries(teller).sort((a, b) => b[1] - a[1]);
-  }, [observasjonerINaerheten]);
+  // Andre observasjoner i nærheten som ikke allerede er koblet direkte til
+  // dette kameraet — unngår duplikater med hovedlisten under.
+  const andreObservasjonerINaerheten = useMemo(() => {
+    if (!kamera) return [];
+    return observasjonerINaerheten.filter((obs) => obs.cameraId !== kamera.id);
+  }, [observasjonerINaerheten, kamera]);
 
   const heatmapSoner = useMemo(() => {
     return byggHeatmap(observasjonerINaerheten);
   }, [observasjonerINaerheten]);
 
-  const retningGrader = useMemo(() => {
-    return retningTilGrader(kamera?.direction || "");
-  }, [kamera?.direction]);
+  const aktivitet = useMemo(() => {
+    const installedAtDato = timestampTilDato(kamera?.installedAt) || new Date();
+    const removedAtDato = kamera && !kamera.active ? timestampTilDato(kamera.removedAt) : null;
+
+    return calculateCameraActivity({
+      installedAt: installedAtDato,
+      removedAt: removedAtDato,
+      observations: kameraObservasjoner.map((obs) => ({
+        tid: obs.tid,
+        antall: obs.antall,
+      })),
+    });
+  }, [kamera, kameraObservasjoner]);
+
+  const lavKonfidens = aktivitet.confidence < LAV_KONFIDENS_TERSKEL;
+
+  const artsfordeling = useMemo(() => {
+    const teller: Record<string, number> = {};
+
+    kameraObservasjoner.forEach((obs) => {
+      teller[obs.dyr] = (teller[obs.dyr] || 0) + (obs.antall > 0 ? obs.antall : 1);
+    });
+
+    const total = Object.values(teller).reduce((sum, n) => sum + n, 0);
+
+    return Object.entries(teller)
+      .map(([dyr, antall]) => ({
+        dyr,
+        antall,
+        prosent: total > 0 ? Math.round((antall / total) * 100) : 0,
+      }))
+      .sort((a, b) => b.antall - a.antall);
+  }, [kameraObservasjoner]);
+
+  const aktivitetOverTid = useMemo(() => {
+    const nå = Date.now();
+    const innenfor = (msVindu: number) =>
+      kameraObservasjoner.filter((obs) => nå - new Date(obs.tid).getTime() <= msVindu);
+
+    const oppsummer = (liste: Observasjon[]) => ({
+      observasjoner: liste.length,
+      dyr: liste.reduce((sum, obs) => sum + (obs.antall > 0 ? obs.antall : 1), 0),
+    });
+
+    return {
+      sisteSjuDager: oppsummer(innenfor(7 * 24 * 60 * 60 * 1000)),
+      sisteTrettiDager: oppsummer(innenfor(30 * 24 * 60 * 60 * 1000)),
+      helePerioden: oppsummer(kameraObservasjoner),
+    };
+  }, [kameraObservasjoner]);
+
+  // Enkel tidsfordeling (morgen/dag/kveld/natt) — samme grenser som
+  // "tidsmønster" i app/statistikk.tsx. Kun beregnet når datagrunnlaget er
+  // stort nok til at et mønster faktisk betyr noe.
+  const tidsmønster = useMemo(() => {
+    if (kameraObservasjoner.length < TIDSMØNSTER_MIN_OBS) return null;
+
+    const m: Record<Tidsvindu, number> = { morgen: 0, dag: 0, kveld: 0, natt: 0 };
+
+    kameraObservasjoner.forEach((obs) => {
+      const t = new Date(obs.tid).getTime();
+      if (Number.isNaN(t)) return;
+
+      const h = new Date(obs.tid).getHours();
+      if (h >= 5 && h < 10) m.morgen++;
+      else if (h < 17) m.dag++;
+      else if (h < 23) m.kveld++;
+      else m.natt++;
+    });
+
+    return m;
+  }, [kameraObservasjoner]);
+
+  const peakTime = useMemo(() => {
+    if (!tidsmønster) return null;
+
+    const entries = Object.entries(tidsmønster) as [Tidsvindu, number][];
+    const total = entries.reduce((sum, [, n]) => sum + n, 0);
+    if (total === 0) return null;
+
+    const [toppVindu, toppVerdi] = entries.sort((a, b) => b[1] - a[1])[0];
+    if (toppVerdi === 0) return null;
+
+    return TIDSVINDU_LABEL[toppVindu].toLowerCase();
+  }, [tidsmønster]);
+
+  const oppsummeringTekst = useMemo(() => {
+    const input: KameraOppsummeringInput = {
+      activeDays: aktivitet.activeDays,
+      observationEvents: aktivitet.observationEvents,
+      totalAnimals: aktivitet.totalAnimals,
+      dominantSpecies: artsfordeling[0]?.dyr ?? null,
+      dominantSpeciesPercentage: artsfordeling[0]?.prosent ?? null,
+      observationsPerWeek: aktivitet.observationsPerWeek,
+      animalsPerWeek: aktivitet.animalsPerWeek,
+      peakTime,
+      activityLevel: aktivitet.level,
+      confidence: aktivitet.confidence,
+    };
+
+    return genererKameraOppsummering(input);
+  }, [aktivitet, artsfordeling, peakTime]);
+
+  const sisteObservasjon = useMemo(() => {
+    return kameraObservasjoner[0] || null;
+  }, [kameraObservasjoner]);
 
   async function lagreEndringer() {
     if (!kamera) return;
@@ -308,7 +452,7 @@ export default function KameraDetaljScreen() {
     try {
       await updateCamera(kamera.id, {
         name: trimmedName,
-        direction: direction.trim(),
+        directionDegrees,
         notes: notes.trim(),
       });
 
@@ -354,7 +498,7 @@ export default function KameraDetaljScreen() {
   function avbrytRedigering() {
     if (!kamera) return;
     setName(kamera.name || "");
-    setDirection(kamera.direction || "");
+    setDirectionDegrees(kamera.directionDegrees);
     setNotes(kamera.notes || "");
     setEditMode(false);
   }
@@ -362,22 +506,26 @@ export default function KameraDetaljScreen() {
   function slettKamera() {
     if (!kamera) return;
 
-    Alert.alert("Slett kamera", `Vil du slette ${kamera.name}?`, [
-      { text: "Avbryt", style: "cancel" },
-      {
-        text: "Slett",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteCamera(kamera.id);
-            router.back();
-          } catch (error) {
-            console.log("Feil ved sletting:", error);
-            Alert.alert("Feil", "Kunne ikke slette kamera.");
-          }
+    Alert.alert(
+      "Fjerne viltkamera?",
+      "Kameraet fjernes fra kartet, men tidligere observasjoner og statistikk beholdes.",
+      [
+        { text: "Avbryt", style: "cancel" },
+        {
+          text: "Fjern kamera",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deactivateCamera(kamera.id);
+              router.back();
+            } catch (error) {
+              console.log("Feil ved fjerning av kamera:", error);
+              Alert.alert("Feil", "Kunne ikke fjerne kamera.");
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   }
 
   function kanSletteObservasjon(obs: Observasjon) {
@@ -417,6 +565,49 @@ export default function KameraDetaljScreen() {
     );
   }
 
+  function åpneObsModal() {
+    setObsDyr(OBS_DYR_LISTE[0]);
+    setObsAntall("1");
+    setObsKjønn("Ukjent");
+    setObsAlder("Ukjent");
+    setObsKommentar("");
+    setObsModal(true);
+  }
+
+  async function registrerObservasjon() {
+    if (!kamera) return;
+
+    const antallTall = parseInt(obsAntall, 10);
+    const antall = Number.isFinite(antallTall) && antallTall > 0 ? antallTall : 1;
+
+    try {
+      setObsLagrer(true);
+
+      await saveObservation({
+        dyr: obsDyr,
+        type: "Sett dyr",
+        kommentar: obsKommentar.trim(),
+        tid: new Date().toISOString(),
+        latitude: kamera.latitude,
+        longitude: kamera.longitude,
+        retning: null,
+        antall,
+        observationSource: "camera",
+        cameraId: kamera.id,
+        kjonn: obsKjønn === "Ukjent" ? null : obsKjønn,
+        alder: obsAlder === "Ukjent" ? null : obsAlder,
+      });
+
+      setObsModal(false);
+      Alert.alert("Registrert", "Observasjonen er lagret på kameraet.");
+    } catch (error) {
+      console.log("Feil ved registrering av observasjon:", error);
+      Alert.alert("Feil", "Kunne ikke lagre observasjonen.");
+    } finally {
+      setObsLagrer(false);
+    }
+  }
+
   if (laster) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -445,7 +636,7 @@ export default function KameraDetaljScreen() {
     );
   }
 
-  const aktivitetsBadge = hentAktivitetsBadgeStyle(aktivitetsNivaa);
+  const aktivitetsBadge = hentAktivitetsBadgeStyle(aktivitet.level);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -470,40 +661,55 @@ export default function KameraDetaljScreen() {
             <View style={styles.heroTopRow}>
               <View style={styles.heroLeft}>
                 <Text style={styles.heroLabel}>Situasjonen nå</Text>
-                <Text style={styles.heroTitle}>{aktivitetsNivaa} aktivitet</Text>
+                <Text style={styles.heroTitle}>{NIVÅ_LABEL[aktivitet.level]} aktivitet</Text>
                 <Text style={styles.heroText}>
-                  {observasjonerINaerheten.length > 0
-                    ? "Det er registrert aktivitet rundt kameraet. Følg med på mønster og tidspunkt."
-                    : "Ingen aktivitet registrert rundt kameraet ennå."}
+                  {aktivitet.observationEvents > 0
+                    ? "Det er registrert observasjoner på kameraet. Følg med på mønster og tidspunkt."
+                    : "Ingen observasjoner registrert på dette kameraet ennå."}
                 </Text>
               </View>
 
-              <View style={[styles.heroBadge, aktivitetsBadge.bg]}>
-                <Text style={[styles.heroBadgeText, aktivitetsBadge.text]}>{aktivitetsNivaa}</Text>
+              <View style={styles.heroBadgeCol}>
+                <View style={[styles.heroBadge, aktivitetsBadge.bg]}>
+                  <Text style={[styles.heroBadgeText, aktivitetsBadge.text]}>
+                    {NIVÅ_LABEL[aktivitet.level]}
+                  </Text>
+                </View>
+                {lavKonfidens ? (
+                  <View style={styles.konfidensBadge}>
+                    <Text style={styles.konfidensBadgeText}>Lite datagrunnlag</Text>
+                  </View>
+                ) : null}
               </View>
             </View>
 
             <View style={styles.heroStatsRow}>
               <View style={styles.heroStatCard}>
-                <Text style={styles.heroStatValue}>{aktivitetScore}</Text>
-                <Text style={styles.heroStatLabel}>score</Text>
+                <Text style={styles.heroStatValue}>{aktivitet.observationEvents}</Text>
+                <Text style={styles.heroStatLabel}>observasjoner</Text>
               </View>
 
               <View style={styles.heroStatCard}>
-                <Text style={styles.heroStatValue}>{observasjonerINaerheten.length}</Text>
-                <Text style={styles.heroStatLabel}>obs.</Text>
+                <Text style={styles.heroStatValue}>{aktivitet.totalAnimals}</Text>
+                <Text style={styles.heroStatLabel}>dyr totalt</Text>
               </View>
 
               <View style={styles.heroStatCard}>
-                <Text style={styles.heroStatValue}>{dyreFordeling[0]?.[0] || "-"}</Text>
+                <Text style={styles.heroStatValue}>{artsfordeling[0]?.dyr || "-"}</Text>
                 <Text style={styles.heroStatLabel}>toppdyr</Text>
               </View>
             </View>
           </View>
 
-          <Pressable style={styles.primaryButton} onPress={() => setCheckModal(true)}>
-            <Text style={styles.primaryButtonText}>Registrer sjekk</Text>
-          </Pressable>
+          <View style={styles.topActionsRow}>
+            <Pressable style={styles.primaryButtonHalf} onPress={() => setCheckModal(true)}>
+              <Text style={styles.primaryButtonText}>Registrer sjekk</Text>
+            </Pressable>
+
+            <Pressable style={styles.secondaryButtonHalf} onPress={åpneObsModal}>
+              <Text style={styles.secondaryButtonText}>Registrer observasjon</Text>
+            </Pressable>
+          </View>
 
           <View style={styles.card}>
             <View style={styles.cardHeader}>
@@ -522,7 +728,9 @@ export default function KameraDetaljScreen() {
                 <Text style={styles.value}>{kamera.name || "-"}</Text>
 
                 <Text style={styles.label}>Retning</Text>
-                <Text style={styles.value}>{kamera.direction || "Ikke satt"}</Text>
+                <Text style={styles.value}>
+                  {kamera.directionDegrees}° ({vindRetningLabel(kamera.directionDegrees)})
+                </Text>
 
                 <Text style={styles.label}>Notater</Text>
                 <Text style={styles.value}>{kamera.notes || "Ingen notater ennå"}</Text>
@@ -532,8 +740,13 @@ export default function KameraDetaljScreen() {
                   {kamera.latitude.toFixed(5)}, {kamera.longitude.toFixed(5)}
                 </Text>
 
-                <Text style={styles.label}>Opprettet</Text>
-                <Text style={styles.value}>{formatDato(kamera.createdAt)}</Text>
+                <Text style={styles.label}>Status</Text>
+                <Text style={styles.value}>
+                  {kamera.active ? "Aktivt" : `Fjernet ${formatDato(kamera.removedAt)}`}
+                </Text>
+
+                <Text style={styles.label}>Installert</Text>
+                <Text style={styles.value}>{formatDato(kamera.installedAt)}</Text>
 
                 <Text style={styles.label}>Sist oppdatert</Text>
                 <Text style={styles.value}>{formatDato(kamera.updatedAt)}</Text>
@@ -554,26 +767,12 @@ export default function KameraDetaljScreen() {
                 />
 
                 <Text style={styles.label}>Retning</Text>
-                <View style={styles.directionGrid}>
-                  {DIRECTIONS.map((dir) => {
-                    const active = direction === dir;
-                    return (
-                      <Pressable
-                        key={dir}
-                        style={[styles.directionButton, active && styles.directionButtonActive]}
-                        onPress={() => setDirection(dir)}
-                      >
-                        <Text
-                          style={[
-                            styles.directionButtonText,
-                            active && styles.directionButtonTextActive,
-                          ]}
-                        >
-                          {dir}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                <View style={styles.retningVelgerWrap}>
+                  <RetningVelger
+                    value={directionDegrees}
+                    onChange={setDirectionDegrees}
+                    label="Kameraretning"
+                  />
                 </View>
 
                 <Text style={styles.label}>Notater</Text>
@@ -664,19 +863,17 @@ export default function KameraDetaljScreen() {
                 strokeWidth={2}
               />
 
-              {retningGrader !== null && (
-                <Polygon
-                  coordinates={buildSector(
-                    { latitude: kamera.latitude, longitude: kamera.longitude },
-                    120,
-                    retningGrader,
-                    60
-                  )}
-                  fillColor="rgba(59,130,246,0.18)"
-                  strokeColor="rgba(59,130,246,0.55)"
-                  strokeWidth={1.5}
-                />
-              )}
+              <Polygon
+                coordinates={buildSector(
+                  { latitude: kamera.latitude, longitude: kamera.longitude },
+                  120,
+                  kamera.directionDegrees,
+                  60
+                )}
+                fillColor="rgba(59,130,246,0.18)"
+                strokeColor="rgba(59,130,246,0.55)"
+                strokeWidth={1.5}
+              />
 
               <Marker
                 coordinate={{
@@ -684,7 +881,7 @@ export default function KameraDetaljScreen() {
                   longitude: kamera.longitude,
                 }}
                 title={kamera.name}
-                description={kamera.direction || "Viltkamera"}
+                description={`${kamera.directionDegrees}° (${vindRetningLabel(kamera.directionDegrees)})`}
                 pinColor="#22c55e"
               />
 
@@ -707,25 +904,127 @@ export default function KameraDetaljScreen() {
             </Text>
           </View>
 
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Aktivitet</Text>
-              <Text style={styles.statValue}>{aktivitetsNivaa}</Text>
+          <View style={styles.card}>
+            <View style={styles.cardHeaderSimple}>
+              <Text style={styles.cardTitle}>Statistikk</Text>
+              <Text style={styles.cardCaption}>
+                Basert på observasjoner registrert direkte på dette kameraet
+              </Text>
             </View>
 
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Score</Text>
-              <Text style={styles.statValue}>{aktivitetScore}</Text>
+            <View style={styles.periodeRow}>
+              <View style={styles.periodeInfo}>
+                <Text style={styles.label}>Periode aktivt</Text>
+                <Text style={styles.value}>{formaterPeriode(aktivitet.activeDays)}</Text>
+              </View>
+
+              <View style={[styles.heroBadge, aktivitetsBadge.bg]}>
+                <Text style={[styles.heroBadgeText, aktivitetsBadge.text]}>
+                  {NIVÅ_LABEL[aktivitet.level]}
+                </Text>
+              </View>
             </View>
 
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Observasjoner</Text>
-              <Text style={styles.statValue}>{observasjonerINaerheten.length}</Text>
+            {lavKonfidens ? (
+              <Text style={styles.konfidensHint}>
+                Foreløpig lite datagrunnlag — aktivitetsnivået er usikkert.
+              </Text>
+            ) : null}
+
+            <View style={styles.statsRow}>
+              <View style={styles.statCard}>
+                <Text style={styles.statLabel}>Observasjoner</Text>
+                <Text style={styles.statValue}>{aktivitet.observationEvents}</Text>
+              </View>
+
+              <View style={styles.statCard}>
+                <Text style={styles.statLabel}>Dyr totalt</Text>
+                <Text style={styles.statValue}>{aktivitet.totalAnimals}</Text>
+              </View>
+
+              <View style={styles.statCard}>
+                <Text style={styles.statLabel}>Obs. per uke</Text>
+                <Text style={styles.statValue}>{aktivitet.observationsPerWeek}</Text>
+              </View>
+            </View>
+
+            <Text style={[styles.subSectionTitle, { marginTop: 8 }]}>Artsfordeling</Text>
+
+            {artsfordeling.length > 0 ? (
+              artsfordeling.map((art) => (
+                <View key={art.dyr} style={styles.listRow}>
+                  <Text style={styles.listKey}>{art.dyr}</Text>
+                  <Text style={styles.listValue}>
+                    {art.antall} dyr · {art.prosent} %
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyInfo}>Ingen dyredata ennå.</Text>
+            )}
+
+            <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Aktivitet over tid</Text>
+
+            <View style={styles.periodGrid}>
+              <View style={styles.periodCell}>
+                <Text style={styles.periodCellLabel}>Siste 7 dager</Text>
+                <Text style={styles.periodCellValue}>
+                  {aktivitetOverTid.sisteSjuDager.observasjoner} obs · {aktivitetOverTid.sisteSjuDager.dyr} dyr
+                </Text>
+              </View>
+
+              <View style={styles.periodCell}>
+                <Text style={styles.periodCellLabel}>Siste 30 dager</Text>
+                <Text style={styles.periodCellValue}>
+                  {aktivitetOverTid.sisteTrettiDager.observasjoner} obs · {aktivitetOverTid.sisteTrettiDager.dyr} dyr
+                </Text>
+              </View>
+
+              <View style={styles.periodCell}>
+                <Text style={styles.periodCellLabel}>Hele perioden</Text>
+                <Text style={styles.periodCellValue}>
+                  {aktivitetOverTid.helePerioden.observasjoner} obs · {aktivitetOverTid.helePerioden.dyr} dyr
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Tidsmønster</Text>
+
+            {tidsmønster ? (
+              (Object.keys(TIDSVINDU_LABEL) as Tidsvindu[]).map((key) => {
+                const maks = Math.max(
+                  tidsmønster.morgen,
+                  tidsmønster.dag,
+                  tidsmønster.kveld,
+                  tidsmønster.natt,
+                  1
+                );
+                const bredde = `${Math.round((tidsmønster[key] / maks) * 100)}%`;
+
+                return (
+                  <View key={key} style={styles.barRad}>
+                    <View style={styles.barLeft}>
+                      <Text style={styles.barDyr}>{TIDSVINDU_LABEL[key]}</Text>
+                      <Text style={styles.barMeta}>{tidsmønster[key]} obs</Text>
+                    </View>
+                    <View style={styles.barTrack}>
+                      <View style={[styles.barFyllSoft, { width: bredde as any }]} />
+                    </View>
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.emptyInfo}>For lite data ennå.</Text>
+            )}
+
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryTitle}>Automatisk oppsummering</Text>
+              <Text style={styles.summaryText}>{oppsummeringTekst}</Text>
             </View>
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Aktivitet rundt kamera</Text>
+            <Text style={styles.cardTitle}>Observasjoner på kamera</Text>
 
             {sisteObservasjon ? (
               <View style={styles.highlightBox}>
@@ -735,35 +1034,20 @@ export default function KameraDetaljScreen() {
                 </Text>
                 <Text style={styles.highlightSmall}>{formatDato(sisteObservasjon.tid)}</Text>
                 <Text style={styles.highlightSmall}>
-                  Avstand: {Math.round(sisteObservasjon.distance)} meter
+                  {sisteObservasjon.antall} dyr i denne observasjonen
                 </Text>
                 {!!sisteObservasjon.kommentar && (
                   <Text style={styles.highlightComment}>{sisteObservasjon.kommentar}</Text>
                 )}
               </View>
             ) : (
-              <Text style={styles.emptyInfo}>
-                Ingen observasjoner innen {AKTIVITET_RADIUS_METER} meter ennå.
-              </Text>
-            )}
-
-            <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Dyr i nærheten</Text>
-
-            {dyreFordeling.length > 0 ? (
-              dyreFordeling.map(([dyr, count]) => (
-                <View key={dyr} style={styles.listRow}>
-                  <Text style={styles.listKey}>{dyr}</Text>
-                  <Text style={styles.listValue}>{count} stk</Text>
-                </View>
-              ))
-            ) : (
-              <Text style={styles.emptyInfo}>Ingen dyredata ennå.</Text>
+              <Text style={styles.emptyInfo}>Ingen observasjoner registrert på dette kameraet ennå.</Text>
             )}
 
             <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Siste observasjoner</Text>
 
-            {observasjonerINaerheten.length > 0 ? (
-              observasjonerINaerheten.slice(0, 8).map((obs, index) => {
+            {kameraObservasjoner.length > 0 ? (
+              kameraObservasjoner.slice(0, 8).map((obs, index) => {
                 const canDelete = kanSletteObservasjon(obs);
 
                 return (
@@ -778,7 +1062,7 @@ export default function KameraDetaljScreen() {
 
                     <View style={styles.obsActions}>
                       <View style={styles.distanceBadge}>
-                        <Text style={styles.distanceBadgeText}>{Math.round(obs.distance)} m</Text>
+                        <Text style={styles.distanceBadgeText}>{obs.antall} dyr</Text>
                       </View>
 
                       {canDelete ? (
@@ -797,6 +1081,32 @@ export default function KameraDetaljScreen() {
               <Text style={styles.emptyInfo}>Ingen observasjoner å vise.</Text>
             )}
           </View>
+
+          {andreObservasjonerINaerheten.length > 0 ? (
+            <View style={styles.card}>
+              <View style={styles.cardHeaderSimple}>
+                <Text style={styles.cardTitle}>Andre observasjoner i nærheten</Text>
+                <Text style={styles.cardCaption}>
+                  Innen {AKTIVITET_RADIUS_METER} meter, men ikke registrert direkte på dette kameraet
+                </Text>
+              </View>
+
+              {andreObservasjonerINaerheten.slice(0, 5).map((obs, index) => (
+                <View key={`${obs.id || obs.tid}-nearby-${index}`} style={styles.obsRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.obsTitle}>
+                      {obs.dyr} · {obs.type}
+                    </Text>
+                    <Text style={styles.obsMeta}>{formatDato(obs.tid)}</Text>
+                  </View>
+
+                  <View style={styles.distanceBadge}>
+                    <Text style={styles.distanceBadgeText}>{Math.round(obs.distance)} m</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </ScrollView>
 
         <Modal visible={checkModal} transparent animationType="fade">
@@ -866,6 +1176,96 @@ export default function KameraDetaljScreen() {
                   <Text style={styles.primaryButtonText}>Lagre</Text>
                 </Pressable>
               </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={obsModal} transparent animationType="fade">
+          <View style={styles.modal}>
+            <View style={styles.modalCard}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={styles.cardTitle}>Registrer observasjon</Text>
+
+                <Text style={styles.label}>Dyr</Text>
+                <View style={styles.chipRow}>
+                  {OBS_DYR_LISTE.map((val) => (
+                    <Pressable
+                      key={val}
+                      style={[styles.chip, obsDyr === val && styles.chipActive]}
+                      onPress={() => setObsDyr(val)}
+                    >
+                      <Text style={[styles.chipText, obsDyr === val && styles.chipTextActive]}>
+                        {val}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={styles.label}>Antall</Text>
+                <TextInput
+                  value={obsAntall}
+                  onChangeText={setObsAntall}
+                  keyboardType="number-pad"
+                  placeholder="1"
+                  placeholderTextColor="#64748b"
+                  style={styles.input}
+                />
+
+                <Text style={styles.label}>Kjønn</Text>
+                <View style={styles.chipRow}>
+                  {OBS_KJØNN.map((val) => (
+                    <Pressable
+                      key={val}
+                      style={[styles.chip, obsKjønn === val && styles.chipActive]}
+                      onPress={() => setObsKjønn(val)}
+                    >
+                      <Text style={[styles.chipText, obsKjønn === val && styles.chipTextActive]}>
+                        {val}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={styles.label}>Alder</Text>
+                <View style={styles.chipRow}>
+                  {OBS_ALDER.map((val) => (
+                    <Pressable
+                      key={val}
+                      style={[styles.chip, obsAlder === val && styles.chipActive]}
+                      onPress={() => setObsAlder(val)}
+                    >
+                      <Text style={[styles.chipText, obsAlder === val && styles.chipTextActive]}>
+                        {val}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={styles.label}>Kommentar</Text>
+                <TextInput
+                  placeholder="Valgfritt"
+                  placeholderTextColor="#999"
+                  style={styles.input}
+                  value={obsKommentar}
+                  onChangeText={setObsKommentar}
+                />
+
+                <View style={styles.buttonRow}>
+                  <Pressable style={styles.secondaryButtonHalf} onPress={() => setObsModal(false)}>
+                    <Text style={styles.secondaryButtonText}>Avbryt</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.primaryButtonHalf}
+                    onPress={registrerObservasjon}
+                    disabled={obsLagrer}
+                  >
+                    <Text style={styles.primaryButtonText}>
+                      {obsLagrer ? "Lagrer..." : "Lagre"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -944,6 +1344,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: { color: "#ffffff", fontSize: 24, fontWeight: "800" },
   heroText: { color: "#cbd5e1", fontSize: 14, lineHeight: 21, marginTop: 8 },
+  heroBadgeCol: { alignItems: "flex-end", gap: 6 },
   heroBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   heroBadgeText: { fontSize: 12, fontWeight: "800" },
   heroStatsRow: { flexDirection: "row", gap: 10, marginTop: 16 },
@@ -964,12 +1365,23 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
 
+  konfidensBadge: {
+    backgroundColor: "rgba(148,163,184,0.14)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  konfidensBadgeText: { color: "#cbd5e1", fontSize: 10, fontWeight: "800" },
+  konfidensHint: { color: "#94a3b8", fontSize: 12, marginTop: 8, lineHeight: 17 },
+
   levelHighBg: { backgroundColor: "rgba(239,68,68,0.14)" },
   levelHighText: { color: "#fca5a5" },
   levelMediumBg: { backgroundColor: "rgba(245,158,11,0.14)" },
   levelMediumText: { color: "#fde68a" },
   levelLowBg: { backgroundColor: "rgba(34,197,94,0.14)" },
   levelLowText: { color: "#86efac" },
+
+  topActionsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
 
   card: {
     backgroundColor: "#111827",
@@ -1020,20 +1432,7 @@ const styles = StyleSheet.create({
   },
   textArea: { minHeight: 100, textAlignVertical: "top" },
 
-  directionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  directionButton: {
-    minWidth: 54,
-    backgroundColor: "#1f2937",
-    borderWidth: 1,
-    borderColor: "#374151",
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: "center",
-  },
-  directionButtonActive: { backgroundColor: "#12351f", borderColor: "#22c55e" },
-  directionButtonText: { color: "#e5e7eb", fontWeight: "800" },
-  directionButtonTextActive: { color: "#86efac" },
+  retningVelgerWrap: { alignItems: "center", marginTop: 10, marginBottom: 4 },
 
   buttonRow: { flexDirection: "row", gap: 10, marginTop: 16 },
   choiceRow: { flexDirection: "row", gap: 10, marginTop: 8 },
@@ -1049,6 +1448,19 @@ const styles = StyleSheet.create({
   choiceActive: { backgroundColor: "#163222", borderColor: "#22c55e" },
   choiceText: { color: "#ffffff", fontWeight: "800" },
   choiceTextActive: { color: "#86efac" },
+
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: "#1f2937",
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
+  chipActive: { backgroundColor: "#12351f", borderColor: "#22c55e" },
+  chipText: { color: "#e5e7eb", fontSize: 12, fontWeight: "700" },
+  chipTextActive: { color: "#86efac", fontWeight: "800" },
 
   primaryButton: {
     backgroundColor: "#22c55e",
@@ -1106,7 +1518,7 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
   statCard: {
     flex: 1,
-    backgroundColor: "#111827",
+    backgroundColor: "#0f172a",
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "#1f2937",
@@ -1114,6 +1526,66 @@ const styles = StyleSheet.create({
   },
   statLabel: { color: "#94a3b8", fontSize: 12, marginBottom: 6 },
   statValue: { color: "#ffffff", fontSize: 20, fontWeight: "800" },
+
+  periodeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  periodeInfo: { flex: 1 },
+
+  periodGrid: { flexDirection: "row", gap: 8 },
+  periodCell: {
+    flex: 1,
+    backgroundColor: "#0f172a",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    padding: 10,
+  },
+  periodCellLabel: {
+    color: "#94a3b8",
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  periodCellValue: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
+
+  barRad: { marginBottom: 12 },
+  barLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  barDyr: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
+  barMeta: { color: "#94a3b8", fontSize: 12 },
+  barTrack: {
+    height: 8,
+    backgroundColor: "#0f172a",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  barFyllSoft: { height: "100%", borderRadius: 4, backgroundColor: "#60a5fa" },
+
+  summaryBox: {
+    marginTop: 18,
+    backgroundColor: "rgba(34,197,94,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(34,197,94,0.16)",
+    borderRadius: 16,
+    padding: 14,
+  },
+  summaryTitle: {
+    color: "#86efac",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  summaryText: { color: "#e2e8f0", fontSize: 14, lineHeight: 21 },
 
   highlightBox: { backgroundColor: "#0f172a", borderRadius: 14, padding: 14 },
   highlightTitle: {
@@ -1203,5 +1675,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#1f2937",
+    maxHeight: "88%",
   },
 });
