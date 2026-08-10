@@ -15,11 +15,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, {
   Circle,
-  LongPressEvent,
   Marker,
   Polygon,
   PROVIDER_GOOGLE,
-} from "react-native-maps";
+} from "@/components/MapView";
+import type { LongPressEvent } from "@/components/MapView";
 
 import RetningVelger from "@/components/RetningVelger";
 import {

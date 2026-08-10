@@ -17,6 +17,9 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+google-services.json
+GoogleService-Info.plist
+google-play-service-account.json
 
 # Metro
 .metro-health-check*
@@ -30,7 +33,12 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files — .env.example is intentionally NOT ignored (checked in as a template)
+.env
+.env.local
+.env.development
+.env.preview
+.env.production
 .env*.local
 
 # typescript

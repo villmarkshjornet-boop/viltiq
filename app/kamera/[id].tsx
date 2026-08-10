@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Circle, Marker, Polygon } from "react-native-maps";
+import MapView, { Circle, Marker, Polygon } from "../../components/MapView";
 import BottomDock from "../../components/BottomDock";
 import RetningVelger from "../../components/RetningVelger";
 
