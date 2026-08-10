@@ -1,8 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { deleteDoc, doc } from "firebase/firestore";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Modal,
@@ -17,25 +15,20 @@ import {
 import MapView, { Circle, Marker, Polygon } from "react-native-maps";
 import BottomDock from "../../components/BottomDock";
 
-import { auth, db } from "../../src/config/firebase";
-import { login } from "../../src/services/auth";
-import { subscribeToNearbyObservations } from "../../src/services/observations";
+import { auth } from "../../src/config/firebase";
+import { hentTidsvekt } from "../../src/lib/aktivitet";
+import { buildSector, distanceMeters } from "../../src/lib/geo";
+import {
+  deleteCamera,
+  subscribeToCamera,
+  updateCamera,
+  type Viltkamera,
+} from "../../src/services/cameras";
+import {
+  deleteObservation,
+  subscribeToNearbyObservations,
+} from "../../src/services/observations";
 import type { Observasjon } from "../../src/types/observation";
-
-type Viltkamera = {
-  id: string;
-  name: string;
-  latitude: number;
-  longitude: number;
-  direction: string;
-  notes: string;
-  createdAt: string;
-  updatedAt: string;
-  lastCheckedAt?: string;
-  batteryStatus?: string;
-  memoryCardStatus?: string;
-  baitStatus?: string;
-};
 
 type ObservasjonMedDistance = Observasjon & {
   distance: number;
@@ -47,54 +40,26 @@ type HeatSone = {
   score: number;
 };
 
-const KAMERAER_KEY = "viltkameraer_v1";
 const AKTIVITET_RADIUS_METER = 300;
 const AKTIVITET_RADIUS_KM = AKTIVITET_RADIUS_METER / 1000;
 const DIRECTIONS = ["N", "NØ", "Ø", "SØ", "S", "SV", "V", "NV"];
 
-function toRad(value: number) {
-  return (value * Math.PI) / 180;
-}
-
-function haversineDistance(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-) {
-  const R = 6371000;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-
-  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-}
-
-function formatDato(verdi?: string) {
+function formatDato(verdi?: any) {
   if (!verdi) return "Ikke registrert";
-  const dato = new Date(verdi);
+
+  let dato: Date;
+
+  if (typeof verdi === "string") {
+    dato = new Date(verdi);
+  } else if (typeof verdi?.toDate === "function") {
+    // Firestore Timestamp (fra serverTimestamp()) — konverter til Date.
+    dato = verdi.toDate();
+  } else {
+    return "Ikke registrert";
+  }
+
   if (Number.isNaN(dato.getTime())) return "Ikke registrert";
   return dato.toLocaleString("no-NO");
-}
-
-function hentTidsvekt(tid: string) {
-  const nå = Date.now();
-  const observasjonTid = new Date(tid).getTime();
-
-  if (!observasjonTid || Number.isNaN(observasjonTid)) return 1;
-
-  const timerSiden = (nå - observasjonTid) / (1000 * 60 * 60);
-
-  if (timerSiden <= 6) return 5;
-  if (timerSiden <= 24) return 3;
-  if (timerSiden <= 72) return 2;
-  return 1;
 }
 
 function normaliserKamera(kamera: Viltkamera): Viltkamera {
@@ -122,42 +87,6 @@ function retningTilGrader(direction: string) {
   };
 
   return map[direction] ?? null;
-}
-
-function beregnSektorKoordinater(
-  lat: number,
-  lon: number,
-  bearing: number,
-  distance: number = 120,
-  spread: number = 60
-) {
-  const points = [];
-  const earthRadius = 6371000;
-  const startAngle = bearing - spread / 2;
-  const endAngle = bearing + spread / 2;
-
-  points.push({ latitude: lat, longitude: lon });
-
-  for (let angle = startAngle; angle <= endAngle; angle += 4) {
-    const rad = (angle * Math.PI) / 180;
-
-    const newLat =
-      lat + (distance / earthRadius) * (180 / Math.PI) * Math.cos(rad);
-
-    const newLon =
-      lon +
-      ((distance / earthRadius) * (180 / Math.PI) * Math.sin(rad)) /
-        Math.cos((lat * Math.PI) / 180);
-
-    points.push({
-      latitude: newLat,
-      longitude: newLon,
-    });
-  }
-
-  points.push({ latitude: lat, longitude: lon });
-
-  return points;
 }
 
 function byggHeatmap(data: ObservasjonMedDistance[]): HeatSone[] {
@@ -221,7 +150,6 @@ export default function KameraDetaljScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  const [kameraer, setKameraer] = useState<Viltkamera[]>([]);
   const [kamera, setKamera] = useState<Viltkamera | null>(null);
   const [observasjoner, setObservasjoner] = useState<Observasjon[]>([]);
   const [laster, setLaster] = useState(true);
@@ -237,95 +165,87 @@ export default function KameraDetaljScreen() {
   const [bait, setBait] = useState("Nei");
   const [checkNote, setCheckNote] = useState("");
 
-  const hentKamera = useCallback(async () => {
-    try {
-      const kameraData = await AsyncStorage.getItem(KAMERAER_KEY);
-      const råKameraListe: Viltkamera[] = kameraData ? JSON.parse(kameraData) : [];
-
-      const kameraListe = Array.isArray(råKameraListe)
-        ? råKameraListe.map(normaliserKamera)
-        : [];
-
-      setKameraer(kameraListe);
-
-      const funnet = kameraListe.find((item) => item.id === id) || null;
-      setKamera(funnet);
-
-      if (funnet) {
-        setName(funnet.name || "");
-        setDirection(funnet.direction || "");
-        setNotes(funnet.notes || "");
-      }
-    } catch (error) {
-      console.log("Feil ved lasting av kamera:", error);
-      setKamera(null);
-      setKameraer([]);
-    }
-  }, [id]);
+  const initialisertForId = useRef<string | null>(null);
 
   useEffect(() => {
-    let unsubscribe: undefined | (() => void);
+    if (!id) {
+      setLaster(false);
+      return;
+    }
+
     let aktiv = true;
+    let obsUnsubscribe: undefined | (() => void);
+    let obsAbonnementStartet = false;
 
-    async function init() {
-      try {
-        setLaster(true);
-
-        await login();
-        await hentKamera();
-
-        const kameraData = await AsyncStorage.getItem(KAMERAER_KEY);
-        const råKameraListe: Viltkamera[] = kameraData ? JSON.parse(kameraData) : [];
-        const kameraListe = Array.isArray(råKameraListe)
-          ? råKameraListe.map(normaliserKamera)
-          : [];
-        const funnet = kameraListe.find((item) => item.id === id) || null;
-
+    const kameraUnsubscribe = subscribeToCamera(
+      id,
+      (funnet) => {
         if (!aktiv) return;
 
-        if (!funnet) {
+        const normalisert = funnet ? normaliserKamera(funnet) : null;
+        setKamera(normalisert);
+
+        if (!normalisert) {
           setLaster(false);
           return;
         }
 
-        unsubscribe = subscribeToNearbyObservations(
-          {
-            center: {
-              latitude: funnet.latitude,
-              longitude: funnet.longitude,
+        if (!obsAbonnementStartet) {
+          obsAbonnementStartet = true;
+
+          obsUnsubscribe = subscribeToNearbyObservations(
+            {
+              center: {
+                latitude: normalisert.latitude,
+                longitude: normalisert.longitude,
+              },
+              radiusKm: AKTIVITET_RADIUS_KM,
             },
-            radiusKm: AKTIVITET_RADIUS_KM,
-          },
-          (liste: Observasjon[]) => {
-            if (!aktiv) return;
-            setObservasjoner(
-              [...liste].sort(
-                (a, b) => new Date(b.tid).getTime() - new Date(a.tid).getTime()
-              )
-            );
-            setLaster(false);
-          },
-          (error: Error) => {
-            console.log("Feil ved lasting av observasjoner rundt kamera:", error);
-            if (!aktiv) return;
-            setObservasjoner([]);
-            setLaster(false);
-          }
-        );
-      } catch (error) {
-        console.log("Feil ved init kamera:", error);
+            (liste: Observasjon[]) => {
+              if (!aktiv) return;
+              setObservasjoner(
+                [...liste].sort(
+                  (a, b) => new Date(b.tid).getTime() - new Date(a.tid).getTime()
+                )
+              );
+              setLaster(false);
+            },
+            (error: Error) => {
+              console.log("Feil ved lasting av observasjoner rundt kamera:", error);
+              if (!aktiv) return;
+              setObservasjoner([]);
+              setLaster(false);
+            }
+          );
+        }
+      },
+      (error) => {
+        console.log("Feil ved lasting av kamera:", error);
         if (!aktiv) return;
+        setKamera(null);
         setLaster(false);
       }
-    }
-
-    init();
+    );
 
     return () => {
       aktiv = false;
-      if (unsubscribe) unsubscribe();
+      kameraUnsubscribe();
+      if (obsUnsubscribe) obsUnsubscribe();
     };
-  }, [hentKamera, id]);
+  }, [id]);
+
+  // Fyll redigeringsfeltene kun første gang et gitt kamera lastes, slik at
+  // sanntidsoppdateringer fra Firestore ikke overskriver tekst brukeren
+  // holder på å skrive i redigeringsmodus.
+  useEffect(() => {
+    if (!kamera) return;
+    if (initialisertForId.current === kamera.id) return;
+
+    initialisertForId.current = kamera.id;
+    setName(kamera.name || "");
+    setDirection(kamera.direction || "");
+    setNotes(kamera.notes || "");
+  }, [kamera]);
 
   const observasjonerINaerheten = useMemo<ObservasjonMedDistance[]>(() => {
     if (!kamera) return [];
@@ -333,11 +253,9 @@ export default function KameraDetaljScreen() {
     return observasjoner
       .filter((obs) => obs.latitude != null && obs.longitude != null)
       .map((obs) => {
-        const distance = haversineDistance(
-          kamera.latitude,
-          kamera.longitude,
-          obs.latitude as number,
-          obs.longitude as number
+        const distance = distanceMeters(
+          { latitude: kamera.latitude, longitude: kamera.longitude },
+          { latitude: obs.latitude as number, longitude: obs.longitude as number }
         );
 
         return {
@@ -392,22 +310,12 @@ export default function KameraDetaljScreen() {
     }
 
     try {
-      const oppdatertKamera: Viltkamera = {
-        ...kamera,
+      await updateCamera(kamera.id, {
         name: trimmedName,
         direction: direction.trim(),
         notes: notes.trim(),
-        updatedAt: new Date().toISOString(),
-      };
+      });
 
-      const oppdatertListe = kameraer.map((item) =>
-        item.id === kamera.id ? oppdatertKamera : item
-      );
-
-      await AsyncStorage.setItem(KAMERAER_KEY, JSON.stringify(oppdatertListe));
-
-      setKameraer(oppdatertListe);
-      setKamera(oppdatertKamera);
       setEditMode(false);
     } catch (error) {
       console.log("Feil ved lagring:", error);
@@ -428,23 +336,15 @@ export default function KameraDetaljScreen() {
           : `Sjekk: ${ekstraNotat}`
         : kamera.notes || "";
 
-      const oppdatert: Viltkamera = {
-        ...kamera,
+      await updateCamera(kamera.id, {
         lastCheckedAt: new Date().toISOString(),
         batteryStatus: battery,
         memoryCardStatus: memory,
         baitStatus: bait,
         notes: sammensattNotat,
-        updatedAt: new Date().toISOString(),
-      };
+      });
 
-      const nyListe = kameraer.map((k) => (k.id === kamera.id ? oppdatert : k));
-
-      await AsyncStorage.setItem(KAMERAER_KEY, JSON.stringify(nyListe));
-
-      setKamera(oppdatert);
-      setKameraer(nyListe);
-      setNotes(oppdatert.notes || "");
+      setNotes(sammensattNotat);
       setCheckModal(false);
       setCheckNote("");
 
@@ -473,8 +373,7 @@ export default function KameraDetaljScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            const oppdatertListe = kameraer.filter((item) => item.id !== kamera.id);
-            await AsyncStorage.setItem(KAMERAER_KEY, JSON.stringify(oppdatertListe));
+            await deleteCamera(kamera.id);
             router.back();
           } catch (error) {
             console.log("Feil ved sletting:", error);
@@ -510,7 +409,7 @@ export default function KameraDetaljScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              await deleteDoc(doc(db, "observations", obs.id));
+              await deleteObservation(obs.id);
               Alert.alert("Slettet", "Observasjonen er slettet.");
             } catch (error) {
               console.log("Feil ved sletting av observasjon:", error);
@@ -538,7 +437,9 @@ export default function KameraDetaljScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>Fant ikke kamera</Text>
-          <Text style={styles.emptyText}>Kameraet finnes ikke lenger i lokal lagring.</Text>
+          <Text style={styles.emptyText}>
+            Kameraet finnes ikke lenger, eller du har ikke tilgang til det.
+          </Text>
 
           <Pressable style={styles.primaryButton} onPress={() => router.back()}>
             <Text style={styles.primaryButtonText}>Tilbake</Text>
@@ -769,10 +670,11 @@ export default function KameraDetaljScreen() {
 
               {retningGrader !== null && (
                 <Polygon
-                  coordinates={beregnSektorKoordinater(
-                    kamera.latitude,
-                    kamera.longitude,
-                    retningGrader
+                  coordinates={buildSector(
+                    { latitude: kamera.latitude, longitude: kamera.longitude },
+                    120,
+                    retningGrader,
+                    60
                   )}
                   fillColor="rgba(59,130,246,0.18)"
                   strokeColor="rgba(59,130,246,0.55)"

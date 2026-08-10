@@ -8,6 +8,7 @@ import {
     orderBy,
     query,
     serverTimestamp,
+    Unsubscribe,
     updateDoc,
     where,
 } from "firebase/firestore";
@@ -78,6 +79,34 @@ export function subscribeToMyCameras(callback: (items: Viltkamera[]) => void) {
 
     callback(items);
   });
+}
+
+/**
+ * Sanntidsabonnement på ett enkelt kamera-dokument. Brukes av kamera-
+ * detaljskjermen (app/kamera/[id].tsx) slik at f.eks. en sjekk registrert fra
+ * en annen enhet dukker opp uten at brukeren må laste skjermen på nytt.
+ * Kaller `callback(null)` dersom kameraet ikke (lenger) finnes.
+ */
+export function subscribeToCamera(
+  id: string,
+  callback: (item: Viltkamera | null) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "cameras", id),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        callback(null);
+        return;
+      }
+
+      callback({
+        id: snapshot.id,
+        ...(snapshot.data() as Omit<Viltkamera, "id">),
+      });
+    },
+    (error) => onError?.(error as Error)
+  );
 }
 
 export async function updateCamera(
