@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "observations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jaktlagId", "order": "ASCENDING"  },
+        { "fieldPath": "geohash",   "order": "ASCENDING"  }
+      ]
+    },
+    {
       "collectionGroup": "fellings",
       "queryScope": "COLLECTION",
       "fields": [

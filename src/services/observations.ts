@@ -151,48 +151,56 @@ export function subscribeToNearbyObservations(
   const radiusInM = radiusKm * 1000;
   const bounds    = geohashQueryBounds([center.latitude, center.longitude], radiusInM);
 
-  const latestPerQuery = new Map<number, Observasjon[]>();
+  const latestPerQuery = new Map<string, Observasjon[]>();
   const unsubscribers:  Unsubscribe[] = [];
+  let avbrutt = false;
 
   const emitMerged = () => {
     onData(dedupeObservations(Array.from(latestPerQuery.values()).flat()));
   };
 
-  let avbrutt = false;
-
-  // Hent jaktlagId FØR lytterne settes opp, slik at klient-side filtrering
-  // er korrekt fra og med første batch (unngår at andre lags data vises
-  // midlertidig mens løftet ennå ikke er ferdig).
+  // Firestore validerer en spørring mot dens *mulige* resultatsett, ikke de
+  // faktiske dokumentene. Sikkerhetsregelen for `observations` sjekker
+  // jaktlagId — så en geohash-spørring UTEN en tilsvarende where("jaktlagId")
+  // ville blitt avvist i sin helhet (permission-denied), ikke bare filtrert.
+  // Derfor kjører vi to eksplisitte, "beviselig trygge" spørringer per
+  // geohash-intervall: én for offentlige observasjoner (jaktlagId == "") og
+  // én for eget aktivt jaktlag (jaktlagId == mitt lag) — begge matcher
+  // Firestore-regelen nøyaktig og trenger ingen klient-side etterfiltrering.
   getAktivtJaktlagId().then((jaktlagId) => {
     if (avbrutt) return;
 
-    bounds.forEach(([startHash, endHash], index) => {
-      const q = query(
-        collection(db, OBSERVATIONS_COLLECTION),
-        orderBy("geohash"),
-        startAt(startHash),
-        endAt(endHash)
-      );
+    const jaktlagIder = jaktlagId ? ["", jaktlagId] : [""];
 
-      const unsub = onSnapshot(
-        q,
-        (snapshot) => {
-          const items: Observasjon[] = [];
-          snapshot.forEach((d) => {
-            const item = mapDocToObservation(d);
-            if (typeof item.latitude !== "number" || typeof item.longitude !== "number") return;
-            // Filtrer på jaktlag hvis tilgjengelig
-            if (jaktlagId && d.data().jaktlagId && d.data().jaktlagId !== jaktlagId) return;
-            if (isWithinRadiusKm(item as { latitude: number; longitude: number }, center, radiusKm)) {
-              items.push(item);
-            }
-          });
-          latestPerQuery.set(index, items);
-          emitMerged();
-        },
-        (error) => onError?.(error as Error)
-      );
-      unsubscribers.push(unsub);
+    bounds.forEach(([startHash, endHash], boundIndex) => {
+      jaktlagIder.forEach((id) => {
+        const key = `${boundIndex}:${id}`;
+        const q = query(
+          collection(db, OBSERVATIONS_COLLECTION),
+          where("jaktlagId", "==", id),
+          orderBy("geohash"),
+          startAt(startHash),
+          endAt(endHash)
+        );
+
+        const unsub = onSnapshot(
+          q,
+          (snapshot) => {
+            const items: Observasjon[] = [];
+            snapshot.forEach((d) => {
+              const item = mapDocToObservation(d);
+              if (typeof item.latitude !== "number" || typeof item.longitude !== "number") return;
+              if (isWithinRadiusKm(item as { latitude: number; longitude: number }, center, radiusKm)) {
+                items.push(item);
+              }
+            });
+            latestPerQuery.set(key, items);
+            emitMerged();
+          },
+          (error) => onError?.(error as Error)
+        );
+        unsubscribers.push(unsub);
+      });
     });
   });
 
