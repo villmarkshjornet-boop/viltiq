@@ -9,10 +9,10 @@ import {
     orderBy,
     query,
     serverTimestamp,
-    Unsubscribe,
     updateDoc,
     where,
 } from "firebase/firestore";
+import type { Unsubscribe } from "firebase/firestore";
 import { getAktivtJaktlagId } from "./jaktlag";
 
 export type Viltkamera = {

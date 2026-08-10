@@ -8,9 +8,9 @@ import {
     orderBy,
     query,
     serverTimestamp,
-    Unsubscribe,
     where,
 } from "firebase/firestore";
+import type { Unsubscribe } from "firebase/firestore";
 import { getAktivtJaktlagId } from "./jaktlag";
 
 const MAP_POINTS_COLLECTION = "mapPoints";

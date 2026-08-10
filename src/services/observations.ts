@@ -12,9 +12,9 @@ import {
     query,
     serverTimestamp,
     startAt,
-    Unsubscribe,
     where,
 } from "firebase/firestore";
+import type { Unsubscribe } from "firebase/firestore";
 import {
     distanceBetween,
     geohashForLocation,
