@@ -16,10 +16,14 @@ service cloud.firestore {
     }
 
     // ── Observasjoner ────────────────────────────────────────────────────────
-    // Leses av alle innloggede (geohash-spørringer kan ikke filtreres per jaktlag
-    // på regel-nivå — jaktlag-filtrering skjer klient-side).
+    // Leses av: eier, alle (hvis observasjonen er offentlig, jaktlagId == ""),
+    // eller medlemmer av jaktlaget observasjonen tilhører.
     match /observations/{id} {
-      allow read:   if isAuth();
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.jaktlagId == "" ||
+        isMember(resource.data.jaktlagId)
+      );
       allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
       allow update: if false;

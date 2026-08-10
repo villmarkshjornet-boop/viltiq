@@ -17,11 +17,13 @@ type ObservationDoc = {
   tid?: string;
   latitude?: number | null;
   longitude?: number | null;
+  jaktlagId?: string;
 };
 
 type UserLocationDoc = {
   latitude?: number;
   longitude?: number;
+  jaktlagId?: string | null;
 };
 
 function toRad(value: number) {
@@ -81,7 +83,10 @@ export const sendObservationPush = onDocumentCreated(
       admin.firestore().collection("user_locations").get(),
     ]);
 
-    const userLocations = new Map<string, { latitude: number; longitude: number }>();
+    const userLocations = new Map<
+      string,
+      { latitude: number; longitude: number; jaktlagId?: string | null }
+    >();
 
     locationsSnap.forEach((doc) => {
       const data = doc.data() as UserLocationDoc;
@@ -93,6 +98,7 @@ export const sendObservationPush = onDocumentCreated(
         userLocations.set(doc.id, {
           latitude: data.latitude,
           longitude: data.longitude,
+          jaktlagId: data.jaktlagId ?? null,
         });
       }
     });
@@ -113,6 +119,14 @@ export const sendObservationPush = onDocumentCreated(
 
       const location = userLocations.get(doc.id);
       if (!location) return;
+
+      // Personvern: en observasjon knyttet til et privat jaktlag skal kun
+      // varsle medlemmer av det jaktlaget. Offentlige observasjoner
+      // (jaktlagId === "") varsler alle innen radius, som før.
+      const observationJaktlagId = observation.jaktlagId ?? "";
+      if (observationJaktlagId !== "" && location.jaktlagId !== observationJaktlagId) {
+        return;
+      }
 
       const radiusKm =
         user.radiusKm === 10 || user.radiusKm === 25 || user.radiusKm === 50

@@ -127,14 +127,13 @@ export async function saveObservation(
 export async function drainOfflineQueue(): Promise<number> {
   const user = auth.currentUser;
   if (!user) return 0;
-  const jaktlagId = await getAktivtJaktlagId();
-  if (!jaktlagId) return 0;
+  const jaktlagId = (await getAktivtJaktlagId()) ?? undefined;
 
   const kø = await hentKø();
   let synket = 0;
   for (const obs of kø) {
     try {
-      await saveObservationToFirestore({ ...obs, userId: user.uid, jaktlagId });
+      await saveObservationToFirestore({ ...obs, userId: user.uid, jaktlagId: jaktlagId ?? "" });
       await fjernFraKø(obs.id);
       synket++;
     } catch {
@@ -155,44 +154,52 @@ export function subscribeToNearbyObservations(
   const latestPerQuery = new Map<number, Observasjon[]>();
   const unsubscribers:  Unsubscribe[] = [];
 
-  // Hent jaktlagId én gang, bruk den for klient-side filtrering
-  let jaktlagId: string | null = null;
-  getAktivtJaktlagId().then((id) => { jaktlagId = id; });
-
   const emitMerged = () => {
     onData(dedupeObservations(Array.from(latestPerQuery.values()).flat()));
   };
 
-  bounds.forEach(([startHash, endHash], index) => {
-    const q = query(
-      collection(db, OBSERVATIONS_COLLECTION),
-      orderBy("geohash"),
-      startAt(startHash),
-      endAt(endHash)
-    );
+  let avbrutt = false;
 
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        const items: Observasjon[] = [];
-        snapshot.forEach((d) => {
-          const item = mapDocToObservation(d);
-          if (typeof item.latitude !== "number" || typeof item.longitude !== "number") return;
-          // Filtrer på jaktlag hvis tilgjengelig
-          if (jaktlagId && d.data().jaktlagId && d.data().jaktlagId !== jaktlagId) return;
-          if (isWithinRadiusKm(item as { latitude: number; longitude: number }, center, radiusKm)) {
-            items.push(item);
-          }
-        });
-        latestPerQuery.set(index, items);
-        emitMerged();
-      },
-      (error) => onError?.(error as Error)
-    );
-    unsubscribers.push(unsub);
+  // Hent jaktlagId FØR lytterne settes opp, slik at klient-side filtrering
+  // er korrekt fra og med første batch (unngår at andre lags data vises
+  // midlertidig mens løftet ennå ikke er ferdig).
+  getAktivtJaktlagId().then((jaktlagId) => {
+    if (avbrutt) return;
+
+    bounds.forEach(([startHash, endHash], index) => {
+      const q = query(
+        collection(db, OBSERVATIONS_COLLECTION),
+        orderBy("geohash"),
+        startAt(startHash),
+        endAt(endHash)
+      );
+
+      const unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          const items: Observasjon[] = [];
+          snapshot.forEach((d) => {
+            const item = mapDocToObservation(d);
+            if (typeof item.latitude !== "number" || typeof item.longitude !== "number") return;
+            // Filtrer på jaktlag hvis tilgjengelig
+            if (jaktlagId && d.data().jaktlagId && d.data().jaktlagId !== jaktlagId) return;
+            if (isWithinRadiusKm(item as { latitude: number; longitude: number }, center, radiusKm)) {
+              items.push(item);
+            }
+          });
+          latestPerQuery.set(index, items);
+          emitMerged();
+        },
+        (error) => onError?.(error as Error)
+      );
+      unsubscribers.push(unsub);
+    });
   });
 
-  return () => unsubscribers.forEach((u) => u());
+  return () => {
+    avbrutt = true;
+    unsubscribers.forEach((u) => u());
+  };
 }
 
 export async function deleteObservation(id: string): Promise<void> {
