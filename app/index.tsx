@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -13,6 +12,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
+import { subscribeToVisibleCameras } from "../src/services/cameras";
+import { getAktivtJaktlagId } from "../src/services/jaktlag";
 import {
   getUserPosition,
   syncUserLocation,
@@ -20,9 +21,9 @@ import {
 } from "../src/services/location";
 import {
   deleteObservation,
+  drainOfflineQueue,
   subscribeToNearbyObservations,
 } from "../src/services/observations";
-import { drainOfflineQueue } from "../src/services/observations";
 import { getSettings } from "../src/services/settings";
 import { hentVær, type VærData } from "../src/services/weather";
 import type { Observasjon } from "../src/types/observation";
@@ -59,7 +60,6 @@ function åpneSesonger(dato: Date): string[] {
   );
 }
 
-const CAMERA_KEY = "viltkameraer_v1";
 const dyrListe   = ["Alle", "Rådyr", "Elg", "Hjort", "Rev"];
 const dyrGruppe  = ["Rådyr", "Elg", "Hjort", "Rev"] as const;
 
@@ -110,13 +110,14 @@ export default function HomeScreen() {
   const åpne = useMemo(() => åpneSesonger(new Date()), []);
 
   useEffect(() => {
-    AsyncStorage.getItem(CAMERA_KEY)
-      .then((raw) => {
-        if (!raw) return;
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) setKameraCount(arr.length);
-      })
-      .catch(() => {});
+    let unsub: (() => void) | undefined;
+    (async () => {
+      const jaktlagId = await getAktivtJaktlagId();
+      unsub = subscribeToVisibleCameras(jaktlagId, (kameraer) => {
+        setKameraCount(kameraer.filter((k) => k.active).length);
+      });
+    })();
+    return () => unsub?.();
   }, []);
 
   useEffect(() => {

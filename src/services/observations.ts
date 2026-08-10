@@ -1,5 +1,5 @@
 import { auth, db } from "@/src/config/firebase";
-import type { Observasjon } from "@/src/types/observation";
+import type { Observasjon, ObservasjonKilde, SporType } from "@/src/types/observation";
 import {
     addDoc,
     collection,
@@ -20,6 +20,7 @@ import {
     geohashForLocation,
     geohashQueryBounds,
 } from "geofire-common";
+import { getCamera } from "./cameras";
 import { getAktivtJaktlagId } from "./jaktlag";
 import { fjernFraKø, hentKø, leggIKø } from "./offlineQueue";
 
@@ -33,6 +34,12 @@ type SaveObservationInput = {
   latitude: number | null;
   longitude: number | null;
   retning?: number | null;
+  antall?: number;
+  observationSource?: ObservasjonKilde;
+  cameraId?: string | null;
+  sporType?: SporType | null;
+  kjonn?: string | null;
+  alder?: string | null;
 };
 
 type NearbyOptions = {
@@ -45,6 +52,7 @@ function mapDocToObservation(d: any): Observasjon {
   return {
     id:        d.id,
     userId:    data.userId    ?? "",
+    jaktlagId: data.jaktlagId ?? "",
     dyr:       data.dyr       ?? "",
     type:      data.type      ?? "",
     kommentar: data.kommentar ?? "",
@@ -53,6 +61,13 @@ function mapDocToObservation(d: any): Observasjon {
     longitude: data.longitude ?? null,
     geohash:   data.geohash   ?? "",
     retning:   data.retning   ?? null,
+    antall:    typeof data.antall === "number" && data.antall > 0 ? data.antall : 1,
+    observationSource: data.observationSource ?? "manual",
+    cameraId:  data.cameraId ?? null,
+    cameraDirectionDegrees: data.cameraDirectionDegrees ?? null,
+    sporType:  data.sporType ?? null,
+    kjonn:     data.kjonn ?? null,
+    alder:     data.alder ?? null,
     createdAt: data.createdAt,
   };
 }
@@ -73,8 +88,14 @@ function isWithinRadiusKm(
   return distanceBetween([item.latitude, item.longitude], [center.latitude, center.longitude]) <= radiusKm;
 }
 
+type SaveObservationToFirestoreInput = SaveObservationInput & {
+  userId: string;
+  jaktlagId: string;
+  cameraDirectionDegrees?: number | null;
+};
+
 async function saveObservationToFirestore(
-  input: SaveObservationInput & { userId: string; jaktlagId: string }
+  input: SaveObservationToFirestoreInput
 ): Promise<string> {
   const hasGps  = typeof input.latitude === "number" && typeof input.longitude === "number";
   const geohash = hasGps
@@ -91,6 +112,13 @@ async function saveObservationToFirestore(
     latitude:  input.latitude,
     longitude: input.longitude,
     retning:   input.retning ?? null,
+    antall:    input.antall && input.antall > 0 ? input.antall : 1,
+    observationSource: input.observationSource ?? "manual",
+    cameraId:  input.cameraId ?? null,
+    cameraDirectionDegrees: input.cameraDirectionDegrees ?? null,
+    sporType:  input.sporType ?? null,
+    kjonn:     input.kjonn ?? null,
+    alder:     input.alder ?? null,
     createdAt: serverTimestamp(),
   };
   if (geohash) payload.geohash = geohash;
@@ -99,26 +127,75 @@ async function saveObservationToFirestore(
   return ref.id;
 }
 
+/**
+ * Slår opp kameraet en observasjon skal knyttes til, og gir tilbake
+ * autoritative verdier (posisjon, retning-øyeblikksbilde, jaktlagId) hentet
+ * fra selve kamera-dokumentet — ikke det klienten måtte ha sendt inn.
+ * Slik arver en kameraobservasjon alltid riktig jaktlagId fra kameraet
+ * (§16), uansett hvilket jaktlag brukeren lokalt har "aktivt" akkurat nå.
+ * Faller tilbake til input uendret dersom oppslaget feiler (f.eks. offline).
+ */
+async function berikMedKameraData(
+  input: SaveObservationInput,
+  fallbackJaktlagId: string
+): Promise<{ input: SaveObservationInput; jaktlagId: string; cameraDirectionDegrees: number | null }> {
+  if (!input.cameraId) {
+    return { input, jaktlagId: fallbackJaktlagId, cameraDirectionDegrees: null };
+  }
+
+  try {
+    const kamera = await getCamera(input.cameraId);
+    if (!kamera) return { input, jaktlagId: fallbackJaktlagId, cameraDirectionDegrees: null };
+
+    return {
+      input: {
+        ...input,
+        latitude: kamera.latitude,
+        longitude: kamera.longitude,
+      },
+      jaktlagId: kamera.jaktlagId ?? "",
+      cameraDirectionDegrees: kamera.directionDegrees,
+    };
+  } catch {
+    // Offline e.l. — behold input som den er, bruk brukerens eget aktive jaktlag.
+    return { input, jaktlagId: fallbackJaktlagId, cameraDirectionDegrees: null };
+  }
+}
+
 export async function saveObservation(
   input: SaveObservationInput
 ): Promise<{ id: string; offline: boolean }> {
   const user = auth.currentUser;
   if (!user) throw new Error("Bruker er ikke logget inn.");
 
-  const jaktlagId = (await getAktivtJaktlagId()) ?? undefined;
+  const egetJaktlagId = (await getAktivtJaktlagId()) ?? "";
+  const { input: beriket, jaktlagId, cameraDirectionDegrees } =
+    await berikMedKameraData(input, egetJaktlagId);
 
   try {
-    const id = await saveObservationToFirestore({ ...input, userId: user.uid, jaktlagId: jaktlagId ?? "" });
+    const id = await saveObservationToFirestore({
+      ...beriket,
+      userId: user.uid,
+      jaktlagId,
+      cameraDirectionDegrees,
+    });
     return { id, offline: false };
   } catch {
     await leggIKø({
-      dyr:       input.dyr,
-      type:      input.type,
-      kommentar: input.kommentar,
-      tid:       input.tid,
-      latitude:  input.latitude,
-      longitude: input.longitude,
-      retning:   input.retning ?? null,
+      dyr:       beriket.dyr,
+      type:      beriket.type,
+      kommentar: beriket.kommentar,
+      tid:       beriket.tid,
+      latitude:  beriket.latitude,
+      longitude: beriket.longitude,
+      retning:   beriket.retning ?? null,
+      antall:    beriket.antall ?? 1,
+      observationSource: beriket.observationSource ?? "manual",
+      cameraId:  beriket.cameraId ?? null,
+      cameraDirectionDegrees,
+      sporType:  beriket.sporType ?? null,
+      kjonn:     beriket.kjonn ?? null,
+      alder:     beriket.alder ?? null,
     });
     return { id: "offline", offline: true };
   }
@@ -127,13 +204,23 @@ export async function saveObservation(
 export async function drainOfflineQueue(): Promise<number> {
   const user = auth.currentUser;
   if (!user) return 0;
-  const jaktlagId = (await getAktivtJaktlagId()) ?? undefined;
+  const egetJaktlagId = (await getAktivtJaktlagId()) ?? "";
 
   const kø = await hentKø();
   let synket = 0;
   for (const obs of kø) {
     try {
-      await saveObservationToFirestore({ ...obs, userId: user.uid, jaktlagId: jaktlagId ?? "" });
+      // Kameraobservasjoner: slå opp kameraet på nytt ved synk (ikke bare ved
+      // lagring), i tilfelle kameraets jaktlag-tilknytning er endret siden
+      // observasjonen ble lagt i kø mens enheten var offline.
+      const { jaktlagId, cameraDirectionDegrees } = await berikMedKameraData(obs, egetJaktlagId);
+
+      await saveObservationToFirestore({
+        ...obs,
+        userId: user.uid,
+        jaktlagId,
+        cameraDirectionDegrees: obs.cameraDirectionDegrees ?? cameraDirectionDegrees,
+      });
       await fjernFraKø(obs.id);
       synket++;
     } catch {
@@ -208,6 +295,33 @@ export function subscribeToNearbyObservations(
     avbrutt = true;
     unsubscribers.forEach((u) => u());
   };
+}
+
+/**
+ * Observasjoner eksplisitt koblet til ett viltkamera (via cameraId) — brukes
+ * av kamera-statistikkskjermen. Mer presist enn en radius-basert
+ * nærhetsspørring, og respekterer jaktlag-personvernet på samme måte som
+ * subscribeToNearbyObservations (jaktlagId må oppgis og matche kameraets
+ * eget jaktlagId for at spørringen skal være bevisbart trygg for Firestore).
+ */
+export function subscribeToObservationsByCamera(
+  cameraId: string,
+  jaktlagId: string,
+  onData: (items: Observasjon[]) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, OBSERVATIONS_COLLECTION),
+    where("jaktlagId", "==", jaktlagId),
+    where("cameraId", "==", cameraId),
+    orderBy("tid", "desc")
+  );
+
+  return onSnapshot(
+    q,
+    (snap) => onData(snap.docs.map(mapDocToObservation)),
+    (error) => onError?.(error as Error)
+  );
 }
 
 export async function deleteObservation(id: string): Promise<void> {

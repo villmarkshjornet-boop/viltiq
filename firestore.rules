@@ -24,18 +24,46 @@ service cloud.firestore {
         resource.data.jaktlagId == "" ||
         isMember(resource.data.jaktlagId)
       );
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      // Kameraobservasjoner må arve nøyaktig samme jaktlagId som kameraet de
+      // er koblet til (§16 — hindrer at en kameraobservasjon "hvitvaskes" til
+      // et annet jaktlag enn kameraet faktisk tilhører).
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid && (
+        request.resource.data.cameraId == null ||
+        get(/databases/$(database)/documents/cameras/$(request.resource.data.cameraId)).data.jaktlagId
+          == request.resource.data.jaktlagId
+      );
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
       allow update: if false;
     }
 
     // ── Viltkameraer ────────────────────────────────────────────────────────
-    // Kun eieren kan lese og endre.
+    // Eieren kan alltid lese/endre/slette. Jaktlag-medlemmer kan lese og
+    // oppdatere (registrere sjekk/observasjon) et kamera som tilhører laget,
+    // men kan ikke slette et kamera de ikke selv eier.
     match /cameras/{id} {
-      allow read:   if isAuth() && resource.data.userId == request.auth.uid;
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        (resource.data.jaktlagId != null && resource.data.jaktlagId != "" && isMember(resource.data.jaktlagId))
+      );
       allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        (resource.data.jaktlagId != null && resource.data.jaktlagId != "" && isMember(resource.data.jaktlagId))
+      );
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Kartpunkter ("Annet": saltstein, fôringsplass, post, åte osv.) ───────
+    // Samme synlighetsmodell som observasjoner.
+    match /mapPoints/{id} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.jaktlagId == "" ||
+        isMember(resource.data.jaktlagId)
+      );
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow update: if false;
     }
 
     // ── Felling ─────────────────────────────────────────────────────────────

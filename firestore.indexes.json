@@ -17,6 +17,15 @@
       ]
     },
     {
+      "collectionGroup": "observations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jaktlagId", "order": "ASCENDING"  },
+        { "fieldPath": "cameraId",  "order": "ASCENDING"  },
+        { "fieldPath": "tid",       "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "fellings",
       "queryScope": "COLLECTION",
       "fields": [
@@ -37,6 +46,22 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "userId",    "order": "ASCENDING"  },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mapPoints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId",    "order": "ASCENDING"  },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mapPoints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jaktlagId", "order": "ASCENDING"  },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     }
