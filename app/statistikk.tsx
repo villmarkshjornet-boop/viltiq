@@ -17,6 +17,9 @@ import { subscribeToNearbyObservations } from "../src/services/observations";
 import { getSettings } from "../src/services/settings";
 import { hentVær, jaktVindRad, type VærData } from "../src/services/weather";
 import type { Observasjon } from "../src/types/observation";
+import { dyrEmoji, hentNivå, hentTidsvekt, hentTimerSiden } from "../src/lib/aktivitet";
+import { calcBearing, type LatLng } from "../src/lib/geo";
+import { måneFase } from "../src/lib/maane";
 
 // ─── Konstanter ───────────────────────────────────────────────────────────────
 
@@ -47,49 +50,9 @@ const SESONGER: Record<string, Array<{ fraM: number; fraD: number; tilM: number;
 
 // ─── Hjelpefunksjoner ─────────────────────────────────────────────────────────
 
-function hentTimerSiden(tid: string): number {
-  const ms = new Date(tid).getTime();
-  if (!ms || Number.isNaN(ms)) return 999999;
-  return (Date.now() - ms) / (1000 * 60 * 60);
-}
-
-function hentTidsvekt(tid: string): number {
-  const t = hentTimerSiden(tid);
-  if (t <= 6)  return 5;
-  if (t <= 24) return 4;
-  if (t <= 72) return 3;
-  if (t <= 168) return 2;
-  return 1;
-}
-
-function hentNivå(score: number): string {
-  if (score >= 14) return "Høy";
-  if (score >= 6)  return "Medium";
-  return "Lav";
-}
-
 function prosentBredde(value: number, max: number): DimensionValue {
   if (max <= 0 || value <= 0) return "0%";
   return `${Math.min(Math.round((value / max) * 100), 100)}%` as DimensionValue;
-}
-
-// Månefase basert på synodisk syklus
-function måneFase(dato: Date): { navn: string; emoji: string; belysning: number } {
-  const referanse = new Date(2000, 0, 6, 18, 14, 0);
-  const synodisk  = 29.53058867;
-  const diff      = (dato.getTime() - referanse.getTime()) / (1000 * 60 * 60 * 24);
-  const fase      = ((diff % synodisk) + synodisk) % synodisk;
-  const p         = fase / synodisk;
-  const belysning = Math.round(50 * (1 - Math.cos(p * 2 * Math.PI)));
-
-  if (p < 0.03 || p > 0.97) return { navn: "Nymåne",        emoji: "🌑", belysning: 0 };
-  if (p < 0.22)              return { navn: "Voksende sigd", emoji: "🌒", belysning };
-  if (p < 0.28)              return { navn: "Halvmåne",      emoji: "🌓", belysning: 50 };
-  if (p < 0.47)              return { navn: "Voksende",      emoji: "🌔", belysning };
-  if (p < 0.53)              return { navn: "Fullmåne",      emoji: "🌕", belysning: 100 };
-  if (p < 0.72)              return { navn: "Minkende",      emoji: "🌖", belysning };
-  if (p < 0.78)              return { navn: "Halvmåne",      emoji: "🌗", belysning: 50 };
-  return                            { navn: "Minkende sigd", emoji: "🌘", belysning };
 }
 
 // Aktivitetsnivå nå for gitt art
@@ -141,10 +104,11 @@ function sesongsStatus(dyr: string, dato: Date): { åpen: boolean; label: string
   return { åpen: false, label: "Sesong avsluttet", farge: "#4D6858" };
 }
 
-// Prediker sannsynlig posisjonssone fra observasjoner
+// Prediker sannsynlig posisjonssone fra observasjoner, sett fra brukerens ståsted
 function predikterSone(
   obs: Observasjon[],
-  dyr: string
+  dyr: string,
+  brukerPos: LatLng | null
 ): { retningLabel: string; konfidensStr: string; antallObs: number } | null {
   const relevante = obs
     .filter((o) => o.dyr === dyr && o.latitude != null && o.longitude != null)
@@ -164,23 +128,20 @@ function predikterSone(
   const senterLat = sumLat / sumVekt;
   const senterLon = sumLon / sumVekt;
 
-  // Beregn retning fra brukerens perspektiv (simplifisert kompassretning)
-  const dLat = senterLat;
-  const dLon = senterLon;
+  // Beregn retning fra brukerens faktiske posisjon til sentrum av observasjonene
   const dirs = ["Nord", "Nordøst", "Øst", "Sørøst", "Sør", "Sørvest", "Vest", "Nordvest"];
-  const atan  = Math.atan2(dLon, dLat);
-  const idx   = Math.round(((atan * 180) / Math.PI + 360) % 360 / 45) % 8;
-  const retningLabel = dirs[idx] ?? "Ukjent";
+  let retningLabel = "Ukjent";
+  if (brukerPos) {
+    const bearing = calcBearing(brukerPos, { latitude: senterLat, longitude: senterLon });
+    const idx = Math.round(bearing / 45) % 8;
+    retningLabel = dirs[idx] ?? "Ukjent";
+  }
 
   // Konfidens basert på antall obs og ferskhet
   const konfidens    = Math.min(Math.round((sumVekt / (relevante.length * 5)) * 100), 95);
   const konfidensStr = `${konfidens}%`;
 
   return { retningLabel, konfidensStr, antallObs: relevante.length };
-}
-
-function dyrEmoji(dyr: string): string {
-  return dyr === "Rev" ? "🦊" : "🦌";
 }
 
 // ─── Komponent ────────────────────────────────────────────────────────────────
@@ -193,6 +154,7 @@ export default function StatistikkScreen() {
   const [feiltekst,     setFeiltekst]     = useState("");
   const [radiusKm,      setRadiusKm]      = useState<10 | 25 | 50>(50);
   const [vær,           setVær]           = useState<VærData | null>(null);
+  const [brukerPos,     setBrukerPos]     = useState<LatLng | null>(null);
 
   const måne = useMemo(() => måneFase(new Date()), []);
 
@@ -212,6 +174,7 @@ export default function StatistikkScreen() {
           const pos = await getUserPosition();
           if (!aktiv) return;
           if (!pos) { setFeiltekst("Fant ikke posisjon."); setLaster(false); return; }
+          setBrukerPos({ latitude: pos.latitude, longitude: pos.longitude });
 
           await syncUserLocation({ latitude: pos.latitude, longitude: pos.longitude });
 
@@ -308,7 +271,10 @@ export default function StatistikkScreen() {
     return Object.values(map).sort((a, b) => b.score - a.score).slice(0, 3);
   }, [filtrert]);
 
-  const prediksjon = useMemo(() => predikterSone(observasjoner, valgtDyr), [observasjoner, valgtDyr]);
+  const prediksjon = useMemo(
+    () => predikterSone(observasjoner, valgtDyr, brukerPos),
+    [observasjoner, valgtDyr, brukerPos]
+  );
   const aktNå      = useMemo(() => aktivitetNå(valgtDyr), [valgtDyr]);
   const neste      = useMemo(() => nesteToppunkt(valgtDyr), [valgtDyr]);
   const sesong     = useMemo(() => sesongsStatus(valgtDyr, new Date()), [valgtDyr]);

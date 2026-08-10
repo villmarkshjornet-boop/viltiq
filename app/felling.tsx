@@ -13,7 +13,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
-import { login } from "../src/services/auth";
 import {
   lagreFelling,
   slettFelling,
@@ -82,7 +81,6 @@ export default function FellingScreen() {
       let unsub: (() => void) | undefined;
       let aktiv = true;
       (async () => {
-        await login();
         const k = await getKvoter();
         if (aktiv) setKvoter(k);
         unsub = subscribeFellings(

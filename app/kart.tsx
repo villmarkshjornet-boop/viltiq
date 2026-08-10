@@ -39,6 +39,18 @@ import {
 } from "@/src/services/observations";
 import { getSettings } from "@/src/services/settings";
 import type { Observasjon } from "@/src/types/observation";
+import {
+  dyrEmoji,
+  hentRelativTid,
+  hentTidsvekt,
+} from "@/src/lib/aktivitet";
+import {
+  anonymiserPosisjon,
+  buildSector,
+  calcBearing,
+  distanceMeters,
+  movePoint,
+} from "@/src/lib/geo";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 
@@ -82,47 +94,13 @@ const retningListe = [
 
 // ─── Hjelpefunksjoner ─────────────────────────────────────────────────────────
 
-function getObsWeight(tid: string): number {
-  const hrs = (Date.now() - new Date(tid).getTime()) / (1000 * 60 * 60);
-  if (hrs <= 6)  return 5;
-  if (hrs <= 24) return 3;
-  if (hrs <= 72) return 2;
-  return 1;
-}
-
-function approxDistM(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number }
-): number {
-  const R    = 6371000;
-  const dLat = ((b.latitude  - a.latitude)  * Math.PI) / 180;
-  const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
-  const lat  = (a.latitude * Math.PI) / 180;
-  return Math.sqrt((dLat * R) ** 2 + (dLon * Math.cos(lat) * R) ** 2);
-}
-
-function movePoint(
-  lat: number,
-  lng: number,
-  bearingDeg: number,
-  distM: number
-): { latitude: number; longitude: number } {
-  const R   = 6371000;
-  const ang = (bearingDeg * Math.PI) / 180;
-  return {
-    latitude:  lat + ((distM / R) * (180 / Math.PI)) * Math.cos(ang),
-    longitude: lng + ((distM / R) * (180 / Math.PI) * Math.sin(ang))
-                   / Math.cos((lat * Math.PI) / 180),
-  };
-}
-
 function buildHeatZones(obs: Observasjon[]): HeatZone[] {
   const thresh = 0.003;
   const zones: HeatZone[] = [];
 
   for (const o of obs) {
     if (o.latitude == null || o.longitude == null) continue;
-    const w = getObsWeight(o.tid);
+    const w = hentTidsvekt(o.tid);
 
     const addPoint = (lat: number, lng: number, weight: number) => {
       const ex = zones.find(
@@ -241,44 +219,6 @@ function getZoneRadius(score: number): number {
   return 150;
 }
 
-function calcBearing(
-  from: { latitude: number; longitude: number },
-  to:   { latitude: number; longitude: number }
-): number {
-  const lat1 = (from.latitude  * Math.PI) / 180;
-  const lat2 = (to.latitude    * Math.PI) / 180;
-  const dLon = ((to.longitude - from.longitude) * Math.PI) / 180;
-  const y = Math.sin(dLon) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-}
-
-function buildSector(
-  center:     { latitude: number; longitude: number },
-  radiusM:    number,
-  bearingDeg: number,
-  spanDeg     = 110,
-  steps       = 24
-): Array<{ latitude: number; longitude: number }> {
-  const coords: Array<{ latitude: number; longitude: number }> = [center];
-  const start = bearingDeg - spanDeg / 2;
-  for (let i = 0; i <= steps; i++) {
-    coords.push(movePoint(center.latitude, center.longitude, start + (i / steps) * spanDeg, radiusM));
-  }
-  coords.push(center);
-  return coords;
-}
-
-function hentRelativTid(tid: string): string {
-  const ms   = Date.now() - new Date(tid).getTime();
-  const min  = Math.round(ms / 60000);
-  const hrs  = Math.round(ms / 3600000);
-  const days = Math.round(ms / 86400000);
-  if (min  < 60) return `for ${min}min siden`;
-  if (hrs  < 24) return `for ${hrs}t siden`;
-  return `for ${days}d siden`;
-}
-
 function normaliserScore(score: number): string {
   return Math.min((score * 10) / 15, 10).toFixed(1);
 }
@@ -289,10 +229,6 @@ function scoreEtikett(score: number): string {
   if (n >= 7.0) return "Bra";
   if (n >= 5.0) return "Greit";
   return "Lavt";
-}
-
-function dyrEmoji(dyr: string): string {
-  return dyr === "Rev" ? "🦊" : "🦌";
 }
 
 // ─── Hovedkomponent ───────────────────────────────────────────────────────────
@@ -465,13 +401,14 @@ export default function KartScreen() {
     if (!userLocation || sporpunktLaster) return;
     try {
       setSporpunktLaster(true);
+      const p = anonymiserPosisjon(userLocation.latitude, userLocation.longitude);
       await saveObservation({
         dyr:      valgtDyr,
         type:     "Spor",
         kommentar: "Sporpunkt fra kart",
         tid:      new Date().toISOString(),
-        latitude:  userLocation.latitude,
-        longitude: userLocation.longitude,
+        latitude:  p.latitude,
+        longitude: p.longitude,
         retning:  null,
       });
       Alert.alert("Sporpunkt lagret", `${dyrEmoji(valgtDyr)} ${valgtDyr} · Spor registrert her.`);
@@ -888,7 +825,7 @@ export default function KartScreen() {
             .filter((o) =>
               o.latitude != null &&
               o.longitude != null &&
-              approxDistM(selectedCamera, {
+              distanceMeters(selectedCamera, {
                 latitude:  o.latitude  as number,
                 longitude: o.longitude as number,
               }) <= 300
@@ -972,26 +909,36 @@ export default function KartScreen() {
                 )}
               </View>
 
-              <Pressable
-                onPress={() =>
-                  Alert.alert(
-                    "Slett kamera",
-                    `Vil du slette ${selectedCamera.name}?`,
-                    [
-                      { text: "Avbryt", style: "cancel" },
-                      {
-                        text: "Slett",
-                        style: "destructive",
-                        onPress: () => slettKamera(selectedCamera.id),
-                      },
-                    ]
-                  )
-                }
-                style={styles.deleteCameraBtn}
-              >
-                <Ionicons name="trash-outline" size={15} color="#F87171" />
-                <Text style={styles.deleteCameraBtnText}>Slett kamera</Text>
-              </Pressable>
+              <View style={styles.cameraPanelActions}>
+                <Pressable
+                  onPress={() => router.push(`/kamera/${selectedCamera.id}`)}
+                  style={styles.detailsCameraBtn}
+                >
+                  <Ionicons name="open-outline" size={15} color="#60A5FA" />
+                  <Text style={styles.detailsCameraBtnText}>Detaljer</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    Alert.alert(
+                      "Slett kamera",
+                      `Vil du slette ${selectedCamera.name}?`,
+                      [
+                        { text: "Avbryt", style: "cancel" },
+                        {
+                          text: "Slett",
+                          style: "destructive",
+                          onPress: () => slettKamera(selectedCamera.id),
+                        },
+                      ]
+                    )
+                  }
+                  style={[styles.deleteCameraBtn, { flex: 1 }]}
+                >
+                  <Ionicons name="trash-outline" size={15} color="#F87171" />
+                  <Text style={styles.deleteCameraBtnText}>Slett kamera</Text>
+                </Pressable>
+              </View>
             </ScrollView>
           );
         })()}
@@ -1245,6 +1192,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(96,165,250,0.12)",
     alignItems: "center", justifyContent: "center",
   },
+  cameraPanelActions: { flexDirection: "row", gap: 10 },
+  detailsCameraBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 12,
+    borderWidth: 1, borderColor: "rgba(96,165,250,0.25)", borderRadius: 14,
+    backgroundColor: "rgba(96,165,250,0.08)",
+  },
+  detailsCameraBtnText: { color: "#60A5FA", fontSize: 14, fontWeight: "800" },
   deleteCameraBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 6, paddingVertical: 12,

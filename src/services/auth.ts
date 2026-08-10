@@ -22,6 +22,3 @@ export async function loggUt() {
 export function getCurrentUser() {
   return auth.currentUser;
 }
-
-// Bakoverkompatibilitet — alle eksisterende skjermkall beholder denne
-export async function login() {}

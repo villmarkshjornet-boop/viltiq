@@ -5,10 +5,6 @@ import { View } from "react-native";
 import "react-native-reanimated";
 import { auth } from "../src/config/firebase";
 
-export const unstable_settings = {
-  anchor: "(tabs)",
-};
-
 function AuthGate({ children }: { children: React.ReactNode }) {
   const router   = useRouter();
   const segments = useSegments();
@@ -39,14 +35,14 @@ export default function RootLayout() {
   return (
     <AuthGate>
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
+        <Stack.Screen name="index"         options={{ headerShown: false }} />
         <Stack.Screen name="onboarding"    options={{ headerShown: false }} />
         <Stack.Screen name="logg"          options={{ headerShown: false }} />
         <Stack.Screen name="kart"          options={{ headerShown: false }} />
         <Stack.Screen name="statistikk"    options={{ headerShown: false }} />
         <Stack.Screen name="felling"       options={{ headerShown: false }} />
         <Stack.Screen name="innstillinger" options={{ headerShown: false }} />
-        <Stack.Screen name="modal"         options={{ presentation: "modal" }} />
+        <Stack.Screen name="kamera/[id]"   options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="light" />
     </AuthGate>

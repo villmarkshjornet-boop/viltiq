@@ -1,3 +1,5 @@
+import { vindRetningLabel } from "../lib/geo";
+
 export type Vær = {
   temperatur: number;
   vindHastighet: number; // m/s
@@ -11,10 +13,7 @@ export type VærData = Vær & {
   emoji: string;
 };
 
-export function vindRetningLabel(grader: number): string {
-  const dirs = ["N", "NØ", "Ø", "SØ", "S", "SV", "V", "NV"];
-  return dirs[Math.round(grader / 45) % 8];
-}
+export { vindRetningLabel };
 
 export function jaktVindRad(vindRetning: number): string {
   // Jegeren bør ha vinden i ansiktet — stå MOT vindretningen

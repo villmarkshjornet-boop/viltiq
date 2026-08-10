@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { Link } from "expo-router";
 import { useEffect, useState } from "react";
@@ -21,10 +20,10 @@ import {
   subscribeToMyObservations,
 } from "../src/services/observations";
 import type { Observasjon } from "../src/types/observation";
+import { anonymiserPosisjon } from "../src/lib/geo";
 
 const dyrListe = ["Rådyr", "Elg", "Hjort", "Rev"] as const;
 const typeListe = ["Sett dyr", "Spor", "Kamera"] as const;
-const OBSERVASJONER_KEY = "observasjoner";
 
 const retningListe = [
   { label: "NV", grader: 315 },
@@ -47,14 +46,6 @@ type StatusTone = "success" | "info" | "error";
 
 function dyrEmoji(d: string): string {
   return d === "Rev" ? "🦊" : "🦌";
-}
-
-function anonymiserPosisjon(lat: number, lon: number) {
-  const r = 0.002;
-  return {
-    latitude:  lat + (Math.random() - 0.5) * r,
-    longitude: lon + (Math.random() - 0.5) * r,
-  };
 }
 
 export default function LoggScreen() {
@@ -125,15 +116,6 @@ export default function LoggScreen() {
         tid, latitude, longitude, retning,
       });
 
-      // Lagre lokalt med firestoreId for eventuell sletting
-      const raw  = await AsyncStorage.getItem(OBSERVASJONER_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      list.push({
-        firestoreId, dyr: valgtDyr, type: valgtType,
-        kommentar: kommentar.trim(), tid, latitude, longitude, retning,
-      });
-      await AsyncStorage.setItem(OBSERVASJONER_KEY, JSON.stringify(list));
-
       if (!offline) setSisteId(firestoreId);
       setVisAngre(!offline);
       setStatusTone(offline ? "info" : "success");
@@ -155,11 +137,6 @@ export default function LoggScreen() {
     if (!sisteId) return;
     try {
       await deleteObservation(sisteId);
-      const raw = await AsyncStorage.getItem(OBSERVASJONER_KEY);
-      if (raw) {
-        const list = JSON.parse(raw).filter((o: any) => o.firestoreId !== sisteId);
-        await AsyncStorage.setItem(OBSERVASJONER_KEY, JSON.stringify(list));
-      }
       setVisAngre(false);
       setSisteId(null);
       setMelding("Observasjonen er slettet.");

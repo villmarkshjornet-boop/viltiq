@@ -12,40 +12,32 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import BottomDock from "../../components/BottomDock";
-import { login } from "../../src/services/auth";
+import BottomDock from "../components/BottomDock";
 import {
   getUserPosition,
   syncUserLocation,
   type UserPosition,
-} from "../../src/services/location";
+} from "../src/services/location";
 import {
   deleteObservation,
   subscribeToNearbyObservations,
-} from "../../src/services/observations";
-import { drainOfflineQueue } from "../../src/services/observations";
-import { getSettings } from "../../src/services/settings";
-import { hentVær, vindRetningLabel, type VærData } from "../../src/services/weather";
-import type { Observasjon } from "../../src/types/observation";
+} from "../src/services/observations";
+import { drainOfflineQueue } from "../src/services/observations";
+import { getSettings } from "../src/services/settings";
+import { hentVær, type VærData } from "../src/services/weather";
+import type { Observasjon } from "../src/types/observation";
+import {
+  dyrEmoji,
+  hentNivå,
+  hentRelativTid,
+  hentTidsvekt,
+  hentTimerSiden,
+  nivåFarge,
+} from "../src/lib/aktivitet";
+import { movePoint, vindRetningLabel } from "../src/lib/geo";
+import { måneFase } from "../src/lib/maane";
 
-// ─── Måne og sesong ───────────────────────────────────────────────────────────
-
-function måneFase(dato: Date): { emoji: string; navn: string; belysning: number } {
-  const ref      = new Date(2000, 0, 6, 18, 14, 0);
-  const synodisk = 29.53058867;
-  const diff     = (dato.getTime() - ref.getTime()) / 86400000;
-  const fase     = ((diff % synodisk) + synodisk) % synodisk;
-  const p        = fase / synodisk;
-  const belysning = Math.round(50 * (1 - Math.cos(p * 2 * Math.PI)));
-  if (p < 0.03 || p > 0.97) return { emoji: "🌑", navn: "Nymåne",        belysning: 0 };
-  if (p < 0.22)              return { emoji: "🌒", navn: "Voksende sigd", belysning };
-  if (p < 0.28)              return { emoji: "🌓", navn: "Halvmåne",      belysning: 50 };
-  if (p < 0.47)              return { emoji: "🌔", navn: "Voksende",      belysning };
-  if (p < 0.53)              return { emoji: "🌕", navn: "Fullmåne",      belysning: 100 };
-  if (p < 0.72)              return { emoji: "🌖", navn: "Minkende",      belysning };
-  if (p < 0.78)              return { emoji: "🌗", navn: "Halvmåne",      belysning: 50 };
-  return                            { emoji: "🌘", navn: "Minkende sigd", belysning };
-}
+// ─── Sesong ───────────────────────────────────────────────────────────────────
 
 const SESONGER: Record<string, Array<{ fraM: number; fraD: number; tilM: number; tilD: number }>> = {
   Rådyr:  [{ fraM: 8,  fraD: 10, tilM: 9,  tilD: 23 }, { fraM: 10, fraD: 1, tilM: 1, tilD: 31 }],
@@ -73,46 +65,6 @@ const dyrGruppe  = ["Rådyr", "Elg", "Hjort", "Rev"] as const;
 
 // ─── Hjelpefunksjoner ─────────────────────────────────────────────────────────
 
-function hentTimerSiden(tid: string): number {
-  const ms = new Date(tid).getTime();
-  if (!ms || Number.isNaN(ms)) return 999999;
-  return (Date.now() - ms) / (1000 * 60 * 60);
-}
-
-function hentTidsvekt(tid: string): number {
-  const t = hentTimerSiden(tid);
-  if (t <= 6)  return 5;
-  if (t <= 24) return 3;
-  if (t <= 72) return 2;
-  return 1;
-}
-
-function hentNivå(score: number): string {
-  if (score >= 20) return "Høy";
-  if (score >= 8)  return "Medium";
-  return "Lav";
-}
-
-function hentRelativTid(tid: string): string {
-  const ms   = Date.now() - new Date(tid).getTime();
-  const min  = Math.round(ms / 60000);
-  const hrs  = Math.round(ms / 3600000);
-  const days = Math.round(ms / 86400000);
-  if (min  < 60) return `for ${min}m siden`;
-  if (hrs  < 24) return `for ${hrs}t siden`;
-  return `for ${days}d siden`;
-}
-
-function predictPosition(lat: number, lng: number, bearingDeg: number, distM = 250) {
-  const R   = 6371000;
-  const ang = (bearingDeg * Math.PI) / 180;
-  return {
-    latitude:  lat + ((distM / R) * (180 / Math.PI)) * Math.cos(ang),
-    longitude: lng + ((distM / R) * (180 / Math.PI) * Math.sin(ang))
-                   / Math.cos((lat * Math.PI) / 180),
-  };
-}
-
 type Sone = { latitude: number; longitude: number; score: number; count: number };
 
 function leggTilSone(soner: Sone[], lat: number, lng: number, vekt: number, terskel = 0.003) {
@@ -137,21 +89,11 @@ function byggVarmesoner(data: Observasjon[]): Sone[] {
     const vekt = hentTidsvekt(obs.tid);
     leggTilSone(soner, obs.latitude, obs.longitude, vekt);
     if (obs.retning != null) {
-      const pred = predictPosition(obs.latitude, obs.longitude, obs.retning);
+      const pred = movePoint(obs.latitude, obs.longitude, obs.retning, 250);
       leggTilSone(soner, pred.latitude, pred.longitude, vekt * 0.6);
     }
   }
   return soner.sort((a, b) => b.score - a.score);
-}
-
-function dyrEmoji(dyr: string): string {
-  return dyr === "Rev" ? "🦊" : "🦌";
-}
-
-function nivåFarge(nivå: string): string {
-  if (nivå === "Høy")    return "#F97316";
-  if (nivå === "Medium") return "#EAB308";
-  return "#22C55E";
 }
 
 // ─── Komponent ────────────────────────────────────────────────────────────────
@@ -183,7 +125,6 @@ export default function HomeScreen() {
       try {
         setLaster(true);
         setFeiltekst("");
-        await login();
         const settings = await getSettings();
         setRadiusKm(settings.radiusKm);
         const pos: UserPosition | null = await getUserPosition();
