@@ -1,0 +1,37 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "observations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId",    "order": "ASCENDING"  },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fellings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jaktlagId", "order": "ASCENDING"  },
+        { "fieldPath": "dato",      "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fellings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid",  "order": "ASCENDING"  },
+        { "fieldPath": "dato", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cameras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId",    "order": "ASCENDING"  },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

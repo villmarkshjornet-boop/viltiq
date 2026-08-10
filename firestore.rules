@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Hjelpefunksjoner ────────────────────────────────────────────────────
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Sjekk om den innloggede brukeren er medlem av et jaktlag
+    function isMember(jaktlagId) {
+      return isAuth() && exists(
+        /databases/$(database)/documents/jaktlag/$(jaktlagId)/members/$(request.auth.uid)
+      );
+    }
+
+    // ── Observasjoner ────────────────────────────────────────────────────────
+    // Leses av alle innloggede (geohash-spørringer kan ikke filtreres per jaktlag
+    // på regel-nivå — jaktlag-filtrering skjer klient-side).
+    match /observations/{id} {
+      allow read:   if isAuth();
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow update: if false;
+    }
+
+    // ── Viltkameraer ────────────────────────────────────────────────────────
+    // Kun eieren kan lese og endre.
+    match /cameras/{id} {
+      allow read:   if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Felling ─────────────────────────────────────────────────────────────
+    // Eier kan alltid lese. Jaktlag-medlemmer kan lese jaktlagets fellinger.
+    match /fellings/{id} {
+      allow read: if isAuth() && (
+        resource.data.uid == request.auth.uid ||
+        (resource.data.jaktlagId != null && isMember(resource.data.jaktlagId))
+      );
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAuth() && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // ── Jaktlag ─────────────────────────────────────────────────────────────
+    // Alle innloggede kan lese (nødvendig for å finne lag via invitasjonskode).
+    // Kun lederen kan endre jaktlaget.
+    match /jaktlag/{jaktlagId} {
+      allow read:   if isAuth();
+      allow create: if isAuth() && request.resource.data.lederUid == request.auth.uid;
+      allow update: if isAuth() && resource.data.lederUid == request.auth.uid;
+      allow delete: if isAuth() && resource.data.lederUid == request.auth.uid;
+
+      // Medlemmer
+      match /members/{uid} {
+        allow read:   if isMember(jaktlagId);
+        allow create: if isAuth() && uid == request.auth.uid;
+        allow delete: if isAuth() && (
+          uid == request.auth.uid ||
+          get(/databases/$(database)/documents/jaktlag/$(jaktlagId)).data.lederUid == request.auth.uid
+        );
+        allow update: if false;
+      }
+
+      // Kvoter — kun jaktlag-medlemmer
+      match /kvoter/{docId} {
+        allow read, write: if isMember(jaktlagId);
+      }
+    }
+
+    // ── Brukerposisjoner ────────────────────────────────────────────────────
+    // Brukeren skriver kun sin egen posisjon.
+    // Lesing: eget dokument, eller jaktlag-kollega (jaktlagId-felt matcher og brukeren er medlem).
+    match /user_locations/{uid} {
+      allow write: if isAuth() && uid == request.auth.uid;
+      allow read:  if isAuth() && (
+        uid == request.auth.uid ||
+        (resource.data.jaktlagId != null && isMember(resource.data.jaktlagId))
+      );
+    }
+
+    // ── Push-innstillinger ──────────────────────────────────────────────────
+    // Kun eieren leser og skriver.
+    match /users/{uid}/{document=**} {
+      allow read, write: if isAuth() && uid == request.auth.uid;
+    }
+  }
+}
