@@ -925,8 +925,15 @@ export default function KartScreen() {
               </Marker>
             )}
 
-            {/* Observasjonsmarkører — dyr sett (manuelt/kamera) */}
-            {dyrObsMedGps.filter((o) => !bestZone || o.latitude !== bestZone.latitude).map((o) => (
+            {/* Observasjonsmarkører — dyr sett (manuelt/kamera). Filtrerer
+                bort observasjonen som "sådde" beste-sonen (bestZone.id er
+                id-en til den første observasjonen buildHeatZones klynget
+                inn i sonen), slik at den ikke også vises som en vanlig pin
+                rett under den store elg-emoji-markøren. Sammenlignet
+                tidligere kun breddegrad mot bestZone sin VEKTEDE
+                GJENNOMSNITTSPOSISJON — som i praksis nesten aldri stemte
+                eksakt, og ga en dobbel-pin de fleste steder. */}
+            {dyrObsMedGps.filter((o) => !bestZone || o.id !== bestZone.id).map((o) => (
               <Marker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}

@@ -282,20 +282,28 @@ export const LeafletMapView = forwardRef<MapViewHandle, MapViewProps>(function L
  * eneste ankerverdien brukt med egendefinerte barn noe sted i appen.
  */
 export function Marker({ coordinate, title, pinColor, onPress, children }: MarkerProps) {
+  // renderToStaticMarkup selv er billig å kjøre på hver render (liten
+  // React-tre → streng) — det vi faktisk vil unngå å gjøre unødvendig ofte
+  // er å bygge en NY L.divIcon-instans (Leaflet bytter ut markør-DOM-noden
+  // ved hver ny ikon-instans). Derfor beregnes HTML-strengen på hver
+  // render, mens selve divIcon-objektet memoiseres på INNHOLDET
+  // (html-strengen), ikke bare på om det finnes barn. Uten dette (tidligere
+  // `[pinColor, !!children]`) oppdaterte f.eks. ikke kameraets
+  // retningspil-rotasjon seg live når kameraet ble redigert — komponenten
+  // beholdt sitt første, cachede ikon helt til den ble unmountet/remountet.
+  const childrenHtml = children ? renderToStaticMarkup(<>{children}</>) : null;
+
   const icon = useMemo(() => {
-    if (children) {
+    if (childrenHtml != null) {
       return L.divIcon({
-        html: `<div style="transform:translate(-50%,-100%)">${renderToStaticMarkup(
-          <>{children}</>
-        )}</div>`,
+        html: `<div style="transform:translate(-50%,-100%)">${childrenHtml}</div>`,
         className: "viltiq-custom-marker-icon",
         iconSize: [0, 0],
         iconAnchor: [0, 0],
       });
     }
     return defaultPinIcon(pinColor || "#2CC36B");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinColor, !!children]);
+  }, [childrenHtml, pinColor]);
 
   return (
     <LeafletMarker
