@@ -114,25 +114,58 @@ Prosjektet er forberedt, men ingenting er sendt inn:
   eksporterings-samsvar for kryptering) er IKKE satt opp — det er et eget
   steg når dere faktisk skal til TestFlight/App Store, ikke gjort her.
 
-## 5. Kritisk web-funn og fiks: react-native-maps
+## 5. Web-kart: Kartverket/Geonorge via Leaflet
 
-`app/kart.tsx` og `app/kamera/[id].tsx` importerte `react-native-maps`
-direkte. Dette biblioteket har **ingen web-implementasjon** — det importerer
-React Native-interne moduler (`codegenNativeCommands`) som ikke finnes i
-nettleser. Resultat: `npx expo export -p web` **feilet fullstendig** (ikke
-degradert — hele bygget krasjet) før denne økten.
+`app/kart.tsx` og `app/kamera/[id].tsx` importerte opprinnelig
+`react-native-maps` direkte. Det biblioteket har **ingen web-implementasjon**
+— `npx expo export -p web` **feilet fullstendig** (hele bygget krasjet) inntil
+dette ble løst. Begge filene importerer fortsatt kartet via
+`components/MapView` i stedet for `"react-native-maps"` direkte:
+- `components/MapView.tsx` — tynn wrapper rundt det ekte biblioteket. Metro
+  velger denne for iOS/Android. **Ingen endring i native oppførsel** (native
+  bruker fortsatt Google-provideren som før).
+- `components/MapView.web.tsx` / `components/LeafletMapImpl.tsx` — et ekte
+  webkart basert på **Leaflet** og **Kartverket/Geonorge sine åpne WMTS/WMS-
+  tjenester** (topografisk kart som bakgrunn, matrikkelkart som valgfritt
+  eiendomsgrense-overlegg). Verifisert med en faktisk innlogget nettleser-
+  økt (Playwright): alle karfliser lastes fra `cache.kartverket.no`, ingen
+  konsollfeil.
 
-**Fiks**: begge filene importerer nå kartet via `components/MapView` i
-stedet for `"react-native-maps"` direkte:
-- `components/MapView.tsx` — ren videreeksport av det ekte biblioteket.
-  Metro velger denne for iOS/Android. **Ingen endring i native oppførsel.**
-- `components/MapView.web.tsx` — viser en tydelig "Kart er ikke tilgjengelig
-  i nettleser ennå"-boks på web i stedet for å krasje. Standard Expo/Metro-
-  mønster for plattform-spesifikke filer.
+**Hvorfor Leaflet** (fremfor MapLibre GL eller OpenLayers): Kartverket/
+Geonorge sine tjenester er klassisk WMTS/WMS (ikke vektor-tiles), og
+Leaflets `TileLayer`/`WMSTileLayer` støtter dette mønsteret direkte uten
+noe limkode. `react-leaflet` sin deklarative JSX-modell
+(`<Marker>`/`<Circle>`/`<Polygon>` som barn) matcher nesten 1:1 hvordan
+`kart.tsx` allerede brukte react-native-maps, som holdt selve wrapperen
+liten. Ingen API-nøkkel/konto kreves noe sted i stacken (i motsetning til
+Mapbox GL), konsistent med å bruke åpne norske offentlige data hele veien.
+Kartfliser/WMS-bilder lastes via vanlige `<img>`-elementer, ikke
+`fetch()+canvas`, så CORS er ikke en blokkering for selve visningen.
 
-Kartfunksjonen (plassere viltkamera, langtrykk, markører) er dermed reelt
-**kun tilgjengelig på iOS/Android**, ikke i nettleserversjonen. Se avsnitt 6
-for full oversikt.
+**Viktig arkitekturdetalj (SSR)**: Leaflet berører `window` idet modulen
+lastes, noe som krasjet Node under Expo Router sin statiske pre-rendering
+(`ReferenceError: window is not defined` — verifisert direkte). Løst ved at
+`MapView.web.tsx` ALDRI importerer `leaflet`/`react-leaflet` statisk — den
+faktiske implementasjonen (`LeafletMapImpl.tsx`) lastes kun via en dynamisk
+`import()` inni `useEffect`, som aldri kjører under SSR. Bekreftet i
+byggeloggen: `LeafletMapImpl` havner i en egen, separat lastet chunk
+(~350 kB), ikke i hovedbunten.
+
+**Tjenester brukt** (verifisert direkte mot GetCapabilities, ikke gjettet):
+- **Topo WMTS**: `cache.kartverket.no/v1/wmts/1.0.0/topo/...` — gratis, ingen
+  tilgangsbegrensning per capabilities-dokumentet.
+- **Matrikkelkart WMS** (eiendomsgrenser): `wms.geonorge.no/skwms1/wms.matrikkel`,
+  layer `eiendomsgrense`. Viser KUN grensegeometri — et WMS GetMap-bilde
+  inneholder aldri eier-/personopplysninger. `wms.matrikkel.v1` (med
+  `.v1`-suffiks) er en ANNEN, autentisert/IP-sperret tjeneste — ikke bruk den.
+- **Ortofoto/flyfoto**: **IKKE tilgjengelig som åpen tjeneste lenger.** Norge
+  i bilder stengte sine åpne WMTS/WMS-tjenester for offentligheten i mars
+  2026 — tilgang er nå forbeholdt Norge digitalt-parter. "Satellitt"-valget
+  i kartvelgeren viser derfor OpenStreetMap Standard i stedet, med en synlig
+  merknad i kartet om dette. Merk: `tile.openstreetmap.org` sin brukspolicy
+  er ikke ment for tyngre produksjonstrafikk — vurder en dedikert leverandør
+  (MapTiler, Stadia Maps e.l.) dersom "Satellitt" skal være pålitelig i
+  skarp drift, ikke bare til utvikling/test.
 
 ## 6. Hva fungerer hvor
 
@@ -140,14 +173,16 @@ for full oversikt.
 |---|---|---|
 | Innlogging (Firebase Auth) | ✅ | ✅ |
 | Firestore (observasjoner, jaktlag, felling, kvoter) | ✅ | ✅ |
-| Kart (react-native-maps) | ❌ Viser forklarende fallback-tekst | ✅ |
+| Kart, grunnlag (Kartverket topo / OSM Standard) | ✅ | ✅ (Google Maps-provider) |
+| Kart, eiendomsgrenser (matrikkelkart WMS) | ✅ | ❌ ikke koblet på native i denne omgangen |
+| Kart, kameraretning/sektor/varmesoner/prediksjonssoner | ✅ | ✅ |
 | GPS/lokasjon (expo-location) | ⚠️ Fungerer via nettleserens Geolocation API, men mindre nøyaktig og krever HTTPS + brukersamtykke i nettleseren | ✅ |
 | Push-varsler (expo-notifications) | ❌ Web push er en helt annen mekanisme enn Expo sin mobil-push; ikke satt opp | ✅ (krever APNs-nøkkel for iOS, se avsnitt 3) |
 | Haptisk feedback (expo-haptics) | ⚠️ No-op (ingen feil, bare ingen vibrasjon) | ✅ |
 | Cloud Functions (push-utsendelse) | N/A (server-side, plattform-uavhengig) | N/A |
 
-**Ikke fjernet noe fra native for å få web til å fungere** — kart-fallbacken
-er kun en `.web.tsx`-fil som native-buildene aldri ser.
+**Ikke fjernet noe fra native for å få web til å fungere** — hele
+Leaflet-implementasjonen ligger i `.web.tsx`-filer native-buildene aldri ser.
 
 ## 7. Firebase — dev/prod-strategi
 

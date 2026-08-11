@@ -19,7 +19,7 @@ import MapView, {
   Polygon,
   PROVIDER_GOOGLE,
 } from "@/components/MapView";
-import type { LongPressEvent } from "@/components/MapView";
+import type { LongPressEvent, MapViewHandle } from "@/components/MapView";
 
 import RetningVelger from "@/components/RetningVelger";
 import {
@@ -320,7 +320,7 @@ export default function KartScreen() {
     filter?:   string;
   }>();
   const router = useRouter();
-  const mapRef = useRef<MapView | null>(null);
+  const mapRef = useRef<MapViewHandle | null>(null);
 
   const [loading,      setLoading]      = useState(true);
   const [savingPin,    setSavingPin]    = useState(false);
@@ -338,6 +338,7 @@ export default function KartScreen() {
   const [visKameraer,    setVisKameraer]    = useState(true);
   const [visAktiveSoner, setVisAktiveSoner] = useState(false);
   const [visSporAnnet,   setVisSporAnnet]   = useState(true);
+  const [visEiendomsgrenser, setVisEiendomsgrenser] = useState(false);
   const [medlsPosisjon,  setMedlsPosisjon]  = useState<MedlemPosisjon[]>([]);
 
   // ── Langtrykk-meny og nye punkter ──
@@ -824,6 +825,7 @@ export default function KartScreen() {
             }}
             showsUserLocation
             showsMyLocationButton={false}
+            showPropertyBoundaries={visEiendomsgrenser}
             onLongPress={handleMapLongPress}
             onPress={() => { setSelectedCamera(null); filterOpenSet(false); }}
           >
@@ -1093,6 +1095,14 @@ export default function KartScreen() {
               onPress={() => setVisSporAnnet((v) => !v)}
             >
               <Ionicons name="layers-outline" size={20} color={visSporAnnet ? "#FCD34D" : "#D1FAE5"} />
+            </Pressable>
+
+            {/* Vis/skjul eiendomsgrenser (Kartverket/Geonorge matrikkelkart — kun web) */}
+            <Pressable
+              style={[styles.floatBtn, visEiendomsgrenser && styles.floatBtnActiveOrange]}
+              onPress={() => setVisEiendomsgrenser((v) => !v)}
+            >
+              <Ionicons name="map-outline" size={20} color={visEiendomsgrenser ? "#FB923C" : "#D1FAE5"} />
             </Pressable>
 
             {/* Prediksjon (48t) */}
@@ -1841,6 +1851,7 @@ const styles = StyleSheet.create({
   floatBtnActiveBlue:  { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "#3B82F6" },
   floatBtnActiveCyan:  { backgroundColor: "rgba(34,211,238,0.18)", borderColor: "#22D3EE" },
   floatBtnActiveYellow: { backgroundColor: "rgba(252,211,77,0.18)", borderColor: "#FCD34D" },
+  floatBtnActiveOrange: { backgroundColor: "rgba(251,146,60,0.18)", borderColor: "#FB923C" },
   locateBtn: {
     position: "absolute", right: 14, top: "38%",
     width: 50, height: 50, borderRadius: 25,
