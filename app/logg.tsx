@@ -21,6 +21,7 @@ import {
 } from "../src/services/observations";
 import type { Observasjon } from "../src/types/observation";
 import { anonymiserPosisjon } from "../src/lib/geo";
+import { dyrEmoji } from "../src/lib/aktivitet";
 
 const dyrListe = ["Rådyr", "Elg", "Hjort", "Rev"] as const;
 const typeListe = ["Sett dyr", "Spor", "Kamera"] as const;
@@ -43,10 +44,6 @@ const kompassGrid: (typeof retningListe[0] | null)[][] = [
 ];
 
 type StatusTone = "success" | "info" | "error";
-
-function dyrEmoji(d: string): string {
-  return d === "Rev" ? "🦊" : "🦌";
-}
 
 export default function LoggScreen() {
   const [valgtDyr,  setValgtDyr]  = useState<string>("Rådyr");

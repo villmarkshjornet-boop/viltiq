@@ -9,11 +9,11 @@ import {
     StyleSheet,
     Switch,
     Text,
+    TextInput,
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
-import { TextInput } from "react-native";
 import { auth } from "../src/config/firebase";
 import { loggUt } from "../src/services/auth";
 import {
@@ -156,7 +156,8 @@ export default function InnstillingerScreen() {
 
   async function persist(
     next: AppSettings,
-    nextPushToken: string | null = pushToken
+    nextPushToken: string | null = pushToken,
+    successMessage = "Innstillinger lagret."
   ) {
     try {
       setSaving(true);
@@ -172,7 +173,7 @@ export default function InnstillingerScreen() {
       setSettings(next);
       setPushToken(nextPushToken);
       setMessageTone("success");
-      setMessage("Innstillinger lagret.");
+      setMessage(successMessage);
     } catch (error: any) {
       setMessageTone("error");
       setMessage(error?.message || "Kunne ikke lagre innstillinger.");
@@ -193,32 +194,18 @@ export default function InnstillingerScreen() {
       return;
     }
 
+    setSaving(true);
+    setMessage("");
     try {
-      setSaving(true);
-      setMessage("");
-
       const token = await registerForPushNotificationsAsync();
-
-      const next = {
-        ...settings,
-        notificationsEnabled: true,
-      };
-
-      await saveSettings(next);
-      await syncUserPushSettingsToFirestore({
-        radiusKm: next.radiusKm,
-        notificationsEnabled: true,
-        expoPushToken: token,
-      });
-
-      setSettings(next);
-      setPushToken(token);
-      setMessageTone("success");
-      setMessage("Pushvarsler er aktivert.");
+      await persist(
+        { ...settings, notificationsEnabled: true },
+        token,
+        "Pushvarsler er aktivert."
+      );
     } catch (error: any) {
       setMessageTone("error");
       setMessage(error?.message || "Kunne ikke aktivere pushvarsler.");
-    } finally {
       setSaving(false);
     }
   }
