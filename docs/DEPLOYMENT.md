@@ -102,9 +102,12 @@ Ingen av disse kan gjøres herfra — de krever innlogging jeg ikke har tilgang 
 Prosjektet er forberedt, men ingenting er sendt inn:
 - `eas.json` sin `production`-profil bygger allerede riktig (`autoIncrement`,
   ikke simulator).
-- `eas.json` sin `submit.production.ios` har tomme felt (`appleId`,
-  `ascAppId`, `appleTeamId`) — du må fylle disse inn selv (eller la
-  `eas submit` spørre interaktivt) når du faktisk er klar for TestFlight.
+- `eas.json` sin `submit.production` har ingen `ios`-blokk ennå (tomme
+  `appleId`/`ascAppId`/`appleTeamId`-felt gjorde `eas init` feile med
+  "eas.json is not valid", og ble fjernet — se `git log`). Når du har en
+  Apple Developer-konto, kjør `eas submit --platform ios` og la den spørre
+  deg interaktivt (den skriver gyldige verdier inn i `eas.json` selv), i
+  stedet for å legge inn tomme placeholder-felt på nytt.
 - Når du er klar (ikke nå): `eas build --platform ios --profile production`,
   deretter `eas submit --platform ios`.
 - App Store Connect-oppføring (skjermbilder, personvernerklæring-lenke,
