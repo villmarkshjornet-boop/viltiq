@@ -321,6 +321,15 @@ export default function KartScreen() {
   }>();
   const router = useRouter();
   const mapRef = useRef<MapViewHandle | null>(null);
+  // På web kobles mapRef til den ekte imperative kart-instansen først når
+  // Leaflet er ferdig lastet asynkront (se components/MapView.web.tsx) —
+  // ikke synkront som på native. Uten dette flagget i avhengighetslisten
+  // under kan fokuseringseffekten rekke å kjøre (og stille gjøre ingenting,
+  // siden mapRef.current fortsatt er null) før kartet faktisk er klart, og
+  // kjører aldri på nytt siden ingen av de andre avhengighetene endres
+  // igjen — dyplenking (f.eks. "Vis i kart" fra "beste område" på
+  // hjemskjermen) ville da svikte stille på web.
+  const [mapReady, setMapReady] = useState(false);
 
   const [loading,      setLoading]      = useState(true);
   const [savingPin,    setSavingPin]    = useState(false);
@@ -383,14 +392,22 @@ export default function KartScreen() {
     let unsubCam: (() => void) | null = null;
     let unsubPts: (() => void) | null = null;
     let unsubLoc: (() => void) | null = null;
+    // Uten denne vakten: hvis skjermen unmountes mens en av await-ene under
+    // fortsatt venter, blir cleanup-funksjonen kalt FØR unsub*-variablene er
+    // satt (de er fortsatt null på det tidspunktet) — lytterne som opprettes
+    // etter det lekker for resten av appens levetid. Samme mønster som
+    // allerede brukt riktig i app/kamera/[id].tsx og observations.ts.
+    let aktiv = true;
 
     (async () => {
       try {
         setLoading(true);
         const settings = await getSettings();
+        if (!aktiv) return;
         setRadiusKm(settings.radiusKm);
 
         const aktivtJaktlagId = await getAktivtJaktlagId();
+        if (!aktiv) return;
 
         // Kamera- og kartpunktlyttere (Firestore) — egne + jaktlagets
         try {
@@ -412,6 +429,7 @@ export default function KartScreen() {
         }
 
         const perm = await Location.requestForegroundPermissionsAsync();
+        if (!aktiv) return;
         if (perm.status !== "granted") {
           setErrorText("Lokasjon ble ikke godkjent.");
           setLoading(false);
@@ -421,9 +439,11 @@ export default function KartScreen() {
         const pos = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
+        if (!aktiv) return;
         const center = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         setUserLocation(center);
         await syncUserLocation(center);
+        if (!aktiv) return;
 
         unsubObs = subscribeToNearbyObservations(
           { center, radiusKm: settings.radiusKm },
@@ -441,12 +461,14 @@ export default function KartScreen() {
           }
         );
       } catch (e: any) {
+        if (!aktiv) return;
         setErrorText(e?.message || "Noe gikk galt.");
         setLoading(false);
       }
     })();
 
     return () => {
+      aktiv = false;
       if (unsubObs) unsubObs();
       if (unsubCam) unsubCam();
       if (unsubPts) unsubPts();
@@ -789,6 +811,7 @@ export default function KartScreen() {
 
   useEffect(() => {
     if (!mapRef.current || !userLocation) return;
+    void mapReady; // trigger re-kjøring når web-kartets ref faktisk kobles til (se kommentar ved mapReady)
     const fLat = params.focusLat ? Number(params.focusLat) : null;
     const fLng = params.focusLng ? Number(params.focusLng) : null;
     if (fLat && fLng && !Number.isNaN(fLat) && !Number.isNaN(fLng)) {
@@ -802,7 +825,7 @@ export default function KartScreen() {
         600
       );
     }
-  }, [params.focusLat, params.focusLng, userLocation]);
+  }, [params.focusLat, params.focusLng, userLocation, mapReady]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -813,7 +836,7 @@ export default function KartScreen() {
         {/* ── Kart ── */}
         {userLocation ? (
           <MapView
-            ref={(r) => { mapRef.current = r; }}
+            ref={(r) => { mapRef.current = r; if (r) setMapReady(true); }}
             provider={PROVIDER_GOOGLE}
             style={StyleSheet.absoluteFill}
             mapType={mapMode}
