@@ -8,7 +8,7 @@ export type Nivå = "Høy" | "Medium" | "Lav";
 /** Timer siden et ISO-tidspunkt. Ugyldig/tomt tidspunkt regnes som uendelig gammelt. */
 export function hentTimerSiden(tid: string): number {
   const ms = new Date(tid).getTime();
-  if (!ms || Number.isNaN(ms)) return Number.POSITIVE_INFINITY;
+  if (Number.isNaN(ms)) return Number.POSITIVE_INFINITY;
   return (Date.now() - ms) / (1000 * 60 * 60);
 }
 
