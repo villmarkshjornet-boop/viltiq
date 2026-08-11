@@ -18,7 +18,3 @@ export async function loggInn(epost: string, passord: string) {
 export async function loggUt() {
   await signOut(auth);
 }
-
-export function getCurrentUser() {
-  return auth.currentUser;
-}
