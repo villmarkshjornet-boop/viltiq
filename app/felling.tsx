@@ -3,6 +3,7 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   Alert,
+  type DimensionValue,
   Modal,
   Pressable,
   ScrollView,
@@ -38,8 +39,6 @@ function formaterDato(iso: string) {
   return d.toLocaleDateString("nb-NO", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-type Chip<T extends string> = { val: T; label: string };
-
 function ChipRow<T extends string>({
   vals, selected, onSelect,
 }: { vals: readonly T[]; selected: T; onSelect: (v: T) => void }) {
@@ -66,7 +65,6 @@ export default function FellingScreen() {
   const [modalVis,    setModalVis]    = useState(false);
   const [kvoteModal,  setKvoteModal]  = useState(false);
   const [lagrer,      setLagrer]      = useState(false);
-  const [redigertDyr, setRedigertDyr] = useState("");
 
   // Skjema-state
   const [valgtDyr,   setValgtDyr]   = useState("Rådyr");
@@ -118,7 +116,8 @@ export default function FellingScreen() {
         kommentar: kommentar.trim(),
       });
       setModalVis(false);
-    } catch {
+    } catch (e) {
+      console.log("lagre felling-feil:", e);
       Alert.alert("Feil", "Klarte ikke lagre felling. Prøv igjen.");
     } finally {
       setLagrer(false);
@@ -131,7 +130,17 @@ export default function FellingScreen() {
       `Slette ${f.dyr} felt ${formaterDato(f.dato)}?`,
       [
         { text: "Avbryt", style: "cancel" },
-        { text: "Slett", style: "destructive", onPress: () => slettFelling(f.id) },
+        {
+          text: "Slett",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await slettFelling(f.id);
+            } catch (e: any) {
+              Alert.alert("Feil", e?.message || "Klarte ikke slette fellingen.");
+            }
+          },
+        },
       ]
     );
   }
@@ -201,7 +210,7 @@ export default function FellingScreen() {
               <View key={dyr} style={s.kvoteRad}>
                 <Text style={s.kvoteDyr}>{dyrEmoji(dyr)} {dyr}</Text>
                 <View style={s.kvoteBarWrap}>
-                  <View style={[s.kvoteBar, { width: `${Math.round(pst * 100)}%` as any, backgroundColor: over ? "#F87171" : "#2CC36B" }]} />
+                  <View style={[s.kvoteBar, { width: `${Math.round(pst * 100)}%` as DimensionValue, backgroundColor: over ? "#F87171" : "#2CC36B" }]} />
                 </View>
                 <Text style={[s.kvoteTall, over && s.kvoteTallOver]}>
                   {felt}/{kvote > 0 ? kvote : "—"}

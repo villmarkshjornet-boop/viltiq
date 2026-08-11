@@ -333,7 +333,13 @@ export default function LoggScreen() {
                               {
                                 text: "Slett",
                                 style: "destructive",
-                                onPress: () => deleteObservation(obs.id),
+                                onPress: async () => {
+                                  try {
+                                    await deleteObservation(obs.id);
+                                  } catch (e: any) {
+                                    Alert.alert("Feil", e?.message || "Klarte ikke slette observasjonen.");
+                                  }
+                                },
                               },
                             ]
                           )

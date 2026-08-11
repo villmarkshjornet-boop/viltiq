@@ -198,7 +198,8 @@ export default function StatistikkScreen() {
               setLaster(false);
             }
           );
-        } catch {
+        } catch (e) {
+          console.log("init-feil:", e);
           if (!aktiv) return;
           setFeiltekst("Noe gikk galt ved oppstart.");
           setLaster(false);
