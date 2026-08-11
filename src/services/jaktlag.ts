@@ -93,8 +93,13 @@ export async function bliMedIJaktlag(kode: string): Promise<Jaktlag> {
     opprettet:  data.opprettet?.toDate?.()?.toISOString() ?? "",
   };
 
+  // invitKode sendes med som del av selve skrivingen slik at Firestore-
+  // regelen kan bevise server-side at brukeren faktisk oppga riktig kode
+  // for DETTE laget (get() på jaktlag-dokumentet sammenlignes mot denne
+  // verdien) — uten dette kunne enhver innlogget bruker meldt seg inn i et
+  // hvilket som helst jaktlag uten å kjenne koden.
   await setDoc(doc(db, "jaktlag", d.id, "members", uid), {
-    uid, epost, rolle: "jeger", blagtTil: serverTimestamp(),
+    uid, epost, rolle: "jeger", blagtTil: serverTimestamp(), invitKode: data.invitKode,
   });
 
   await setAktivtJaktlagId(d.id);

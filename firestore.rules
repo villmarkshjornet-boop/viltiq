@@ -25,12 +25,17 @@ service cloud.firestore {
         isMember(resource.data.jaktlagId)
       );
       // Kameraobservasjoner må arve nøyaktig samme jaktlagId som kameraet de
-      // er koblet til (§16 — hindrer at en kameraobservasjon "hvitvaskes" til
-      // et annet jaktlag enn kameraet faktisk tilhører).
+      // er koblet til (hindrer at en kameraobservasjon "hvitvaskes" til et
+      // annet jaktlag enn kameraet faktisk tilhører). Manuelle observasjoner
+      // (cameraId == null) må ha jaktlagId == "" (offentlig) eller brukeren
+      // må faktisk være medlem av laget den påstår å tilhøre — uten dette
+      // kunne en hvilken som helst innlogget bruker plantet falske
+      // observasjoner i et vilkårlig jaktlags feed.
       allow create: if isAuth() && request.resource.data.userId == request.auth.uid && (
-        request.resource.data.cameraId == null ||
-        get(/databases/$(database)/documents/cameras/$(request.resource.data.cameraId)).data.jaktlagId
-          == request.resource.data.jaktlagId
+        request.resource.data.cameraId == null
+          ? (request.resource.data.jaktlagId == "" || isMember(request.resource.data.jaktlagId))
+          : get(/databases/$(database)/documents/cameras/$(request.resource.data.cameraId)).data.jaktlagId
+              == request.resource.data.jaktlagId
       );
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
       allow update: if false;
@@ -45,7 +50,12 @@ service cloud.firestore {
         resource.data.userId == request.auth.uid ||
         (resource.data.jaktlagId != null && resource.data.jaktlagId != "" && isMember(resource.data.jaktlagId))
       );
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      // Må enten være et offentlig kamera (jaktlagId == "") eller opprettes
+      // av et faktisk medlem av laget det tilordnes — ellers kunne enhver
+      // innlogget bruker registrert et kamera "på" et vilkårlig jaktlag.
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid && (
+        request.resource.data.jaktlagId == "" || isMember(request.resource.data.jaktlagId)
+      );
       allow update: if isAuth() && (
         resource.data.userId == request.auth.uid ||
         (resource.data.jaktlagId != null && resource.data.jaktlagId != "" && isMember(resource.data.jaktlagId))
@@ -61,7 +71,9 @@ service cloud.firestore {
         resource.data.jaktlagId == "" ||
         isMember(resource.data.jaktlagId)
       );
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid && (
+        request.resource.data.jaktlagId == "" || isMember(request.resource.data.jaktlagId)
+      );
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
       allow update: if false;
     }
@@ -73,7 +85,12 @@ service cloud.firestore {
         resource.data.uid == request.auth.uid ||
         (resource.data.jaktlagId != null && isMember(resource.data.jaktlagId))
       );
-      allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
+      // jaktlagId skrives nå alltid som "" (offentlig) eller et ekte lag-id
+      // (aldri utelatt — se lagreFelling i felling.ts), så samme mønster som
+      // observations/cameras/mapPoints kan brukes her også.
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid && (
+        request.resource.data.jaktlagId == "" || isMember(request.resource.data.jaktlagId)
+      );
       allow delete: if isAuth() && resource.data.uid == request.auth.uid;
       allow update: if false;
     }
@@ -90,7 +107,25 @@ service cloud.firestore {
       // Medlemmer
       match /members/{uid} {
         allow read:   if isMember(jaktlagId);
-        allow create: if isAuth() && uid == request.auth.uid;
+        // KRITISK: tidligere sjekket denne KUN at brukeren skrev sin egen
+        // uid — uten noen verifisering av invitasjonskode. Det betydde at
+        // enhver innlogget bruker kunne bli "medlem" av et hvilket som
+        // helst jaktlag (og dermed lese lagets private observasjoner,
+        // kameraer, fellinger og andre medlemmers sanntids-GPS-posisjon)
+        // uten noensinne å ha fått invitasjonskoden. Nå kreves enten at
+        // brukeren er lagets leder som registrerer seg selv rett etter
+        // opprettelse (bevist via get() mot lederUid — se opprettJaktlag i
+        // jaktlag.ts), eller at brukeren oppgir en invitKode i selve
+        // skrivingen som matcher lagets faktiske kode (bevist server-side
+        // via get(), ikke bare klientens egen sjekk — se bliMedIJaktlag).
+        allow create: if isAuth() && uid == request.auth.uid && (
+          get(/databases/$(database)/documents/jaktlag/$(jaktlagId)).data.lederUid == request.auth.uid ||
+          (
+            request.resource.data.rolle == "jeger" &&
+            request.resource.data.invitKode
+              == get(/databases/$(database)/documents/jaktlag/$(jaktlagId)).data.invitKode
+          )
+        );
         allow delete: if isAuth() && (
           uid == request.auth.uid ||
           get(/databases/$(database)/documents/jaktlag/$(jaktlagId)).data.lederUid == request.auth.uid

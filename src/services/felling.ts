@@ -32,12 +32,16 @@ type FellingInput = Omit<Felling, "id" | "uid" | "jaktlagId" | "opprettet">;
 export async function lagreFelling(input: FellingInput): Promise<string> {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error("Ikke innlogget");
-  const jaktlagId = await getAktivtJaktlagId();
+  // "" = offentlig/intet jaktlag — samme konvensjon som cameras.ts/
+  // mapPoints.ts/observations.ts. Feltet skrives alltid (aldri utelatt),
+  // slik at det stemmer med Felling sin egen type (jaktlagId: string, ikke
+  // valgfri) og med den sammensatte Firestore-regelen for fellings/create.
+  const jaktlagId = (await getAktivtJaktlagId()) ?? "";
 
   const ref = await addDoc(collection(db, "fellings"), {
     ...input,
     uid,
-    ...(jaktlagId ? { jaktlagId } : {}),
+    jaktlagId,
     opprettet: serverTimestamp(),
   });
   return ref.id;
@@ -51,8 +55,11 @@ export function subscribeFellings(
   if (!uid) { onError(new Error("Ikke innlogget")); return () => {}; }
 
   let unsub: (() => void) | undefined;
+  let avbrutt = false;
 
   getAktivtJaktlagId().then((jaktlagId) => {
+    if (avbrutt) return;
+
     // Jaktlag-modus: hent alle fellings for laget
     // Offentlig modus: hent egne fellings via uid
     const q = jaktlagId
@@ -66,7 +73,10 @@ export function subscribeFellings(
     );
   });
 
-  return () => unsub?.();
+  return () => {
+    avbrutt = true;
+    unsub?.();
+  };
 }
 
 export async function slettFelling(id: string): Promise<void> {
