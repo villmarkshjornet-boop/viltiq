@@ -60,6 +60,7 @@ import {
   calcBearing,
   movePoint,
 } from "@/src/lib/geo";
+import { runEngine, type Species as EngineSpecies } from "@/src/engine";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,17 @@ type HeatZone = {
 };
 
 type MapPin = { latitude: number; longitude: number };
+
+type PrediksjonssoneVisning = {
+  dyr: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  farge: string;
+  antall: number;
+  /** Ferdig formatert visningstekst (nivå+confidence for motor-arter, prosent for arter uten motorprofil). */
+  etikett: string;
+};
 
 type AktivSone = {
   id: string;
@@ -226,6 +238,46 @@ function buildAktiveSoner(obs: Observasjon[]): AktivSone[] {
   }
 
   return soner;
+}
+
+/**
+ * Enkel 48t-vektet-sentrum-beregning — den ORIGINALE prediksjonslogikken,
+ * beholdt uendret kun for arter ViltIQ Engine ikke (ennå) har en profil for
+ * (i praksis: Rev). Hjort/Rådyr/Elg bruker motoren (src/engine), se
+ * prediksjonsoner i komponenten under. Ikke slett denne uten samtidig å
+ * legge til en motorprofil for artene som fortsatt bruker den.
+ */
+function beregnEnkelPrediksjonssone(
+  dyr: string,
+  observasjoner: Observasjon[],
+  farge: string
+): PrediksjonssoneVisning | null {
+  const relevante = observasjoner.filter(
+    (o) =>
+      o.dyr === dyr &&
+      o.latitude != null &&
+      o.longitude != null &&
+      (Date.now() - new Date(o.tid).getTime()) <= 48 * 3600000
+  );
+  if (relevante.length === 0) return null;
+  let sumLat = 0, sumLon = 0, sumVekt = 0;
+  for (const o of relevante) {
+    const t = (Date.now() - new Date(o.tid).getTime()) / 3600000;
+    const v = t <= 6 ? 5 : t <= 24 ? 4 : 3;
+    sumLat  += (o.latitude  as number) * v;
+    sumLon  += (o.longitude as number) * v;
+    sumVekt += v;
+  }
+  const konfidens = Math.min(Math.round((sumVekt / (relevante.length * 5)) * 100), 95);
+  return {
+    dyr,
+    latitude:  sumLat / sumVekt,
+    longitude: sumLon / sumVekt,
+    radius:    relevante.length >= 5 ? 600 : relevante.length >= 2 ? 400 : 250,
+    farge,
+    antall:    relevante.length,
+    etikett:   `${konfidens}%`,
+  };
 }
 
 function getZoneRadius(score: number): number {
@@ -762,43 +814,38 @@ export default function KartScreen() {
     [obsMedGps]
   );
 
-  // Per-art prediksjonssoner (48t vektet sentrum)
+  // Per-art prediksjonssoner. Hjort/Rådyr/Elg vurderes av ViltIQ Engine v1
+  // (src/engine) — kartet sender kun inn observasjonene og viser resultatet,
+  // det er ALDRI kart.tsx selv som regner ut score/confidence for disse
+  // artene lenger. Motoren isolerer selv arten (§14 i motor-oppdraget), så
+  // kartet trenger ikke filtrere observasjoner per art før kallet.
   const prediksjonsoner = useMemo(() => {
     if (!visPrediksjon) return [];
     const artsfarger: Record<string, string> = {
       Rådyr: "#A78BFA", Elg: "#38BDF8", Hjort: "#FCD34D", Rev: "#FB923C",
     };
-    return dyrListe.map((dyr) => {
-      const relevante = observasjoner.filter(
-        (o) =>
-          o.dyr === dyr &&
-          o.latitude != null &&
-          o.longitude != null &&
-          (Date.now() - new Date(o.tid).getTime()) <= 48 * 3600000
-      );
-      if (relevante.length === 0) return null;
-      let sumLat = 0, sumLon = 0, sumVekt = 0;
-      for (const o of relevante) {
-        const t = (Date.now() - new Date(o.tid).getTime()) / 3600000;
-        const v = t <= 6 ? 5 : t <= 24 ? 4 : 3;
-        sumLat  += (o.latitude  as number) * v;
-        sumLon  += (o.longitude as number) * v;
-        sumVekt += v;
-      }
-      const konfidens = Math.min(Math.round((sumVekt / (relevante.length * 5)) * 100), 95);
-      return {
-        dyr,
-        latitude:  sumLat / sumVekt,
-        longitude: sumLon / sumVekt,
-        radius:    relevante.length >= 5 ? 600 : relevante.length >= 2 ? 400 : 250,
-        farge:     artsfarger[dyr] ?? "#FFFFFF",
-        konfidens,
-        antall:    relevante.length,
-      };
-    }).filter(Boolean) as Array<{
-      dyr: string; latitude: number; longitude: number;
-      radius: number; farge: string; konfidens: number; antall: number;
-    }>;
+    const motorArter: Partial<Record<string, EngineSpecies>> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg" };
+
+    return dyrListe
+      .map((dyr): PrediksjonssoneVisning | null => {
+        const farge = artsfarger[dyr] ?? "#FFFFFF";
+        const motorArt = motorArter[dyr];
+        if (!motorArt) return beregnEnkelPrediksjonssone(dyr, observasjoner, farge);
+
+        const resultat = runEngine(observasjoner, motorArt);
+        const sone = resultat.zones[0];
+        if (!sone) return null;
+        return {
+          dyr,
+          latitude:  sone.center.latitude,
+          longitude: sone.center.longitude,
+          radius:    sone.radiusMeters,
+          farge,
+          antall:    sone.observationCount,
+          etikett:   `${sone.level} · ${sone.confidenceLevel} konfidens`,
+        };
+      })
+      .filter((p): p is PrediksjonssoneVisning => p != null);
   }, [visPrediksjon, observasjoner]);
 
   // Tidbaserte aktive soner (klokkeslett-mønster)
@@ -1159,7 +1206,7 @@ export default function KartScreen() {
             {prediksjonsoner.map((p) => (
               <View key={p.dyr} style={styles.predLegendRad}>
                 <View style={[styles.predLegendDot, { backgroundColor: p.farge }]} />
-                <Text style={styles.predLegendTxt}>{p.dyr} · {p.konfidens}% · {p.antall} obs</Text>
+                <Text style={styles.predLegendTxt}>{p.dyr} · {p.etikett} · {p.antall} obs</Text>
               </View>
             ))}
           </View>
