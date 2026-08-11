@@ -102,6 +102,19 @@ export type EngineConfig = {
     /** Vekt (0–1) hver delkomponent har i confidence-snittet. */
     weights: { volume: number; diversity: number; consistency: number; recency: number };
   };
+
+  ecology: {
+    /**
+     * Hvor mye 0–1 suitability bidrar i samme enhet som observasjonenes rå
+     * score. Ved suitability=1.0 og en enkelt fersk observasjon (rå score
+     * ~1) er ecologyWeight=3 valgt slik at ren økologisk suitability ALENE
+     * gir en "Moderat" displayScore (jf. §T-eksempelet: høy suitability uten
+     * observasjoner ≈ moderat score, lav confidence), mens et par ferske,
+     * reelle observasjoner fortsatt klart dominerer totalen — se
+     * docs/ENGINE_RESEARCH.md sitt "research priors vs. live data"-prinsipp.
+     */
+    weight: number;
+  };
 };
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
@@ -153,5 +166,9 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
     observationSaturationCount: 4,
     sourceSaturationCount: 2,
     weights: { volume: 0.35, diversity: 0.25, consistency: 0.25, recency: 0.15 },
+  },
+
+  ecology: {
+    weight: 3,
   },
 };

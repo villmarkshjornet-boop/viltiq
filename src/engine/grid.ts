@@ -38,6 +38,7 @@ function emptyBreakdown(): EngineSignalBreakdown {
     movementDirection: 0,
     cameraDiversity: 0,
     corridor: 0,
+    ecology: 0,
   };
 }
 
@@ -54,17 +55,25 @@ export type RawZone = {
   breakdown: EngineSignalBreakdown;
 };
 
+export type AreaOfInterest = { center: LatLng; radiusMeters: number };
+
 /**
  * Genererer rutesentre som dekker observasjonene pluss en margin (så
  * signalenes avstandsfalloff ikke kuttes brått ved kartutsnittets kant).
  * Rutestørrelsen skaleres opp automatisk (aldri ned) dersom det ellers ville
  * gitt flere ruter enn `maxGridCells` — deterministisk ytelsestak uten å
  * droppe observasjoner.
+ *
+ * `areaOfInterest` (valgfri) utvider dekningen til minst dette området selv
+ * når det finnes få/ingen observasjoner — nødvendig for at motoren skal
+ * kunne score et område ut fra miljø/økologi alene (§T i motor-oppdraget),
+ * ikke bare rundt eksisterende observasjoner.
  */
 export function buildGridCells(
   observations: readonly EngineObservation[],
   profile: SpeciesProfile,
-  cfg: EngineConfig
+  cfg: EngineConfig,
+  areaOfInterest?: AreaOfInterest
 ): { cells: LatLng[]; cellSizeMeters: number } {
   let minLat = Infinity;
   let maxLat = -Infinity;
@@ -75,6 +84,16 @@ export function buildGridCells(
     maxLat = Math.max(maxLat, o.position.latitude);
     minLon = Math.min(minLon, o.position.longitude);
     maxLon = Math.max(maxLon, o.position.longitude);
+  }
+
+  if (areaOfInterest) {
+    const latSpan = areaOfInterest.radiusMeters / METERS_PER_DEG_LAT;
+    const lonSpan =
+      areaOfInterest.radiusMeters / (METERS_PER_DEG_LAT * Math.cos((areaOfInterest.center.latitude * Math.PI) / 180) || 1);
+    minLat = Math.min(minLat, areaOfInterest.center.latitude - latSpan);
+    maxLat = Math.max(maxLat, areaOfInterest.center.latitude + latSpan);
+    minLon = Math.min(minLon, areaOfInterest.center.longitude - lonSpan);
+    maxLon = Math.max(maxLon, areaOfInterest.center.longitude + lonSpan);
   }
 
   const paddingMeters = profile.baseRadiusMeters * cfg.gridPaddingRadiusFactor;
@@ -128,7 +147,8 @@ export function scoreCell(
   profile: SpeciesProfile,
   cfg: EngineConfig,
   nowMs: number,
-  corridors: readonly EngineDebugCorridor[]
+  corridors: readonly EngineDebugCorridor[],
+  ecologyScoreAt?: (point: LatLng) => number
 ): ScoredCell {
   const breakdown = emptyBreakdown();
   let total = 0;
@@ -174,6 +194,12 @@ export function scoreCell(
   total += corridorBonus;
   breakdown.corridor += corridorBonus;
 
+  if (ecologyScoreAt) {
+    const ecologyContribution = ecologyScoreAt(point);
+    total += ecologyContribution;
+    breakdown.ecology += ecologyContribution;
+  }
+
   return { center: point, score: total, breakdown };
 }
 
@@ -183,9 +209,10 @@ export function scoreGrid(
   profile: SpeciesProfile,
   cfg: EngineConfig,
   nowMs: number,
-  corridors: readonly EngineDebugCorridor[]
+  corridors: readonly EngineDebugCorridor[],
+  ecologyScoreAt?: (point: LatLng) => number
 ): ScoredCell[] {
-  return cells.map((point) => scoreCell(point, observations, profile, cfg, nowMs, corridors));
+  return cells.map((point) => scoreCell(point, observations, profile, cfg, nowMs, corridors, ecologyScoreAt));
 }
 
 /** displayScore = 100 × (1 − e^(−raw / saturation)) — se config.ts sin dokumentasjon av `scoreSaturation`. */

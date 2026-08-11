@@ -16,15 +16,25 @@ import {
   levelFromScore,
   saturateScore,
   scoreGrid,
+  type AreaOfInterest,
 } from "./grid";
 import { normalizeObservations } from "./normalize";
 import { cameraDiversityBonus, computeMovementCorridors } from "./reinforcement";
 import { effectiveRadiusMeters, distanceWeight } from "./signals";
-import { getSpeciesProfile } from "./species/profiles";
+import { getSpeciesProfile, type SpeciesProfile } from "./species/profiles";
 import type { EngineDebugInfo, EngineObservation, EngineResult, LatLng, PredictionZone, Species } from "./types";
+import type { EnvironmentResolver } from "./environment/types";
+import { getEcologyProfile } from "./ecology/profiles";
+import {
+  computeCrepuscularActivityMultiplier,
+  computeSpatialSuitability,
+  determineSeason,
+  isRutActive,
+} from "./ecology/suitability";
 
 export { ENGINE_VERSION, DEFAULT_ENGINE_CONFIG };
 export type { EngineConfig };
+export type { AreaOfInterest } from "./grid";
 
 export type RunEngineOptions = {
   /** Epoketid (ms) motoren skal regne "nå" fra. Kun til testing — defaulter til Date.now(). */
@@ -52,6 +62,7 @@ function mergeConfig(overrides: Partial<EngineConfig> | undefined): EngineConfig
       ...overrides.confidence,
       weights: { ...DEFAULT_ENGINE_CONFIG.confidence.weights, ...overrides.confidence?.weights },
     },
+    ecology: { ...DEFAULT_ENGINE_CONFIG.ecology, ...overrides.ecology },
   };
 }
 
@@ -97,31 +108,30 @@ function emptyResult(species: Species, nowMs: number, cfg: EngineConfig, inputCo
 }
 
 /**
- * Kjør ViltIQ Engine v1 for én art. `rawObservations` kan være hele det
- * synlige datasettet (flere arter) — motoren isolerer selv arten den skal
- * vurdere (§14), så en hjorteobservasjon kan aldri påvirke rådyr- eller
- * elg-resultatet.
+ * Delt pipeline for `runEngine` (kun observasjoner) og `runEcologicalEngine`
+ * (observasjoner + økologisk prior). Selve scoringen er identisk uansett —
+ * forskjellen er kun OM et areaOfInterest/ecologyScoreAt sendes inn.
  */
-export function runEngine(
+function runPipeline(
   rawObservations: readonly Observasjon[],
   species: Species,
-  options: RunEngineOptions = {}
+  profile: SpeciesProfile,
+  cfg: EngineConfig,
+  nowMs: number,
+  debug: boolean,
+  areaOfInterest?: AreaOfInterest,
+  ecologyScoreAt?: (point: LatLng) => number
 ): EngineResult {
-  const cfg = mergeConfig(options.config);
-  const nowMs = options.now ?? Date.now();
-  const debug = options.debug ?? false;
-  const profile = getSpeciesProfile(species);
-
   const normalizedAll = normalizeObservations(rawObservations);
   const observations = normalizedAll.filter((o) => o.species === species);
 
-  if (observations.length === 0) {
+  if (observations.length === 0 && !areaOfInterest) {
     return emptyResult(species, nowMs, cfg, rawObservations.length, debug);
   }
 
-  const { cells, cellSizeMeters } = buildGridCells(observations, profile, cfg);
+  const { cells, cellSizeMeters } = buildGridCells(observations, profile, cfg, areaOfInterest);
   const corridors = computeMovementCorridors(observations, cfg.reinforcement);
-  const scoredCells = scoreGrid(cells, observations, profile, cfg, nowMs, corridors);
+  const scoredCells = scoreGrid(cells, observations, profile, cfg, nowMs, corridors, ecologyScoreAt);
   // Merge-radius skalert med artens egen baseRadius — se extractZones' dokumentasjon
   // for hvorfor en fast global verdi kan fragmentere én observasjon til flere soner.
   const mergeRadiusMeters = Math.max(cfg.zones.mergeRadiusMeters, profile.baseRadiusMeters * 1.5);
@@ -209,4 +219,83 @@ export function runEngine(
     observationsConsidered: observations.length,
     debug: debugInfo,
   };
+}
+
+/**
+ * Kjør ViltIQ Engine v1 for én art, KUN basert på observasjoner (ingen
+ * miljø-/økologidata). `rawObservations` kan være hele det synlige
+ * datasettet (flere arter) — motoren isolerer selv arten den skal vurdere
+ * (§14), så en hjorteobservasjon kan aldri påvirke rådyr- eller
+ * elg-resultatet. Ren, synkron, deterministisk — ingen nettverkskall (§27).
+ */
+export function runEngine(
+  rawObservations: readonly Observasjon[],
+  species: Species,
+  options: RunEngineOptions = {}
+): EngineResult {
+  const cfg = mergeConfig(options.config);
+  const nowMs = options.now ?? Date.now();
+  const debug = options.debug ?? false;
+  const profile = getSpeciesProfile(species);
+  return runPipeline(rawObservations, species, profile, cfg, nowMs, debug);
+}
+
+export type RunEcologicalEngineOptions = RunEngineOptions & {
+  /** Analyseområdets senter og radius — sikrer at motoren kan score et område ut fra miljø/økologi alene, selv uten observasjoner (§T). */
+  areaCenter: LatLng;
+  areaRadiusMeters: number;
+  /**
+   * Ferdig utfylt, SYNKRON miljøoppslag — bygg denne med
+   * environment/resolve.ts sin `resolveEnvironmentContext()` (async, gjør de
+   * faktiske nettverkskallene) FØR du kaller denne funksjonen. Selve
+   * scoringen forblir synkron/deterministisk/testbar (§27) uansett hvor
+   * miljødataene kom fra.
+   */
+  environment: EnvironmentResolver;
+};
+
+/**
+ * ViltIQ Engine v1 med økologisk prior (§S: "Research prior + current
+ * environmental suitability + recent observations = posterior prediction").
+ * Kombinerer artens forskningsbaserte habitat-/sesong-/høyde-/vei-/vind-
+ * suitability (src/engine/ecology) med de samme observasjonssignalene som
+ * `runEngine` — ferske, lokale observasjoner kan alltid overstyre en generell
+ * prior, siden begge bidrar til samme rå celle-score (se config.ts sin
+ * `ecology.weight`-dokumentasjon for hvorfor balansen er satt som den er).
+ */
+export function runEcologicalEngine(
+  rawObservations: readonly Observasjon[],
+  species: Species,
+  options: RunEcologicalEngineOptions
+): EngineResult {
+  const cfg = mergeConfig(options.config);
+  const nowMs = options.now ?? Date.now();
+  const debug = options.debug ?? false;
+  const baseProfile = getSpeciesProfile(species);
+  const ecologyProfile = getEcologyProfile(species);
+  const season = determineSeason(nowMs);
+
+  const rutActive = isRutActive(nowMs, ecologyProfile);
+  const profile: SpeciesProfile = rutActive
+    ? {
+        ...baseProfile,
+        movementDirectionWeight: Math.min(1, baseProfile.movementDirectionWeight * (1 + ecologyProfile.rutBehavior.movementBoost)),
+        corridorWeight: Math.min(1, baseProfile.corridorWeight * (1 + ecologyProfile.rutBehavior.movementBoost)),
+      }
+    : baseProfile;
+
+  const crepuscularMultiplier = computeCrepuscularActivityMultiplier(
+    nowMs,
+    options.environment(options.areaCenter).dynamic,
+    ecologyProfile.crepuscularActivity
+  );
+
+  const ecologyScoreAt = (point: LatLng): number => {
+    const context = options.environment(point);
+    const { suitability } = computeSpatialSuitability(ecologyProfile, season, nowMs, context.static, context.dynamic);
+    return suitability * cfg.ecology.weight * crepuscularMultiplier;
+  };
+
+  const areaOfInterest: AreaOfInterest = { center: options.areaCenter, radiusMeters: options.areaRadiusMeters };
+  return runPipeline(rawObservations, species, profile, cfg, nowMs, debug, areaOfInterest, ecologyScoreAt);
 }

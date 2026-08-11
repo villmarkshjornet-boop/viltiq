@@ -69,6 +69,8 @@ export type EngineSignalBreakdown = {
   cameraDiversity: number;
   /** Bonus fra en registrert bevegelseskorridor (spatiotemporal reinforcement). */
   corridor: number;
+  /** Bidrag fra økologisk suitability (høyde/snø/habitat/vei/kant/vind) — 0 når motoren kjøres uten miljødata. */
+  ecology: number;
 };
 
 export type PredictionZone = {
