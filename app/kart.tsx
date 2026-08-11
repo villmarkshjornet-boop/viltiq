@@ -60,7 +60,13 @@ import {
   calcBearing,
   movePoint,
 } from "@/src/lib/geo";
-import { runEngine, type Species as EngineSpecies } from "@/src/engine";
+import {
+  runEngine,
+  runEcologicalEngine,
+  resolveEnvironmentContext,
+  type Species as EngineSpecies,
+  type EnvironmentResolver,
+} from "@/src/engine";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 
@@ -401,6 +407,12 @@ export default function KartScreen() {
   const [visSporAnnet,   setVisSporAnnet]   = useState(true);
   const [visEiendomsgrenser, setVisEiendomsgrenser] = useState(false);
   const [medlsPosisjon,  setMedlsPosisjon]  = useState<MedlemPosisjon[]>([]);
+  // Miljøoppslag (høyde/habitat/vær/snø/vind) til den økologiske prioren i
+  // motoren — kun løst NÅR "Prediksjon" faktisk er slått på (nettverkskall,
+  // ikke noe kartet trenger med mindre brukeren ber om det). Null = ikke
+  // (ferdig) løst ennå; prediksjonsoner faller da tilbake til den rene
+  // observasjonsmotoren under, uendret fra tidligere oppførsel.
+  const [environmentResolver, setEnvironmentResolver] = useState<EnvironmentResolver | null>(null);
 
   // ── Langtrykk-meny og nye punkter ──
   const [selectedPin,  setSelectedPin]  = useState<MapPin | null>(null);
@@ -814,11 +826,33 @@ export default function KartScreen() {
     [obsMedGps]
   );
 
+  // Løs miljøkontekst (høyde/habitat/vær/snø/vind) for den økologiske
+  // prioren KUN når "Prediksjon" er slått på og vi har en posisjon å ta
+  // utgangspunkt i — dette er eksterne nettverkskall (Geonorge/NIBIO/
+  // Open-Meteo/Overpass, se src/engine/environment), ikke noe kartet skal
+  // gjøre uoppfordret. Feiler oppslaget (offline e.l.), forblir resolveren
+  // null og prediksjonsoner faller tilbake til den rene, alltid-tilgjengelige
+  // observasjonsmotoren under — kartet skal ALDRI blokkere eller krasje på
+  // et mislykket miljøoppslag.
+  useEffect(() => {
+    if (!visPrediksjon || !userLocation) return;
+    let aktiv = true;
+    const analyseRadiusMeter = Math.min(radiusKm * 1000, 5000);
+
+    resolveEnvironmentContext(userLocation, analyseRadiusMeter)
+      .then((resolver) => { if (aktiv) setEnvironmentResolver(() => resolver); })
+      .catch(() => { /* stille — kartet fungerer uten miljødata, se fallback under */ });
+
+    return () => { aktiv = false; };
+  }, [visPrediksjon, userLocation, radiusKm]);
+
   // Per-art prediksjonssoner. Hjort/Rådyr/Elg vurderes av ViltIQ Engine v1
   // (src/engine) — kartet sender kun inn observasjonene og viser resultatet,
   // det er ALDRI kart.tsx selv som regner ut score/confidence for disse
   // artene lenger. Motoren isolerer selv arten (§14 i motor-oppdraget), så
-  // kartet trenger ikke filtrere observasjoner per art før kallet.
+  // kartet trenger ikke filtrere observasjoner per art før kallet. Bruker
+  // den økologiske motoren når miljødata er løst, ellers den rene
+  // observasjonsmotoren (identisk med oppførselen før miljølaget fantes).
   const prediksjonsoner = useMemo(() => {
     if (!visPrediksjon) return [];
     const artsfarger: Record<string, string> = {
@@ -832,7 +866,13 @@ export default function KartScreen() {
         const motorArt = motorArter[dyr];
         if (!motorArt) return beregnEnkelPrediksjonssone(dyr, observasjoner, farge);
 
-        const resultat = runEngine(observasjoner, motorArt);
+        const resultat = (environmentResolver && userLocation)
+          ? runEcologicalEngine(observasjoner, motorArt, {
+              areaCenter: userLocation,
+              areaRadiusMeters: Math.min(radiusKm * 1000, 5000),
+              environment: environmentResolver,
+            })
+          : runEngine(observasjoner, motorArt);
         const sone = resultat.zones[0];
         if (!sone) return null;
         return {
@@ -846,7 +886,7 @@ export default function KartScreen() {
         };
       })
       .filter((p): p is PrediksjonssoneVisning => p != null);
-  }, [visPrediksjon, observasjoner]);
+  }, [visPrediksjon, observasjoner, environmentResolver, userLocation, radiusKm]);
 
   // Tidbaserte aktive soner (klokkeslett-mønster)
   const aktiveSoner = useMemo<AktivSone[]>(() => {
