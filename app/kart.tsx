@@ -39,6 +39,7 @@ import {
 } from "@/src/services/location";
 import { getAktivtJaktlagId } from "@/src/services/jaktlag";
 import {
+  deleteObservation,
   saveObservation,
   subscribeToNearbyObservations,
   subscribeToObservationsByCamera,
@@ -780,6 +781,32 @@ export default function KartScreen() {
     }
   }
 
+  // Global sletting (§14 i STEG 4-oppdraget): brukeren skal kunne slette en
+  // registrering fra KARTET også, ikke bare fra Logg. deleteObservation
+  // treffer samme Firestore-dokument uansett hvor kallet kommer fra, så
+  // motorens neste beregning (heatmap/soner) leser automatisk den oppdaterte
+  // observasjonslisten — ingen egen "cache" å rydde opp separat.
+  function bekreftSlettObservasjonFraKart(obs: Observasjon) {
+    Alert.alert(
+      "Slette registreringen?",
+      `${obs.dyr} · ${obs.type} fjernes fra kartet, historikken og ViltIQs analysegrunnlag.`,
+      [
+        { text: "Avbryt", style: "cancel" },
+        {
+          text: "Slett",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteObservation(obs.id);
+            } catch (e: any) {
+              Alert.alert("Feil", e?.message || "Klarte ikke slette registreringen.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
   // ─── Beregnede verdier ────────────────────────────────────────────────────
 
   const filtrerteObs = useMemo(() => {
@@ -1165,6 +1192,7 @@ export default function KartScreen() {
                 tracksViewChanges={false}
                 title={`${o.dyr} · ${o.type}`}
                 description={o.kommentar || undefined}
+                onPress={() => bekreftSlettObservasjonFraKart(o)}
               >
                 <View style={styles.obsPinWrap}>
                   <View style={[styles.obsPinBubble, o.dyr === "Rev" && styles.obsPinBubbleRev]}>
@@ -1184,6 +1212,7 @@ export default function KartScreen() {
                 tracksViewChanges={false}
                 title={`Spor${o.sporType ? " · " + o.sporType : ""}`}
                 description={o.kommentar || undefined}
+                onPress={() => bekreftSlettObservasjonFraKart(o)}
               >
                 <View style={styles.sporPinWrap}>
                   <View style={styles.sporPinBubble}>
