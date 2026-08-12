@@ -92,7 +92,14 @@ service cloud.firestore {
         request.resource.data.jaktlagId == "" || isMember(request.resource.data.jaktlagId)
       );
       allow delete: if isAuth() && resource.data.uid == request.auth.uid;
-      allow update: if false;
+      // STEG 5 §4: retting av en felling (art/kjønn/alder/vekt/kategori osv.)
+      // — kun eieren, og uid/jaktlagId/opprettet kan ikke endres via update
+      // (eierskap og opprinnelsestidspunkt er ikke redigerbart, uansett hva
+      // klienten sender inn).
+      allow update: if isAuth() && resource.data.uid == request.auth.uid &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.jaktlagId == resource.data.jaktlagId &&
+        request.resource.data.opprettet == resource.data.opprettet;
     }
 
     // ── Jaktlag ─────────────────────────────────────────────────────────────
