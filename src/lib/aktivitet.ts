@@ -49,3 +49,25 @@ export function hentRelativTid(tid: string): string {
   if (hrs < 24) return `for ${hrs}t siden`;
   return `for ${days}d siden`;
 }
+
+/**
+ * Enkel, delt relevansmodell (STEG 5 §2/§13): er en registrering fortsatt
+ * praktisk relevant "nå"? Bevisst ÉN, tydelig terskel — ikke flere
+ * kompliserte type-spesifikke regler — så den er lett å forstå og lett å
+ * justere senere. Brukes av BÅDE Hjem ("Nylig relevant aktivitet") og Logg
+ * (Aktive/Historikk), slik at de to skjermene aldri kan vise ulik relevans
+ * for samme registrering.
+ *
+ * VIKTIG: dette er en RENT VISUELL relevansgrense — den sletter eller
+ * skjuler ingenting fra databasen eller fra motoren. Motorens egen
+ * tidsvekting (src/engine/signals.ts sin timeWeight, med artsspesifikk
+ * halveringstid) er en helt separat, mer nyansert beregning brukt til
+ * faktisk scoring — se STEG1-auditens funn om at denne UI-modellen ikke
+ * skal gjenbrukes AV motoren, og tilsvarende skal ikke motorens
+ * halveringstid brukes til å avgjøre hva som vises i en enkel UI-liste.
+ */
+export const AKTIV_REGISTRERING_TERSKEL_TIMER = 48;
+
+export function erAktivRegistrering(tid: string): boolean {
+  return hentTimerSiden(tid) <= AKTIV_REGISTRERING_TERSKEL_TIMER;
+}

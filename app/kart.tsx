@@ -386,6 +386,8 @@ export default function KartScreen() {
     focusLat?: string;
     focusLng?: string;
     filter?:   string;
+    /** "1" — slå på ViltIQ Heatmap automatisk (brukt av "Vis i kart" fra Hjem/Jakt). */
+    heatmap?:  string;
   }>();
   const router = useRouter();
   const mapRef = useRef<MapViewHandle | null>(null);
@@ -411,7 +413,7 @@ export default function KartScreen() {
   const [mapPoints,    setMapPoints]    = useState<MapPoint[]>([]);
   const [filterOpen,   filterOpenSet]   = useState(false);
   const [aktivtFilter,   setAktivtFilter]   = useState(params.filter || "Alle");
-  const [visPrediksjon,  setVisPrediksjon]  = useState(false);
+  const [visPrediksjon,  setVisPrediksjon]  = useState(params.heatmap === "1");
   const [visKameraer,    setVisKameraer]    = useState(true);
   const [visAktiveSoner, setVisAktiveSoner] = useState(false);
   const [visSporAnnet,   setVisSporAnnet]   = useState(true);

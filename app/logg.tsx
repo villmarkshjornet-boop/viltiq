@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { Link } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Modal,
@@ -14,6 +14,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
+import Surface from "../components/ui/Surface";
+import { color as uiColor } from "../src/design/tokens";
 import {
   deleteObservation,
   saveObservation,
@@ -21,7 +23,9 @@ import {
 } from "../src/services/observations";
 import type { Observasjon } from "../src/types/observation";
 import { anonymiserPosisjon } from "../src/lib/geo";
-import { dyrEmoji } from "../src/lib/aktivitet";
+import { AKTIV_REGISTRERING_TERSKEL_TIMER, dyrEmoji, erAktivRegistrering } from "../src/lib/aktivitet";
+
+type Fane = "aktive" | "historikk";
 
 const dyrListe = ["Rådyr", "Elg", "Hjort", "Rev"] as const;
 const typeListe = ["Sett dyr", "Spor", "Kamera"] as const;
@@ -62,15 +66,25 @@ export default function LoggScreen() {
   const [sisteId,  setSisteId]  = useState<string | null>(null);
   const [visAngre, setVisAngre] = useState(false);
 
-  // Historikk
-  const [historikk,    setHistorikk]    = useState<Observasjon[]>([]);
+  // Mine registreringer — delt i Aktive/Historikk (STEG 5 §2), IKKE to
+  // separate datasett. Samme underliggende liste, kun ulikt filtrert med
+  // den delte relevansmodellen (src/lib/aktivitet.ts). Eldre registreringer
+  // slettes ALDRI automatisk — de flytter seg bare til Historikk-fanen når
+  // de ikke lenger er "aktive", og er fortsatt fullt tilgjengelige for både
+  // visning her og for motorens beregninger.
+  const [mineObs,      setMineObs]      = useState<Observasjon[]>([]);
   const [visHistorikk, setVisHistorikk] = useState(false);
+  const [fane,         setFane]         = useState<Fane>("aktive");
 
   // Abonner på egne observasjoner
   useEffect(() => {
-    const unsub = subscribeToMyObservations(setHistorikk);
+    const unsub = subscribeToMyObservations(setMineObs);
     return unsub;
   }, []);
+
+  const aktiveObs = useMemo(() => mineObs.filter((o) => erAktivRegistrering(o.tid)), [mineObs]);
+  const historiskeObs = useMemo(() => mineObs.filter((o) => !erAktivRegistrering(o.tid)), [mineObs]);
+  const visteObs = fane === "aktive" ? aktiveObs : historiskeObs;
 
   // Trinn 1: trykk Lagre → åpne retningsmodal
   function tryLagre() {
@@ -159,7 +173,7 @@ export default function LoggScreen() {
           </View>
 
           {/* ── Oppsummering ── */}
-          <View style={styles.summaryCard}>
+          <Surface variant="elevated" style={styles.summaryCard}>
             <View style={styles.summaryLeft}>
               <Text style={styles.summaryEmoji}>{dyrEmoji(valgtDyr)}</Text>
               <View>
@@ -171,7 +185,7 @@ export default function LoggScreen() {
               <View style={styles.readyDot} />
               <Text style={styles.readyText}>Klar</Text>
             </View>
-          </View>
+          </Surface>
 
           {/* ── Velg dyr ── */}
           <View style={styles.section}>
@@ -216,7 +230,7 @@ export default function LoggScreen() {
               value={kommentar}
               onChangeText={setKommentar}
               placeholder="Eks: 2 elg gikk nordover mot åkeren..."
-              placeholderTextColor="#3D5446"
+              placeholderTextColor={uiColor.textFaint}
               multiline
               maxLength={240}
               style={styles.input}
@@ -226,7 +240,7 @@ export default function LoggScreen() {
 
           {/* ── GPS-info ── */}
           <View style={styles.infoStrip}>
-            <Ionicons name="shield-checkmark-outline" size={15} color="#2CC36B" />
+            <Ionicons name="shield-checkmark-outline" size={15} color={uiColor.primary} />
             <Text style={styles.infoStripText}>GPS anonymiseres automatisk ±200m</Text>
           </View>
 
@@ -248,7 +262,7 @@ export default function LoggScreen() {
               </Text>
               {visAngre && sisteId && (
                 <Pressable onPress={angreLagring} style={styles.angreRow}>
-                  <Ionicons name="trash-outline" size={14} color="#F87171" />
+                  <Ionicons name="trash-outline" size={14} color={uiColor.danger} />
                   <Text style={styles.angreText}>Angre — slett observasjonen</Text>
                 </Pressable>
               )}
@@ -265,37 +279,65 @@ export default function LoggScreen() {
               lagrer && styles.saveBtnDisabled,
             ]}
           >
-            <Ionicons name="checkmark-circle" size={20} color="#04110A" />
+            <Ionicons name="checkmark-circle" size={20} color={uiColor.primaryText} />
             <Text style={styles.saveBtnText}>
               {lagrer ? "Lagrer..." : "Lagre observasjon"}
             </Text>
           </Pressable>
 
-          {/* ── Historikk ── */}
+          {/* ── Mine registreringer: Aktive | Historikk (STEG 5 §2) ── */}
           <Pressable
             style={styles.historikkHeader}
             onPress={() => setVisHistorikk((v) => !v)}
           >
             <View style={styles.historikkHeaderLeft}>
-              <Ionicons name="time-outline" size={16} color="#2CC36B" />
-              <Text style={styles.historikkHeaderTxt}>Mine observasjoner</Text>
+              <Ionicons name="time-outline" size={16} color={uiColor.primary} />
+              <Text style={styles.historikkHeaderTxt}>Mine registreringer</Text>
               <View style={styles.historikkBadge}>
-                <Text style={styles.historikkBadgeTxt}>{historikk.length}</Text>
+                <Text style={styles.historikkBadgeTxt}>{mineObs.length}</Text>
               </View>
             </View>
             <Ionicons
               name={visHistorikk ? "chevron-up" : "chevron-down"}
               size={16}
-              color="#3D5446"
+              color={uiColor.textFaint}
             />
           </Pressable>
 
           {visHistorikk && (
-            <View style={styles.historikkListe}>
-              {historikk.length === 0 ? (
-                <Text style={styles.historikkTom}>Ingen observasjoner ennå.</Text>
+            <>
+              {/* Fane-velger */}
+              <View style={styles.faneRad}>
+                <Pressable
+                  style={[styles.faneBtn, fane === "aktive" && styles.faneBtnActive]}
+                  onPress={() => setFane("aktive")}
+                >
+                  <Text style={[styles.faneBtnTxt, fane === "aktive" && styles.faneBtnTxtActive]}>
+                    Aktive ({aktiveObs.length})
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.faneBtn, fane === "historikk" && styles.faneBtnActive]}
+                  onPress={() => setFane("historikk")}
+                >
+                  <Text style={[styles.faneBtnTxt, fane === "historikk" && styles.faneBtnTxtActive]}>
+                    Historikk ({historiskeObs.length})
+                  </Text>
+                </Pressable>
+              </View>
+              {fane === "aktive" && (
+                <Text style={styles.faneForklaring}>
+                  Registreringer fra de siste {AKTIV_REGISTRERING_TERSKEL_TIMER} timene — fortsatt praktisk relevante nå.
+                </Text>
+              )}
+
+              <View style={styles.historikkListe}>
+              {visteObs.length === 0 ? (
+                <Text style={styles.historikkTom}>
+                  {fane === "aktive" ? "Ingen aktive registreringer nå." : "Ingen eldre registreringer ennå."}
+                </Text>
               ) : (
-                historikk.map((obs) => {
+                visteObs.map((obs) => {
                   const erSiste = obs.id === sisteId;
                   const msDiff  = Date.now() - new Date(obs.tid).getTime();
                   const minDiff = Math.round(msDiff / 60000);
@@ -319,7 +361,7 @@ export default function LoggScreen() {
                         <Ionicons
                           name="navigate"
                           size={13}
-                          color="#2CC36B"
+                          color={uiColor.primary}
                           style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
                         />
                       )}
@@ -346,26 +388,27 @@ export default function LoggScreen() {
                         }
                         style={styles.historikkSlett}
                       >
-                        <Ionicons name="trash-outline" size={14} color="#4D6858" />
+                        <Ionicons name="trash-outline" size={14} color={uiColor.textMuted} />
                       </Pressable>
                     </View>
                   );
                 })
               )}
-            </View>
+              </View>
+            </>
           )}
 
           {/* ── Hurtiglenker ── */}
           <View style={styles.linksRow}>
             <Link href="/kart" asChild>
               <Pressable style={styles.linkBtn}>
-                <Ionicons name="map-outline" size={15} color="#A9F2BF" />
+                <Ionicons name="map-outline" size={15} color={uiColor.primarySoft} />
                 <Text style={styles.linkBtnText}>Dyrekart</Text>
               </Pressable>
             </Link>
             <Link href="/statistikk" asChild>
               <Pressable style={styles.linkBtn}>
-                <Ionicons name="stats-chart-outline" size={15} color="#A9F2BF" />
+                <Ionicons name="stats-chart-outline" size={15} color={uiColor.primarySoft} />
                 <Text style={styles.linkBtnText}>Statistikk</Text>
               </Pressable>
             </Link>
@@ -401,7 +444,7 @@ export default function LoggScreen() {
                       <View key={di} style={styles.compassCenter}>
                         <Ionicons
                           name="compass-outline" size={26}
-                          color={pendingRetning != null ? "#2CC36B" : "#2A3D30"}
+                          color={pendingRetning != null ? uiColor.primary : "#2A3D30"}
                         />
                       </View>
                     ) : (
@@ -432,13 +475,13 @@ export default function LoggScreen() {
 
             {pendingRetning != null && (
               <View style={styles.retningValgt}>
-                <Ionicons name="navigate" size={13} color="#2CC36B" />
+                <Ionicons name="navigate" size={13} color={uiColor.primary} />
                 <Text style={styles.retningValgtText}>
                   {retningListe.find((r) => r.grader === pendingRetning)?.label}{" "}
                   ({pendingRetning}°) valgt
                 </Text>
                 <Pressable onPress={() => setPendingRetning(null)}>
-                  <Ionicons name="close-circle" size={17} color="#3D5446" />
+                  <Ionicons name="close-circle" size={17} color={uiColor.textFaint} />
                 </Pressable>
               </View>
             )}
@@ -448,7 +491,7 @@ export default function LoggScreen() {
                 <Text style={styles.skipBtnText}>Hopp over</Text>
               </Pressable>
               <Pressable onPress={() => bekreftLagring(pendingRetning)} style={styles.confirmBtn}>
-                <Ionicons name="checkmark" size={18} color="#04110A" />
+                <Ionicons name="checkmark" size={18} color={uiColor.primaryText} />
                 <Text style={styles.confirmBtnText}>Lagre</Text>
               </Pressable>
             </View>
@@ -463,7 +506,7 @@ export default function LoggScreen() {
 // ─── Stiler ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: "#060E08" },
+  safe:   { flex: 1, backgroundColor: uiColor.background },
   screen: { flex: 1 },
   container: {
     paddingHorizontal: 20,
@@ -474,23 +517,21 @@ const styles = StyleSheet.create({
   // Header
   header:   { paddingVertical: 22 },
   eyebrow: {
-    color: "#2CC36B", fontSize: 11, fontWeight: "800",
+    color: uiColor.primary, fontSize: 11, fontWeight: "800",
     letterSpacing: 2.5, textTransform: "uppercase", marginBottom: 10,
   },
-  title:    { color: "#FFFFFF", fontSize: 34, fontWeight: "900", letterSpacing: -0.5 },
-  subtitle: { color: "#4D6858", fontSize: 14, marginTop: 6 },
+  title:    { color: uiColor.textPrimary, fontSize: 34, fontWeight: "900", letterSpacing: -0.5 },
+  subtitle: { color: uiColor.textMuted, fontSize: 14, marginTop: 6 },
 
   // Oppsummering
   summaryCard: {
-    backgroundColor: "#0C1A12",
-    borderRadius: 20, borderWidth: 1, borderColor: "#1B2C20",
     padding: 16, marginBottom: 28,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
   summaryLeft:  { flexDirection: "row", alignItems: "center", gap: 14 },
   summaryEmoji: { fontSize: 38 },
-  summaryTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
-  summaryMeta:  { color: "#4D6858", fontSize: 13, marginTop: 3 },
+  summaryTitle: { color: uiColor.textPrimary, fontSize: 18, fontWeight: "800" },
+  summaryMeta:  { color: uiColor.textMuted, fontSize: 13, marginTop: 3 },
   readyBadge: {
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: "rgba(44,195,107,0.10)",
@@ -498,14 +539,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8,
   },
   readyDot: {
-    width: 6, height: 6, borderRadius: 3, backgroundColor: "#2CC36B",
+    width: 6, height: 6, borderRadius: 3, backgroundColor: uiColor.primary,
   },
-  readyText: { color: "#2CC36B", fontSize: 12, fontWeight: "900", letterSpacing: 0.5 },
+  readyText: { color: uiColor.primary, fontSize: 12, fontWeight: "900", letterSpacing: 0.5 },
 
   // Sections
   section:      { marginBottom: 24 },
   sectionLabel: {
-    color: "#3D5446", fontSize: 11, fontWeight: "800",
+    color: uiColor.textFaint, fontSize: 11, fontWeight: "800",
     textTransform: "uppercase", letterSpacing: 1.8, marginBottom: 12,
   },
 
@@ -517,9 +558,9 @@ const styles = StyleSheet.create({
     borderRadius: 14, paddingVertical: 16, paddingHorizontal: 12,
     alignItems: "center",
   },
-  chipActive:     { backgroundColor: "#112A1A", borderColor: "#2CC36B" },
+  chipActive:     { backgroundColor: "#112A1A", borderColor: uiColor.primary },
   chipText:       { color: "#7A9A88", fontSize: 14, fontWeight: "700" },
-  chipTextActive: { color: "#A9F2BF", fontWeight: "800" },
+  chipTextActive: { color: uiColor.primarySoft, fontWeight: "800" },
 
   // Chips — type
   chipAlt: {
@@ -535,7 +576,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#090F0C",
     borderColor: "#172218", borderWidth: 1,
     borderRadius: 16, minHeight: 110,
-    padding: 16, color: "#FFFFFF",
+    padding: 16, color: uiColor.textPrimary,
     textAlignVertical: "top", fontSize: 15, lineHeight: 24,
   },
   charCount: { color: "#2E4236", fontSize: 12, marginTop: 8, textAlign: "right" },
@@ -564,17 +605,17 @@ const styles = StyleSheet.create({
     marginTop: 10, paddingTop: 10,
     borderTopWidth: 1, borderTopColor: "rgba(239,68,68,0.12)",
   },
-  angreText: { color: "#F87171", fontSize: 13, fontWeight: "700" },
+  angreText: { color: uiColor.danger, fontSize: 13, fontWeight: "700" },
 
   // Lagre-knapp
   saveBtn: {
-    backgroundColor: "#2CC36B",
+    backgroundColor: uiColor.primary,
     borderRadius: 18, paddingVertical: 18,
     flexDirection: "row", alignItems: "center",
     justifyContent: "center", gap: 10, marginBottom: 14,
   },
   saveBtnDisabled: { opacity: 0.5 },
-  saveBtnText: { color: "#04110A", fontSize: 16, fontWeight: "900", letterSpacing: 0.2 },
+  saveBtnText: { color: uiColor.primaryText, fontSize: 16, fontWeight: "900", letterSpacing: 0.2 },
 
   // Historikk
   historikkHeader: {
@@ -583,13 +624,25 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: "#111C14",
   },
   historikkHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  historikkHeaderTxt:  { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+  historikkHeaderTxt:  { color: uiColor.textPrimary, fontSize: 15, fontWeight: "800" },
   historikkBadge: {
     backgroundColor: "rgba(44,195,107,0.12)",
     borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2,
     borderWidth: 1, borderColor: "rgba(44,195,107,0.2)",
   },
-  historikkBadgeTxt: { color: "#2CC36B", fontSize: 12, fontWeight: "900" },
+  historikkBadgeTxt: { color: uiColor.primary, fontSize: 12, fontWeight: "900" },
+
+  // Fane-velger (Aktive/Historikk)
+  faneRad: {
+    flexDirection: "row", gap: 8, marginBottom: 10,
+    backgroundColor: "#090F0C", borderRadius: 12, padding: 4,
+    borderWidth: 1, borderColor: "#172218",
+  },
+  faneBtn: { flex: 1, borderRadius: 9, paddingVertical: 9, alignItems: "center" },
+  faneBtnActive: { backgroundColor: "#122E1C" },
+  faneBtnTxt: { color: "#5A7A68", fontSize: 13, fontWeight: "700" },
+  faneBtnTxtActive: { color: uiColor.primarySoft, fontWeight: "800" },
+  faneForklaring: { color: uiColor.textFaint, fontSize: 12, marginBottom: 10, lineHeight: 17 },
   historikkListe: {
     backgroundColor: "#090F0C", borderRadius: 18,
     borderWidth: 1, borderColor: "#172218",
@@ -603,15 +656,15 @@ const styles = StyleSheet.create({
   historikkRadSiste: { backgroundColor: "rgba(44,195,107,0.06)" },
   historikkEmoji:    { fontSize: 20 },
   historikkBody:     { flex: 1 },
-  historikkDyr:      { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  historikkType:     { color: "#3D5446", fontWeight: "600" },
-  historikkTid:      { color: "#3D5446", fontSize: 12, marginTop: 2 },
+  historikkDyr:      { color: uiColor.textPrimary, fontSize: 14, fontWeight: "700" },
+  historikkType:     { color: uiColor.textFaint, fontWeight: "600" },
+  historikkTid:      { color: uiColor.textFaint, fontSize: 12, marginTop: 2 },
   historikkSlett: {
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: "rgba(248,113,113,0.07)",
     alignItems: "center", justifyContent: "center",
   },
-  historikkTom: { color: "#3D5446", fontSize: 13, padding: 16, textAlign: "center" },
+  historikkTom: { color: uiColor.textFaint, fontSize: 13, padding: 16, textAlign: "center" },
 
   // Lenker
   linksRow: { flexDirection: "row", gap: 10 },
@@ -638,8 +691,8 @@ const styles = StyleSheet.create({
     width: 44, height: 5, borderRadius: 3,
     backgroundColor: "#243B2C", alignSelf: "center", marginBottom: 22,
   },
-  modalTitle: { color: "#FFFFFF", fontSize: 22, fontWeight: "900", marginBottom: 6 },
-  modalSub:   { color: "#4D6858", fontSize: 14, lineHeight: 20, marginBottom: 26 },
+  modalTitle: { color: uiColor.textPrimary, fontSize: 22, fontWeight: "900", marginBottom: 6 },
+  modalSub:   { color: uiColor.textMuted, fontSize: 14, lineHeight: 20, marginBottom: 26 },
 
   // Kompassrose
   compass:    { gap: 10, alignItems: "center", marginBottom: 14 },
@@ -650,11 +703,11 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   compassBtnActive: {
-    backgroundColor: "#122E1C", borderColor: "#2CC36B",
-    shadowColor: "#2CC36B", shadowOpacity: 0.22, shadowRadius: 10, elevation: 5,
+    backgroundColor: "#122E1C", borderColor: uiColor.primary,
+    shadowColor: uiColor.primary, shadowOpacity: 0.22, shadowRadius: 10, elevation: 5,
   },
   compassBtnText:       { color: "#5A7A68", fontSize: 15, fontWeight: "900" },
-  compassBtnTextActive: { color: "#2CC36B" },
+  compassBtnTextActive: { color: uiColor.primary },
   compassCenter: {
     width: 68, height: 68, borderRadius: 34,
     backgroundColor: "#091210", borderWidth: 1, borderColor: "#1A2B20",
@@ -667,7 +720,7 @@ const styles = StyleSheet.create({
     borderRadius: 12, padding: 12,
     borderWidth: 1, borderColor: "rgba(44,195,107,0.15)",
   },
-  retningValgtText: { color: "#A9F2BF", fontSize: 14, fontWeight: "600", flex: 1 },
+  retningValgtText: { color: uiColor.primarySoft, fontSize: 14, fontWeight: "600", flex: 1 },
 
   // Modal-knapper
   modalActions: { flexDirection: "row", gap: 12, marginTop: 4 },
@@ -678,10 +731,10 @@ const styles = StyleSheet.create({
   },
   skipBtnText: { color: "#6B8A76", fontSize: 15, fontWeight: "800" },
   confirmBtn: {
-    flex: 1.6, backgroundColor: "#2CC36B",
+    flex: 1.6, backgroundColor: uiColor.primary,
     borderRadius: 16, paddingVertical: 17,
     flexDirection: "row", alignItems: "center",
     justifyContent: "center", gap: 8,
   },
-  confirmBtnText: { color: "#04110A", fontSize: 15, fontWeight: "900" },
+  confirmBtnText: { color: uiColor.primaryText, fontSize: 15, fontWeight: "900" },
 });
