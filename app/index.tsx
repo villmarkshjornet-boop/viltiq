@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
+import Surface from "../components/ui/Surface";
 import { subscribeToVisibleCameras } from "../src/services/cameras";
 import { getAktivtJaktlagId } from "../src/services/jaktlag";
 import {
@@ -295,34 +296,28 @@ export default function HomeScreen() {
             })}
           </ScrollView>
 
-          {/* ── Miljø: Vær + Måne + Sesonger ── */}
-          <View style={styles.miljøRad}>
-            {vær ? (
-              <View style={styles.miljøKort}>
-                <Text style={styles.miljøEmoji}>{vær.emoji}</Text>
-                <Text style={styles.miljøVerdi}>{vær.temperatur}°</Text>
-                <Text style={styles.miljøSub}>{vær.vindHastighet} m/s {vindRetningLabel(vær.vindRetning)}</Text>
-              </View>
-            ) : (
-              <View style={styles.miljøKort}>
-                <Text style={styles.miljøEmoji}>🌡</Text>
-                <Text style={styles.miljøVerdi}>—</Text>
-                <Text style={styles.miljøSub}>Henter vær...</Text>
-              </View>
-            )}
-            <View style={[styles.miljøKort, styles.miljøKortMid]}>
+          {/* ── Miljø: Vær + Måne + Sesonger — ÉN gruppert overflate i stedet for tre separate kort (§15) ── */}
+          <Surface style={styles.miljøRad}>
+            <View style={styles.miljøKort}>
+              <Text style={styles.miljøEmoji}>{vær?.emoji ?? "🌡"}</Text>
+              <Text style={styles.miljøVerdi}>{vær ? `${vær.temperatur}°` : "—"}</Text>
+              <Text style={styles.miljøSub}>{vær ? `${vær.vindHastighet} m/s ${vindRetningLabel(vær.vindRetning)}` : "Henter vær..."}</Text>
+            </View>
+            <View style={styles.miljøDivider} />
+            <View style={styles.miljøKort}>
               <Text style={styles.miljøEmoji}>{måne.emoji}</Text>
               <Text style={styles.miljøVerdi}>{måne.belysning}%</Text>
               <Text style={styles.miljøSub}>{måne.navn}</Text>
             </View>
+            <View style={styles.miljøDivider} />
             <View style={styles.miljøKort}>
               <Text style={styles.miljøEmoji}>🏹</Text>
               <Text style={styles.miljøVerdi}>{åpne.length}</Text>
-              <Text style={styles.miljøSub}>
+              <Text style={styles.miljøSub} numberOfLines={1}>
                 {åpne.length === 0 ? "Ingen åpne" : åpne.join(", ")}
               </Text>
             </View>
-          </View>
+          </Surface>
 
           {/* ── Loading / Feil ── */}
           {laster ? (
@@ -341,7 +336,7 @@ export default function HomeScreen() {
             </View>
           ) : (
             <>
-              {/* ── Hero: Dagens aktivitet ── */}
+              {/* ── Hero: Dagens aktivitet — nivå, nøkkeltall og forklaring i ÉTT kort (§4/§15) ── */}
               <View style={styles.heroCard}>
                 <View style={[styles.heroAccent, { backgroundColor: heroColor + "22" }]} />
                 <View style={[styles.heroAccentDot, { backgroundColor: heroColor }]} />
@@ -350,36 +345,31 @@ export default function HomeScreen() {
                   <Text style={[styles.heroValue, { color: heroColor }]}>
                     {aktivitetData.nivå}
                   </Text>
-                  <Text style={styles.heroSub}>Score: {aktivitetData.score} · {siste24t.length} obs siste 24t</Text>
-                </View>
-              </View>
+                  <Text style={styles.heroDesc}>{aktivitetData.beskrivelse}</Text>
 
-              {/* ── Stats-rad ── */}
-              <View style={styles.statsRow}>
-                <View style={styles.statCard}>
-                  <Text style={styles.statLabel}>Siste 24t</Text>
-                  <Text style={styles.statValue}>{siste24t.length}</Text>
-                  <Text style={styles.statUnit}>obs</Text>
+                  <View style={styles.heroStatsRow}>
+                    <View style={styles.heroStat}>
+                      <Text style={styles.statLabel}>Siste 24t</Text>
+                      <Text style={styles.statValue}>{siste24t.length} obs</Text>
+                    </View>
+                    <View style={styles.heroStatDivider} />
+                    <View style={styles.heroStat}>
+                      <Text style={styles.statLabel}>Mest aktiv</Text>
+                      <Text style={[styles.statValue, styles.statValueSm]}>{mostActiveDyr}</Text>
+                    </View>
+                    <View style={styles.heroStatDivider} />
+                    <View style={styles.heroStat}>
+                      <Text style={styles.statLabel}>Trend</Text>
+                      <Text style={[
+                        styles.statValue, styles.statValueSm,
+                        trend === "Økende"   ? styles.trendUp   :
+                        trend === "Synkende" ? styles.trendDown : styles.trendNeutral,
+                      ]}>
+                        {trend === "Økende" ? "↑ " : trend === "Synkende" ? "↓ " : ""}{trend}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-                <View style={[styles.statCard, styles.statCardMid]}>
-                  <Text style={styles.statLabel}>Mest aktiv</Text>
-                  <Text style={[styles.statValue, styles.statValueSm]}>{mostActiveDyr}</Text>
-                </View>
-                <View style={styles.statCard}>
-                  <Text style={styles.statLabel}>Trend</Text>
-                  <Text style={[
-                    styles.statValue, styles.statValueSm,
-                    trend === "Økende"   ? styles.trendUp   :
-                    trend === "Synkende" ? styles.trendDown : styles.trendNeutral,
-                  ]}>
-                    {trend === "Økende" ? "↑ " : trend === "Synkende" ? "↓ " : ""}{trend}
-                  </Text>
-                </View>
-              </View>
-
-              {/* ── Aktivitetsbeskrivelse ── */}
-              <View style={styles.descCard}>
-                <Text style={styles.descText}>{aktivitetData.beskrivelse}</Text>
               </View>
 
               {/* ── Beste område nå ── */}
@@ -620,31 +610,23 @@ const styles = StyleSheet.create({
     color: "#3D5C4A", fontSize: 11, fontWeight: "800",
     textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10,
   },
-  heroValue: { fontSize: 48, fontWeight: "900", letterSpacing: -1, lineHeight: 52 },
-  heroSub:   { color: "#4D6858", fontSize: 13, marginTop: 10, fontWeight: "600" },
+  heroValue: { fontSize: 44, fontWeight: "900", letterSpacing: -1, lineHeight: 48 },
+  heroDesc:  { color: "#7A9A88", fontSize: 14, lineHeight: 21, marginTop: 10 },
 
-  // Stats
-  statsRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
-  statCard: {
-    flex: 1, backgroundColor: "#0B1610",
-    borderWidth: 1, borderColor: "#192420",
-    borderRadius: 18, padding: 14, alignItems: "center",
+  // Stats — nå EN rad inni hero-kortet, ikke egne kort (§15)
+  heroStatsRow: {
+    flexDirection: "row", alignItems: "center",
+    marginTop: 18, paddingTop: 16,
+    borderTopWidth: 1, borderTopColor: "#152019",
   },
-  statCardMid:  { borderColor: "#1E2C20" },
-  statLabel:    { color: "#3D5446", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8, textAlign: "center" },
-  statValue:    { color: "#FFFFFF", fontSize: 24, fontWeight: "900", textAlign: "center" },
+  heroStat: { flex: 1, alignItems: "center" },
+  heroStatDivider: { width: 1, height: 30, backgroundColor: "#152019" },
+  statLabel:    { color: "#3D5446", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6, textAlign: "center" },
+  statValue:    { color: "#FFFFFF", fontSize: 17, fontWeight: "900", textAlign: "center" },
   statValueSm:  { fontSize: 15 },
-  statUnit:     { color: "#3D5446", fontSize: 10, marginTop: 3, textAlign: "center" },
   trendUp:      { color: "#4ADE80" },
   trendDown:    { color: "#F87171" },
   trendNeutral: { color: "#6B8A76" },
-
-  // Beskrivelses-kort
-  descCard: {
-    backgroundColor: "#0B1610", borderWidth: 1, borderColor: "#192420",
-    borderRadius: 18, paddingHorizontal: 18, paddingVertical: 14, marginBottom: 12,
-  },
-  descText: { color: "#7A9A88", fontSize: 14, lineHeight: 22 },
 
   // Beste område
   besteCard: {
@@ -767,9 +749,9 @@ const styles = StyleSheet.create({
   },
 
   // Miljø-rad
-  miljøRad:    { flexDirection: "row", gap: 8, marginBottom: 16 },
-  miljøKort:   { flex: 1, backgroundColor: "#0B1610", borderRadius: 16, borderWidth: 1, borderColor: "#192420", padding: 12, alignItems: "center" },
-  miljøKortMid: { borderColor: "#1C2A20" },
+  miljøRad:    { flexDirection: "row", alignItems: "center", padding: 14, marginBottom: 16 },
+  miljøKort:   { flex: 1, alignItems: "center" },
+  miljøDivider: { width: 1, height: 34, backgroundColor: "#192420" },
   miljøEmoji:  { fontSize: 20, marginBottom: 4 },
   miljøVerdi:  { color: "#FFFFFF", fontSize: 15, fontWeight: "900", textAlign: "center" },
   miljøSub:    { color: "#3D5446", fontSize: 10, marginTop: 2, textAlign: "center", fontWeight: "700" },

@@ -762,7 +762,7 @@ export default function KameraDetaljScreen() {
                   value={name}
                   onChangeText={setName}
                   placeholder="Navn på kamera"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor="#5C7568"
                   style={styles.input}
                 />
 
@@ -780,7 +780,7 @@ export default function KameraDetaljScreen() {
                   value={notes}
                   onChangeText={setNotes}
                   placeholder="F.eks. trekk, åteplass, sti, høyde"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor="#5C7568"
                   style={[styles.input, styles.textArea]}
                   multiline
                 />
@@ -882,7 +882,7 @@ export default function KameraDetaljScreen() {
                 }}
                 title={kamera.name}
                 description={`${kamera.directionDegrees}° (${vindRetningLabel(kamera.directionDegrees)})`}
-                pinColor="#22c55e"
+                pinColor="#2CC36B"
               />
 
               {observasjonerINaerheten.slice(0, 20).map((obs, index) => (
@@ -894,7 +894,7 @@ export default function KameraDetaljScreen() {
                   }}
                   title={`${obs.dyr} · ${obs.type}`}
                   description={obs.kommentar || formatDato(obs.tid)}
-                  pinColor="#60a5fa"
+                  pinColor="#60A5FA"
                 />
               ))}
             </MapView>
@@ -1207,7 +1207,7 @@ export default function KameraDetaljScreen() {
                   onChangeText={setObsAntall}
                   keyboardType="number-pad"
                   placeholder="1"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor="#5C7568"
                   style={styles.input}
                 />
 
@@ -1298,15 +1298,15 @@ const styles = StyleSheet.create({
 
   header: { marginBottom: 16 },
   eyebrow: {
-    color: "#6ee7b7",
+    color: "#A9F2BF",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 1.3,
     marginBottom: 8,
   },
-  title: { color: "#ffffff", fontSize: 30, fontWeight: "800", marginTop: 2 },
-  subtitle: { color: "#94a3b8", fontSize: 14, marginTop: 6, marginBottom: 4 },
+  title: { color: "#FFFFFF", fontSize: 30, fontWeight: "800", marginTop: 2 },
+  subtitle: { color: "#8EA0AA", fontSize: 14, marginTop: 6, marginBottom: 4 },
 
   heroCard: {
     position: "relative",
@@ -1335,15 +1335,15 @@ const styles = StyleSheet.create({
   },
   heroLeft: { flex: 1 },
   heroLabel: {
-    color: "#86efac",
+    color: "#A9F2BF",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 1.1,
     marginBottom: 8,
   },
-  heroTitle: { color: "#ffffff", fontSize: 24, fontWeight: "800" },
-  heroText: { color: "#cbd5e1", fontSize: 14, lineHeight: 21, marginTop: 8 },
+  heroTitle: { color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
+  heroText: { color: "#C8D8D0", fontSize: 14, lineHeight: 21, marginTop: 8 },
   heroBadgeCol: { alignItems: "flex-end", gap: 6 },
   heroBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   heroBadgeText: { fontSize: 12, fontWeight: "800" },
@@ -1356,9 +1356,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.05)",
     padding: 12,
   },
-  heroStatValue: { color: "#ffffff", fontSize: 18, fontWeight: "800" },
+  heroStatValue: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
   heroStatLabel: {
-    color: "#94a3b8",
+    color: "#8EA0AA",
     fontSize: 11,
     marginTop: 4,
     textTransform: "uppercase",
@@ -1371,23 +1371,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  konfidensBadgeText: { color: "#cbd5e1", fontSize: 10, fontWeight: "800" },
-  konfidensHint: { color: "#94a3b8", fontSize: 12, marginTop: 8, lineHeight: 17 },
+  konfidensBadgeText: { color: "#C8D8D0", fontSize: 10, fontWeight: "800" },
+  konfidensHint: { color: "#8EA0AA", fontSize: 12, marginTop: 8, lineHeight: 17 },
 
   levelHighBg: { backgroundColor: "rgba(239,68,68,0.14)" },
-  levelHighText: { color: "#fca5a5" },
+  levelHighText: { color: "#FCA5A5" },
   levelMediumBg: { backgroundColor: "rgba(245,158,11,0.14)" },
-  levelMediumText: { color: "#fde68a" },
+  levelMediumText: { color: "#FDE68A" },
   levelLowBg: { backgroundColor: "rgba(34,197,94,0.14)" },
-  levelLowText: { color: "#86efac" },
+  levelLowText: { color: "#A9F2BF" },
 
   topActionsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
 
   card: {
-    backgroundColor: "#111827",
+    backgroundColor: "#0B1610",
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#1f2937",
+    borderColor: "#0B1610",
     padding: 16,
     marginBottom: 14,
   },
@@ -1398,33 +1398,33 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   cardHeaderSimple: { marginBottom: 10 },
-  cardTitle: { color: "#ffffff", fontSize: 17, fontWeight: "800" },
+  cardTitle: { color: "#FFFFFF", fontSize: 17, fontWeight: "800" },
   cardCaption: { color: "#7c8b95", fontSize: 12, marginTop: 4 },
 
   editButton: {
-    backgroundColor: "#0f2b3a",
+    backgroundColor: "#0B1B26",
     borderWidth: 1,
-    borderColor: "#164e63",
+    borderColor: "#154759",
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  editButtonText: { color: "#bae6fd", fontSize: 12, fontWeight: "800" },
+  editButtonText: { color: "#BFE9FA", fontSize: 12, fontWeight: "800" },
 
   label: {
-    color: "#94a3b8",
+    color: "#8EA0AA",
     fontSize: 12,
     textTransform: "uppercase",
     marginTop: 12,
     marginBottom: 4,
   },
-  value: { color: "#ffffff", fontSize: 15, lineHeight: 22 },
+  value: { color: "#FFFFFF", fontSize: 15, lineHeight: 22 },
 
   input: {
-    backgroundColor: "#0f172a",
+    backgroundColor: "#060E08",
     borderWidth: 1,
-    borderColor: "#1f2937",
-    color: "#ffffff",
+    borderColor: "#0B1610",
+    color: "#FFFFFF",
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -1440,30 +1440,30 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: "#1f2937",
+    backgroundColor: "#0B1610",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#374151",
+    borderColor: "#192420",
   },
-  choiceActive: { backgroundColor: "#163222", borderColor: "#22c55e" },
-  choiceText: { color: "#ffffff", fontWeight: "800" },
-  choiceTextActive: { color: "#86efac" },
+  choiceActive: { backgroundColor: "#163222", borderColor: "#2CC36B" },
+  choiceText: { color: "#FFFFFF", fontWeight: "800" },
+  choiceTextActive: { color: "#A9F2BF" },
 
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 999,
-    backgroundColor: "#1f2937",
+    backgroundColor: "#0B1610",
     borderWidth: 1,
-    borderColor: "#374151",
+    borderColor: "#192420",
   },
-  chipActive: { backgroundColor: "#12351f", borderColor: "#22c55e" },
-  chipText: { color: "#e5e7eb", fontSize: 12, fontWeight: "700" },
-  chipTextActive: { color: "#86efac", fontWeight: "800" },
+  chipActive: { backgroundColor: "#12351f", borderColor: "#2CC36B" },
+  chipText: { color: "#D7E6DC", fontSize: 12, fontWeight: "700" },
+  chipTextActive: { color: "#A9F2BF", fontWeight: "800" },
 
   primaryButton: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#2CC36B",
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
@@ -1471,7 +1471,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonHalf: {
     flex: 1,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#2CC36B",
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
@@ -1479,12 +1479,12 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: "#04110a", fontSize: 15, fontWeight: "800" },
   secondaryButtonHalf: {
     flex: 1,
-    backgroundColor: "#1f2937",
+    backgroundColor: "#0B1610",
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
   },
-  secondaryButtonText: { color: "#e5e7eb", fontSize: 15, fontWeight: "800" },
+  secondaryButtonText: { color: "#D7E6DC", fontSize: 15, fontWeight: "800" },
 
   deleteButton: {
     marginTop: 18,
@@ -1493,39 +1493,39 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
   },
-  deleteButtonText: { color: "#fca5a5", fontSize: 15, fontWeight: "800" },
+  deleteButtonText: { color: "#FCA5A5", fontSize: 15, fontWeight: "800" },
 
   statusGrid: { gap: 10 },
   statusMiniCard: {
-    backgroundColor: "#0f172a",
+    backgroundColor: "#060E08",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#1f2937",
+    borderColor: "#0B1610",
     padding: 12,
     marginTop: 10,
   },
   statusMiniLabel: {
-    color: "#94a3b8",
+    color: "#8EA0AA",
     fontSize: 12,
     marginBottom: 5,
     textTransform: "uppercase",
   },
-  statusMiniValue: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
+  statusMiniValue: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
 
   map: { width: "100%", height: 260, borderRadius: 16, marginTop: 12 },
-  mapInfo: { color: "#94a3b8", fontSize: 12, marginTop: 10, lineHeight: 18 },
+  mapInfo: { color: "#8EA0AA", fontSize: 12, marginTop: 10, lineHeight: 18 },
 
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
   statCard: {
     flex: 1,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#060E08",
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#1f2937",
+    borderColor: "#0B1610",
     padding: 14,
   },
-  statLabel: { color: "#94a3b8", fontSize: 12, marginBottom: 6 },
-  statValue: { color: "#ffffff", fontSize: 20, fontWeight: "800" },
+  statLabel: { color: "#8EA0AA", fontSize: 12, marginBottom: 6 },
+  statValue: { color: "#FFFFFF", fontSize: 20, fontWeight: "800" },
 
   periodeRow: {
     flexDirection: "row",
@@ -1537,20 +1537,20 @@ const styles = StyleSheet.create({
   periodGrid: { flexDirection: "row", gap: 8 },
   periodCell: {
     flex: 1,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#060E08",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#1f2937",
+    borderColor: "#0B1610",
     padding: 10,
   },
   periodCellLabel: {
-    color: "#94a3b8",
+    color: "#8EA0AA",
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 0.6,
     marginBottom: 4,
   },
-  periodCellValue: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
+  periodCellValue: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
 
   barRad: { marginBottom: 12 },
   barLeft: {
@@ -1559,15 +1559,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 6,
   },
-  barDyr: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
-  barMeta: { color: "#94a3b8", fontSize: 12 },
+  barDyr: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  barMeta: { color: "#8EA0AA", fontSize: 12 },
   barTrack: {
     height: 8,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#060E08",
     borderRadius: 4,
     overflow: "hidden",
   },
-  barFyllSoft: { height: "100%", borderRadius: 4, backgroundColor: "#60a5fa" },
+  barFyllSoft: { height: "100%", borderRadius: 4, backgroundColor: "#60A5FA" },
 
   summaryBox: {
     marginTop: 18,
@@ -1578,29 +1578,29 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   summaryTitle: {
-    color: "#86efac",
+    color: "#A9F2BF",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 8,
   },
-  summaryText: { color: "#e2e8f0", fontSize: 14, lineHeight: 21 },
+  summaryText: { color: "#D7E6DC", fontSize: 14, lineHeight: 21 },
 
-  highlightBox: { backgroundColor: "#0f172a", borderRadius: 14, padding: 14 },
+  highlightBox: { backgroundColor: "#060E08", borderRadius: 14, padding: 14 },
   highlightTitle: {
-    color: "#86efac",
+    color: "#A9F2BF",
     fontSize: 13,
     fontWeight: "800",
     textTransform: "uppercase",
     marginBottom: 8,
   },
-  highlightText: { color: "#ffffff", fontSize: 16, fontWeight: "800" },
-  highlightSmall: { color: "#94a3b8", fontSize: 13, marginTop: 4 },
-  highlightComment: { color: "#cbd5e1", fontSize: 13, marginTop: 8 },
+  highlightText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
+  highlightSmall: { color: "#8EA0AA", fontSize: 13, marginTop: 4 },
+  highlightComment: { color: "#C8D8D0", fontSize: 13, marginTop: 8 },
 
   subSectionTitle: {
-    color: "#ffffff",
+    color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "800",
     marginBottom: 8,
@@ -1610,23 +1610,23 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#1f2937",
+    borderBottomColor: "#0B1610",
   },
-  listKey: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
-  listValue: { color: "#cbd5e1", fontSize: 14 },
+  listKey: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  listValue: { color: "#C8D8D0", fontSize: 14 },
 
   obsRow: {
     flexDirection: "row",
     gap: 10,
     alignItems: "flex-start",
-    backgroundColor: "#0f172a",
+    backgroundColor: "#060E08",
     borderRadius: 14,
     padding: 12,
     marginBottom: 10,
   },
-  obsTitle: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
-  obsMeta: { color: "#94a3b8", fontSize: 12, marginTop: 4 },
-  obsComment: { color: "#cbd5e1", fontSize: 12, marginTop: 6 },
+  obsTitle: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  obsMeta: { color: "#8EA0AA", fontSize: 12, marginTop: 4 },
+  obsComment: { color: "#C8D8D0", fontSize: 12, marginTop: 6 },
   obsActions: { alignItems: "flex-end", gap: 8 },
   distanceBadge: {
     backgroundColor: "#12351f",
@@ -1636,7 +1636,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  distanceBadgeText: { color: "#86efac", fontSize: 12, fontWeight: "800" },
+  distanceBadgeText: { color: "#A9F2BF", fontSize: 12, fontWeight: "800" },
   deleteObsButton: {
     width: 32,
     height: 32,
@@ -1654,14 +1654,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
-  emptyTitle: { color: "#ffffff", fontSize: 24, fontWeight: "800" },
+  emptyTitle: { color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
   emptyText: {
-    color: "#94a3b8",
+    color: "#8EA0AA",
     fontSize: 14,
     marginTop: 8,
     textAlign: "center",
   },
-  emptyInfo: { color: "#94a3b8", fontSize: 14, marginTop: 8 },
+  emptyInfo: { color: "#8EA0AA", fontSize: 14, marginTop: 8 },
 
   modal: {
     flex: 1,
@@ -1670,11 +1670,11 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalCard: {
-    backgroundColor: "#111827",
+    backgroundColor: "#0B1610",
     padding: 20,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#1f2937",
+    borderColor: "#0B1610",
     maxHeight: "88%",
   },
 });
