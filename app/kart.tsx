@@ -418,6 +418,7 @@ export default function KartScreen() {
   const [visAktiveSoner, setVisAktiveSoner] = useState(false);
   const [visSporAnnet,   setVisSporAnnet]   = useState(true);
   const [visEiendomsgrenser, setVisEiendomsgrenser] = useState(false);
+  const [visObservasjoner, setVisObservasjoner] = useState(true);
   const [medlsPosisjon,  setMedlsPosisjon]  = useState<MedlemPosisjon[]>([]);
   // Miljøoppslag (høyde/habitat/vær/snø/vind) til den økologiske prioren i
   // motoren — kun løst NÅR "Prediksjon" faktisk er slått på (nettverkskall,
@@ -902,7 +903,7 @@ export default function KartScreen() {
       return {
         prediksjonsoner: [] as PrediksjonssoneVisning[],
         besteMotorSone: null as PredictionZone | null,
-        heatmapPerArt: {} as Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[] }>>,
+        heatmapPerArt: {} as Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[]; zone: PredictionZone | null }>>,
       };
     }
     const artsfarger: Record<string, string> = {
@@ -911,7 +912,7 @@ export default function KartScreen() {
     const motorArter: Partial<Record<string, EngineSpecies>> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg" };
 
     const visning: PrediksjonssoneVisning[] = [];
-    const heatmap: Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[] }>> = {};
+    const heatmap: Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[]; zone: PredictionZone | null }>> = {};
     let beste: PredictionZone | null = null;
 
     for (const dyr of dyrListe) {
@@ -934,9 +935,8 @@ export default function KartScreen() {
       // Heatmap (§5–§8 i STEG 4-oppdraget): vektede grid-punkter fra HELE
       // motorens skårede flate, ikke bare klyngede soner — samme sannhets-
       // kilde som prediksjonsoner/besteMotorSone under, kun uklynget.
-      heatmap[dyr] = { species: motorArt, points: resultat.heatmapPoints };
-
-      const sone = resultat.zones[0];
+      const sone = resultat.zones[0] ?? null;
+      heatmap[dyr] = { species: motorArt, points: resultat.heatmapPoints, zone: sone };
       if (!sone) continue;
 
       visning.push({
@@ -965,6 +965,12 @@ export default function KartScreen() {
     const besteDyr = dyrListe.find((d) => heatmapPerArt[d]?.species && besteMotorSone?.species === heatmapPerArt[d]?.species);
     return besteDyr ? heatmapPerArt[besteDyr] ?? null : null;
   }, [visPrediksjon, aktivtFilter, heatmapPerArt, besteMotorSone]);
+
+  // STEG 5 §5: sonen som faktisk forklares når brukeren trykker på hotspot-
+  // markøren — sonen bak DET SYNLIGE heatmap-laget (kan avvike fra
+  // besteMotorSone når et artsfilter er valgt), med besteMotorSone som
+  // fallback når heatmapet av en eller annen grunn ikke har egen sone.
+  const hotspotSone = aktivHeatmap?.zone ?? besteMotorSone;
 
   // Tidbaserte aktive soner (klokkeslett-mønster)
   const aktiveSoner = useMemo<AktivSone[]>(() => {
@@ -1009,8 +1015,8 @@ export default function KartScreen() {
     if (errorText) {
       return <Text style={styles.bottomError}>{errorText}</Text>;
     }
-    if (visPrediksjon && besteMotorSone) {
-      return <EngineStatusPanel zone={besteMotorSone} compact={compact} />;
+    if (visPrediksjon && hotspotSone) {
+      return <EngineStatusPanel zone={hotspotSone} compact={compact} showScore />;
     }
     if (bestZone) {
       if (compact) {
@@ -1186,7 +1192,7 @@ export default function KartScreen() {
                 tidligere kun breddegrad mot bestZone sin VEKTEDE
                 GJENNOMSNITTSPOSISJON — som i praksis nesten aldri stemte
                 eksakt, og ga en dobbel-pin de fleste steder. */}
-            {dyrObsMedGps.filter((o) => !bestZone || o.id !== bestZone.id).map((o) => (
+            {visObservasjoner && dyrObsMedGps.filter((o) => !bestZone || o.id !== bestZone.id).map((o) => (
               <Marker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
@@ -1277,9 +1283,38 @@ export default function KartScreen() {
             {/* ViltIQ heatmap (§5–§7 i STEG 4-oppdraget) — motorens
                 sannsynlighetslandskap for den aktive arten, ikke bare
                 sonesentrene. Erstatter de gamle per-art-sirklene for de tre
-                artene motoren faktisk vurderer. */}
+                artene motoren faktisk vurderer.
+
+                STEG 5 §7 — zoom-oppførsel er VERIFISERT, ikke bygget på nytt:
+                radius er i SKJERM-piksler, ikke geografiske meter, på begge
+                plattformer (leaflet.heat sin simpleheat-motor på web, Google
+                Maps' HeatmapTileProvider via react-native-maps på native).
+                Siden punktene projiseres til piksler på nytt ved hver
+                zoom/pan (leaflet: "moveend"-lytter, Android: kvadtre-baserte
+                tiles per zoom-nivå), gir SAMME piksel-radius automatisk
+                bredere/jevnere flater når man zoomer ut og mer lokal
+                variasjon når man zoomer inn — uten noe eget GIS-lag. Se
+                components/LeafletMapImpl.tsx sin Heatmap-komponent for
+                web-implementasjonen. */}
             {aktivHeatmap && aktivHeatmap.points.length > 0 && (
               <Heatmap points={aktivHeatmap.points} radius={32} />
+            )}
+
+            {/* STEG 5 §5: trykkbar hotspot-markør — åpner den fulle
+                motorforklaringen (art/nivå/confidence/signaler/score) for
+                sonen bak det synlige heatmap-laget. En diskret ring, ikke en
+                pin, for ikke å late som om dette er et eksakt punkt (§7). */}
+            {hotspotSone && (
+              <Marker
+                coordinate={{ latitude: hotspotSone.center.latitude, longitude: hotspotSone.center.longitude }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                onPress={() => setSheetSnap("expanded")}
+              >
+                <View style={styles.hotspotRingWrap}>
+                  <View style={styles.hotspotRing} />
+                </View>
+              </Marker>
             )}
 
             {/* Arter uten motorstøtte (i praksis: Rev) beholder den enkle
@@ -1425,15 +1460,24 @@ export default function KartScreen() {
           </View>
         )}
 
-        {/* ── Kartlag-panel ── Én samlet kontroll (§21), erstatter 5 spredte av/på-knapper. */}
+        {/* ── Kartlag-panel ── Én samlet kontroll (§21), erstatter 5 spredte
+            av/på-knapper. STEG 5 §6: gruppert i "ViltIQ" (motorens egne lag)
+            og "Registreringer" (rådata brukeren/kameraene har samlet inn),
+            slik at det er tydelig hva som er en prediksjon og hva som er en
+            faktisk observasjon. */}
         {lagmenyÅpen && !selectedPin && !selectedCamera && (
           <Surface variant="elevated" style={[styles.layersPanel, uiElevation.panel]}>
             <Text style={styles.layersPanelTitle}>Kartlag</Text>
-            <Toggle label="Kamera" icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
-            <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
-            <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
-            <Toggle label="ViltIQ Heatmap" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
+
+            <Text style={styles.layersGroupTitle}>ViltIQ</Text>
+            <Toggle label="Heatmap / prediksjon" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
             <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor="#22D3EE" />
+
+            <Text style={styles.layersGroupTitle}>Registreringer</Text>
+            <Toggle label="Observasjoner" icon="eye-outline" active={visObservasjoner} onToggle={() => setVisObservasjoner((v) => !v)} accentColor="#34D399" />
+            <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
+            <Toggle label="Kamera" icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
+            <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
           </Surface>
         )}
 
@@ -2116,6 +2160,11 @@ const styles = StyleSheet.create({
     color: uiColor.textPrimary, fontSize: 13, fontWeight: "900",
     textTransform: "uppercase", letterSpacing: 1, marginBottom: uiSpacing.sm,
   },
+  layersGroupTitle: {
+    color: uiColor.textFaint, fontSize: 10, fontWeight: "800",
+    textTransform: "uppercase", letterSpacing: 0.6,
+    marginTop: uiSpacing.sm, marginBottom: 2,
+  },
 
   // Desktop engine-panel — starter UNDER artsfilter-raden (top: 60 + rad-
   // høyde), aldri på samme høyde, for å unngå at panelet dekker filtrene.
@@ -2284,6 +2333,19 @@ const styles = StyleSheet.create({
     borderStyle: "solid",
     borderLeftColor: "transparent", borderRightColor: "transparent",
     borderTopColor: "#B45309",
+  },
+
+  // STEG 5 §5/§7 — trykkbar hotspot-ring. Bevisst en ring (område), ikke en
+  // pin (punkt), for å unngå å late som om dette er en eksakt dyre-posisjon.
+  // Touch-arealet er minTouchTarget selv om den visuelle ringen er mindre.
+  hotspotRingWrap: {
+    width: minTouchTarget, height: minTouchTarget,
+    alignItems: "center", justifyContent: "center",
+  },
+  hotspotRing: {
+    width: 26, height: 26, borderRadius: 13,
+    borderWidth: 3, borderColor: "#A78BFA",
+    backgroundColor: "rgba(167,139,250,0.18)",
   },
 
   obsPinWrap:   { alignItems: "center" },

@@ -9,6 +9,16 @@ type EngineStatusPanelProps = {
   compact?: boolean;
   /** Maks antall signaler å vise (§22: ikke overdriv). Default 4. */
   maxSignals?: number;
+  /**
+   * STEG 5 §5: vis motorens rå 0–100-visningsscore ("Score 82/100") og en
+   * påminnelse om at sonen er et ANSLÅTT OMRÅDE, ikke en eksakt dyre-
+   * posisjon — brukt kun der brukeren aktivt har bedt om en detaljert
+   * forklaring (f.eks. ved å trykke på et hotspot i kartet), ikke i de
+   * alltid-synlige oppsummeringene, så score ikke leses som en fasit.
+   * ALDRI presentert som en sannsynlighet (§5 i oppdraget) — kun som
+   * motorens egen, uklassifiserte visningsscore, atskilt fra confidence.
+   */
+  showScore?: boolean;
 };
 
 function ConfidenceBar({ confidence, tone }: { confidence: number; tone: string }) {
@@ -25,7 +35,7 @@ function ConfidenceBar({ confidence, tone }: { confidence: number; tone: string 
  * brukes i desktop-panelet og i mobilens bottom sheet, kun med ulik
  * kompakthet, slik at de to opplevelsene aldri kan drifte fra hverandre.
  */
-export default function EngineStatusPanel({ zone, compact = false, maxSignals = 4 }: EngineStatusPanelProps) {
+export default function EngineStatusPanel({ zone, compact = false, maxSignals = 4, showScore = false }: EngineStatusPanelProps) {
   if (!zone) {
     return (
       <View>
@@ -62,6 +72,12 @@ export default function EngineStatusPanel({ zone, compact = false, maxSignals = 
         <Badge label={zone.confidenceLevel} color={cColor} size="sm" />
       </View>
 
+      {showScore && (
+        <Text style={styles.scoreLine}>
+          Score {Math.round(zone.score)}/100 · viser motorens interne rangering, ikke en sannsynlighet
+        </Text>
+      )}
+
       {zone.dominantSignals.length > 0 && (
         <View style={styles.signals}>
           <Text style={styles.signalsTitle}>Viktigste signaler</Text>
@@ -72,6 +88,12 @@ export default function EngineStatusPanel({ zone, compact = false, maxSignals = 
             </View>
           ))}
         </View>
+      )}
+
+      {showScore && (
+        <Text style={styles.areaNote}>
+          Området er et anslag basert på tilgjengelig data — ikke dyrets eksakte posisjon.
+        </Text>
       )}
     </View>
   );
@@ -85,6 +107,9 @@ const styles = StyleSheet.create({
   confidenceLabel: { fontSize: 12, fontWeight: "700", color: color.textMuted, width: 76 },
   barTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: color.border, overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 3 },
+
+  scoreLine: { fontSize: 12, color: color.textMuted, marginBottom: spacing.md, lineHeight: 17 },
+  areaNote: { fontSize: 11, color: color.textFaint, marginTop: spacing.md, lineHeight: 16, fontStyle: "italic" },
 
   signals: { gap: spacing.sm },
   signalsTitle: { fontSize: 12, fontWeight: "800", color: color.textMuted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: spacing.xs },
