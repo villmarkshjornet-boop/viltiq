@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, {
@@ -66,7 +67,13 @@ import {
   resolveEnvironmentContext,
   type Species as EngineSpecies,
   type EnvironmentResolver,
+  type PredictionZone,
 } from "@/src/engine";
+import { color as uiColor, radius as uiRadius, spacing as uiSpacing, zIndex as uiZ, elevation as uiElevation, minTouchTarget } from "@/src/design/tokens";
+import Surface from "@/components/ui/Surface";
+import Toggle from "@/components/ui/Toggle";
+import BottomSheet, { type SheetSnap } from "@/components/ui/BottomSheet";
+import EngineStatusPanel from "@/components/ui/EngineStatusPanel";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 
@@ -413,6 +420,12 @@ export default function KartScreen() {
   // (ferdig) løst ennå; prediksjonsoner faller da tilbake til den rene
   // observasjonsmotoren under, uendret fra tidligere oppførsel.
   const [environmentResolver, setEnvironmentResolver] = useState<EnvironmentResolver | null>(null);
+
+  // ── STEG 3: presentasjonslag (ren UI — påvirker aldri motor/datalogikk) ──
+  const { width: skjermBredde, height: skjermHøyde } = useWindowDimensions();
+  const erDesktop = skjermBredde >= 900;
+  const [lagmenyÅpen, setLagmenyÅpen] = useState(false);
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
 
   // ── Langtrykk-meny og nye punkter ──
   const [selectedPin,  setSelectedPin]  = useState<MapPin | null>(null);
@@ -853,39 +866,48 @@ export default function KartScreen() {
   // kartet trenger ikke filtrere observasjoner per art før kallet. Bruker
   // den økologiske motoren når miljødata er løst, ellers den rene
   // observasjonsmotoren (identisk med oppførselen før miljølaget fantes).
-  const prediksjonsoner = useMemo(() => {
-    if (!visPrediksjon) return [];
+  const { prediksjonsoner, besteMotorSone } = useMemo(() => {
+    if (!visPrediksjon) return { prediksjonsoner: [] as PrediksjonssoneVisning[], besteMotorSone: null as PredictionZone | null };
     const artsfarger: Record<string, string> = {
       Rådyr: "#A78BFA", Elg: "#38BDF8", Hjort: "#FCD34D", Rev: "#FB923C",
     };
     const motorArter: Partial<Record<string, EngineSpecies>> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg" };
 
-    return dyrListe
-      .map((dyr): PrediksjonssoneVisning | null => {
-        const farge = artsfarger[dyr] ?? "#FFFFFF";
-        const motorArt = motorArter[dyr];
-        if (!motorArt) return beregnEnkelPrediksjonssone(dyr, observasjoner, farge);
+    const visning: PrediksjonssoneVisning[] = [];
+    let beste: PredictionZone | null = null;
 
-        const resultat = (environmentResolver && userLocation)
-          ? runEcologicalEngine(observasjoner, motorArt, {
-              areaCenter: userLocation,
-              areaRadiusMeters: Math.min(radiusKm * 1000, 5000),
-              environment: environmentResolver,
-            })
-          : runEngine(observasjoner, motorArt);
-        const sone = resultat.zones[0];
-        if (!sone) return null;
-        return {
-          dyr,
-          latitude:  sone.center.latitude,
-          longitude: sone.center.longitude,
-          radius:    sone.radiusMeters,
-          farge,
-          antall:    sone.observationCount,
-          etikett:   `${sone.level} · ${sone.confidenceLevel} konfidens`,
-        };
-      })
-      .filter((p): p is PrediksjonssoneVisning => p != null);
+    for (const dyr of dyrListe) {
+      const farge = artsfarger[dyr] ?? "#FFFFFF";
+      const motorArt = motorArter[dyr];
+      if (!motorArt) {
+        const fallback = beregnEnkelPrediksjonssone(dyr, observasjoner, farge);
+        if (fallback) visning.push(fallback);
+        continue;
+      }
+
+      const resultat = (environmentResolver && userLocation)
+        ? runEcologicalEngine(observasjoner, motorArt, {
+            areaCenter: userLocation,
+            areaRadiusMeters: Math.min(radiusKm * 1000, 5000),
+            environment: environmentResolver,
+          })
+        : runEngine(observasjoner, motorArt);
+      const sone = resultat.zones[0];
+      if (!sone) continue;
+
+      visning.push({
+        dyr,
+        latitude:  sone.center.latitude,
+        longitude: sone.center.longitude,
+        radius:    sone.radiusMeters,
+        farge,
+        antall:    sone.observationCount,
+        etikett:   `${sone.level} · ${sone.confidenceLevel} konfidens`,
+      });
+      if (!beste || sone.score > beste.score) beste = sone;
+    }
+
+    return { prediksjonsoner: visning, besteMotorSone: beste };
   }, [visPrediksjon, observasjoner, environmentResolver, userLocation, radiusKm]);
 
   // Tidbaserte aktive soner (klokkeslett-mønster)
@@ -913,6 +935,94 @@ export default function KartScreen() {
       );
     }
   }, [params.focusLat, params.focusLng, userLocation, mapReady]);
+
+  // "Hva skjer nå"-innholdet delt mellom desktop-panelet og mobilens bottom
+  // sheet (§16/§24) — samme data, to ulike beholdere. Viser motorens svar
+  // (art/nivå/confidence/signaler) når Prediksjon er på og har et resultat,
+  // ellers samme "beste område"-info (heatZones-basert) som eksisterte før
+  // STEG 3 — ingen datalogikk endret, kun hvor og hvordan den vises.
+  function statusInnhold(compact: boolean, medHeadline = true) {
+    if (loading) {
+      return (
+        <View style={styles.bottomRow}>
+          <ActivityIndicator size="small" color={uiColor.primary} />
+          <Text style={styles.bottomLoadText}>Laster...</Text>
+        </View>
+      );
+    }
+    if (errorText) {
+      return <Text style={styles.bottomError}>{errorText}</Text>;
+    }
+    if (visPrediksjon && besteMotorSone) {
+      return <EngineStatusPanel zone={besteMotorSone} compact={compact} />;
+    }
+    if (bestZone) {
+      if (compact) {
+        return (
+          <View style={styles.bottomTopRow}>
+            <Text style={styles.bottomTitle}>Beste område</Text>
+            <View style={styles.scoreBadge}>
+              <Text style={styles.scoreBadgeText}>
+                {normaliserScore(bestZone.score)} · {scoreEtikett(bestZone.score)}
+              </Text>
+            </View>
+          </View>
+        );
+      }
+      return (
+        <>
+          {medHeadline && (
+            <View style={styles.bottomTopRow}>
+              <Text style={styles.bottomTitle}>Beste område</Text>
+              <View style={styles.scoreBadge}>
+                <Text style={styles.scoreBadgeText}>
+                  {normaliserScore(bestZone.score)} · {scoreEtikett(bestZone.score)}
+                </Text>
+              </View>
+            </View>
+          )}
+          <Text style={styles.bottomMeta}>
+            {obs24tMedGps.length} obs siste 24t · {kameraer.length} kamera
+          </Text>
+          {sisteObs.slice(0, 2).map((obs) => (
+            <View key={obs.id} style={styles.recentRow}>
+              <Text style={styles.recentEmoji}>{dyrEmoji(obs.dyr)}</Text>
+              <Text style={styles.recentAnimal}>{obs.dyr}</Text>
+              <Text style={styles.recentTime}>{hentRelativTid(obs.tid)}</Text>
+              {obs.retning != null && (
+                <Ionicons
+                  name="navigate" size={12} color={uiColor.primary}
+                  style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
+                />
+              )}
+            </View>
+          ))}
+          <Pressable style={styles.moreLinkRow} onPress={() =>
+            mapRef.current?.animateToRegion(
+              { latitude: bestZone.latitude, longitude: bestZone.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 },
+              500
+            )
+          }>
+            <Text style={styles.moreLinkText}>Sentrer kart</Text>
+            <Ionicons name="chevron-forward" size={13} color={uiColor.primary} />
+          </Pressable>
+        </>
+      );
+    }
+    if (compact) {
+      return <Text style={styles.noDataText}>Ingen observasjoner innen {radiusKm} km.</Text>;
+    }
+    if (!medHeadline) {
+      // Headlinen er allerede vist i den alltid-synlige oppsummeringen over
+      // (mobil bottom sheet) — ikke gjenta den her, kun tilleggshintet.
+      return <Text style={styles.noDataText}>Langtrykk på kartet for å legge til punkt.</Text>;
+    }
+    return (
+      <Text style={styles.noDataText}>
+        Ingen observasjoner innen {radiusKm} km.{"\n"}Langtrykk på kartet for å legge til punkt.
+      </Text>
+    );
+  }
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -1149,10 +1259,14 @@ export default function KartScreen() {
           </View>
         )}
 
-        {/* ── Navigasjonsbar ── */}
+        {/* ── Navigasjonsbar ──
+            Én rad: tilbake, tittel, kartbunn-toggle. Ingen andre kontroller
+            her — kartlag/handlinger flyttet til den konsoliderte høyre-
+            kolonnen under (§21: "kartlag skal samles i én ryddig kontroll",
+            §7: ingen overlappende UI). */}
         <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+          <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
+            <Ionicons name="chevron-back" size={20} color={uiColor.textPrimary} />
             <Text style={styles.backText}>Tilbake</Text>
           </Pressable>
 
@@ -1178,129 +1292,105 @@ export default function KartScreen() {
           </View>
         </View>
 
-        {/* ── Venstre flytende knapper ── */}
+        {/* ── Artsfilter — alltid synlig rad, ikke en gjemt dropdown (§22) ── */}
         {!selectedPin && !selectedCamera && (
-          <View style={styles.leftButtons}>
-            {/* Filter */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterBar}
+            contentContainerStyle={styles.filterBarContent}
+          >
+            {dyrFilter.map((dyr) => {
+              const active = aktivtFilter === dyr;
+              return (
+                <Pressable
+                  key={dyr}
+                  onPress={() => setAktivtFilter(dyr)}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                >
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                    {dyr !== "Alle" && dyrEmoji(dyr) + " "}{dyr}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {/* ── Høyre kontrollkolonne: kartlag, registrer spor, min posisjon ──
+            Konsoliderer det som før var 7 spredte venstre-knapper + 1 høyre-
+            knapp til én forutsigbar kolonne (§8 Overlay management). */}
+        {!selectedPin && !selectedCamera && (
+          <View style={styles.controlColumn}>
             <Pressable
-              style={[styles.floatBtn, filterOpen && styles.floatBtnActive]}
-              onPress={() => filterOpenSet((v) => !v)}
+              style={[styles.controlBtn, lagmenyÅpen && styles.controlBtnActive]}
+              onPress={() => setLagmenyÅpen((v) => !v)}
+              hitSlop={4}
             >
-              <Ionicons name="filter" size={20} color="#D1FAE5" />
+              <Ionicons name="layers-outline" size={20} color={lagmenyÅpen ? uiColor.primary : uiColor.textSecondary} />
             </Pressable>
 
-            {/* Vis/skjul kameraer */}
             <Pressable
-              style={[styles.floatBtn, visKameraer && styles.floatBtnActiveBlue]}
-              onPress={() => setVisKameraer((v) => !v)}
-            >
-              <Ionicons name="camera" size={20} color={visKameraer ? "#60A5FA" : "#D1FAE5"} />
-            </Pressable>
-
-            {/* Sporpunkt — lagre spor ved GPS-posisjon */}
-            <Pressable
-              style={[styles.floatBtn, sporpunktLaster && { opacity: 0.5 }]}
+              style={[styles.controlBtn, sporpunktLaster && styles.controlBtnDisabled]}
               onPress={lagreSporpunkt}
               disabled={sporpunktLaster || !userLocation}
+              hitSlop={4}
             >
-              <Ionicons name="footsteps-outline" size={20} color="#D1FAE5" />
+              <Ionicons name="footsteps-outline" size={20} color={uiColor.textSecondary} />
             </Pressable>
 
-            {/* Vis/skjul spor- og "annet"-punkter */}
-            <Pressable
-              style={[styles.floatBtn, visSporAnnet && styles.floatBtnActiveYellow]}
-              onPress={() => setVisSporAnnet((v) => !v)}
-            >
-              <Ionicons name="layers-outline" size={20} color={visSporAnnet ? "#FCD34D" : "#D1FAE5"} />
-            </Pressable>
-
-            {/* Vis/skjul eiendomsgrenser (Kartverket/Geonorge matrikkelkart — kun web) */}
-            <Pressable
-              style={[styles.floatBtn, visEiendomsgrenser && styles.floatBtnActiveOrange]}
-              onPress={() => setVisEiendomsgrenser((v) => !v)}
-            >
-              <Ionicons name="map-outline" size={20} color={visEiendomsgrenser ? "#FB923C" : "#D1FAE5"} />
-            </Pressable>
-
-            {/* Prediksjon (48t) */}
-            <Pressable
-              style={[styles.floatBtn, visPrediksjon && styles.floatBtnActive]}
-              onPress={() => setVisPrediksjon((v) => !v)}
-            >
-              <Ionicons name="analytics-outline" size={20} color={visPrediksjon ? "#A78BFA" : "#D1FAE5"} />
-            </Pressable>
-
-            {/* Tidbaserte aktive soner */}
-            <Pressable
-              style={[styles.floatBtn, visAktiveSoner && styles.floatBtnActiveCyan]}
-              onPress={() => setVisAktiveSoner((v) => !v)}
-            >
-              <Ionicons name="time-outline" size={20} color={visAktiveSoner ? "#22D3EE" : "#D1FAE5"} />
-            </Pressable>
+            {userLocation && (
+              <Pressable
+                style={styles.controlBtn}
+                hitSlop={4}
+                onPress={() =>
+                  mapRef.current?.animateToRegion(
+                    { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.06, longitudeDelta: 0.06 },
+                    400
+                  )
+                }
+              >
+                <Ionicons name="locate" size={20} color={uiColor.textSecondary} />
+              </Pressable>
+            )}
           </View>
         )}
 
-        {/* ── Prediksjon-legend ── */}
-        {visPrediksjon && !selectedPin && !selectedCamera && prediksjonsoner.length > 0 && (
-          <View style={styles.predLegend}>
-            {prediksjonsoner.map((p) => (
-              <View key={p.dyr} style={styles.predLegendRad}>
-                <View style={[styles.predLegendDot, { backgroundColor: p.farge }]} />
-                <Text style={styles.predLegendTxt}>{p.dyr} · {p.etikett} · {p.antall} obs</Text>
-              </View>
-            ))}
-          </View>
+        {/* ── Kartlag-panel ── Én samlet kontroll (§21), erstatter 5 spredte av/på-knapper. */}
+        {lagmenyÅpen && !selectedPin && !selectedCamera && (
+          <Surface variant="elevated" style={[styles.layersPanel, uiElevation.panel]}>
+            <Text style={styles.layersPanelTitle}>Kartlag</Text>
+            <Toggle label="Kamera" icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
+            <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
+            <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
+            <Toggle label="Prediksjon" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
+            <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor="#22D3EE" />
+          </Surface>
         )}
 
-        {/* ── Aktive soner legend ── */}
-        {visAktiveSoner && !selectedPin && !selectedCamera && aktiveSoner.length > 0 && (
-          <View style={[styles.predLegend, styles.aktivLegend]}>
-            {aktiveSoner.map((s) => (
+        {/* ── Aktive soner — kort legend, plassert til venstre for å aldri kollidere med engine-panelet/høyre-kolonnen ── */}
+        {visAktiveSoner && !selectedPin && !selectedCamera && aktiveSoner.length > 0 && !lagmenyÅpen && (
+          <View style={styles.aktivLegend}>
+            {aktiveSoner.slice(0, 4).map((s) => (
               <View key={s.id} style={styles.predLegendRad}>
                 <View style={[styles.predLegendDot, {
                   backgroundColor: s.type === "nå" ? "#22D3EE" : "#A855F7",
                 }]} />
                 <Text style={styles.predLegendTxt}>
-                  {dyrEmoji(s.dyr)} {s.dyr} · {s.tidLabel} · {s.antall} obs
+                  {dyrEmoji(s.dyr)} {s.dyr} · {s.tidLabel}
                 </Text>
               </View>
             ))}
           </View>
         )}
 
-        {/* ── Høyre lokaliseringsknapp ── */}
-        {!selectedPin && !selectedCamera && userLocation && (
-          <Pressable
-            style={styles.locateBtn}
-            onPress={() =>
-              mapRef.current?.animateToRegion(
-                { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.06, longitudeDelta: 0.06 },
-                400
-              )
-            }
-          >
-            <Ionicons name="locate" size={22} color="#D1FAE5" />
-          </Pressable>
-        )}
-
-        {/* ── Filterpanel ── */}
-        {filterOpen && !selectedPin && !selectedCamera && (
-          <View style={styles.filterPanel}>
-            {dyrFilter.map((dyr) => {
-              const active = aktivtFilter === dyr;
-              return (
-                <Pressable
-                  key={dyr}
-                  onPress={() => { setAktivtFilter(dyr); filterOpenSet(false); }}
-                  style={[styles.filterItem, active && styles.filterItemActive]}
-                >
-                  <Text style={[styles.filterItemText, active && styles.filterItemTextActive]}>
-                    {dyr !== "Alle" && dyrEmoji(dyr) + "  "}{dyr}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+        {/* ── Desktop: kompakt status-/engine-panel over kartet (§16) ──
+            Samme statusInnhold()-data som mobilens bottom sheet — motorens
+            svar når Prediksjon er på, ellers samme "beste område" som før. */}
+        {erDesktop && !selectedPin && !selectedCamera && (
+          <Surface variant="elevated" style={[styles.enginePanelDesktop, uiElevation.panel]}>
+            {statusInnhold(false)}
+          </Surface>
         )}
 
         {/* ── Kameradetaljpanel (bunn-ark) ── */}
@@ -1866,64 +1956,21 @@ export default function KartScreen() {
           </ScrollView>
         )}
 
-        {/* ── Bunnkort ── */}
-        {!selectedPin && !selectedCamera && !filterOpen && (
-          <View style={styles.bottomCard}>
-            <View style={styles.dragHandle} />
-
-            {loading ? (
-              <View style={styles.bottomRow}>
-                <ActivityIndicator size="small" color="#2CC36B" />
-                <Text style={styles.bottomLoadText}>Laster...</Text>
-              </View>
-            ) : errorText ? (
-              <Text style={styles.bottomError}>{errorText}</Text>
-            ) : bestZone ? (
-              <>
-                <View style={styles.bottomTopRow}>
-                  <Text style={styles.bottomTitle}>Beste område</Text>
-                  <View style={styles.scoreBadge}>
-                    <Text style={styles.scoreBadgeText}>
-                      {normaliserScore(bestZone.score)} · {scoreEtikett(bestZone.score)}
-                    </Text>
-                  </View>
-                </View>
-
-                <Text style={styles.bottomMeta}>
-                  {obs24tMedGps.length} obs siste 24t · {kameraer.length} kamera
-                </Text>
-
-                {sisteObs.slice(0, 2).map((obs) => (
-                  <View key={obs.id} style={styles.recentRow}>
-                    <Text style={styles.recentEmoji}>{dyrEmoji(obs.dyr)}</Text>
-                    <Text style={styles.recentAnimal}>{obs.dyr}</Text>
-                    <Text style={styles.recentTime}>{hentRelativTid(obs.tid)}</Text>
-                    {obs.retning != null && (
-                      <Ionicons
-                        name="navigate" size={12} color="#2CC36B"
-                        style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
-                      />
-                    )}
-                  </View>
-                ))}
-
-                <Pressable style={styles.moreLinkRow} onPress={() =>
-                  mapRef.current?.animateToRegion(
-                    { latitude: bestZone.latitude, longitude: bestZone.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 },
-                    500
-                  )
-                }>
-                  <Text style={styles.moreLinkText}>Sentrer kart</Text>
-                  <Ionicons name="chevron-forward" size={13} color="#2CC36B" />
-                </Pressable>
-              </>
-            ) : (
-              <Text style={styles.noDataText}>
-                Ingen observasjoner innen {radiusKm} km.{"\n"}
-                Langtrykk på kartet for å legge til punkt.
-              </Text>
-            )}
-          </View>
+        {/* ── Mobil: status i bottom sheet (§24/§25) — erstatter det gamle
+            faste "Bunnkort". Samme underliggende data (bestZone/besteMotorSone),
+            kun ny presentasjon: motorens svar når Prediksjon er på, ellers
+            samme "beste område"-info som før. ── */}
+        {!erDesktop && !selectedPin && !selectedCamera && !filterOpen && (
+          <BottomSheet
+            snap={sheetSnap}
+            onSnapChange={setSheetSnap}
+            collapsedHeight={68}
+            mediumHeight={280}
+            expandedHeight={Math.min(560, skjermHøyde * 0.72)}
+            summary={statusInnhold(true)}
+          >
+            {statusInnhold(false, false)}
+          </BottomSheet>
         )}
       </View>
     </SafeAreaView>
@@ -1942,11 +1989,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(12,20,16,0.96)",
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 14, paddingVertical: 11,
-    borderBottomWidth: 1, borderBottomColor: "#1A2B20",
+    borderBottomWidth: 1, borderBottomColor: uiColor.border,
+    zIndex: uiZ.navigation,
+    minHeight: 52,
   },
-  backBtn:  { flexDirection: "row", alignItems: "center", gap: 2, minWidth: 86 },
-  backText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
-  navTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center" },
+  backBtn:  { flexDirection: "row", alignItems: "center", gap: 2, minWidth: 86, minHeight: minTouchTarget },
+  backText: { color: uiColor.textPrimary, fontSize: 16, fontWeight: "700" },
+  navTitle: { color: uiColor.textPrimary, fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center" },
   mapToggle: {
     flexDirection: "row", backgroundColor: "#111B15",
     borderRadius: 12, padding: 3,
@@ -1956,40 +2005,56 @@ const styles = StyleSheet.create({
   toggleText:       { color: "#8EA0AA", fontSize: 13, fontWeight: "700" },
   toggleTextActive: { color: "#060E08", fontWeight: "900" },
 
-  leftButtons: { position: "absolute", left: 14, top: "30%", gap: 10 },
-  floatBtn: {
-    width: 46, height: 46, borderRadius: 13,
+  // Artsfilter — alltid synlig rad rett under navBar (§22). Høyre kant
+  // stopper FØR kontrollkolonnen (right: 128 = kolonnens bredde + luft) slik
+  // at chips aldri kan gjengis bak lag-/spor-/posisjon-knappene (§7).
+  filterBar: {
+    position: "absolute", top: 60, left: 0, right: 128,
+    zIndex: uiZ.mapControls,
+  },
+  filterBarContent: { paddingHorizontal: 14, gap: 8, paddingRight: 8 },
+  filterChip: {
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: uiRadius.pill,
+    backgroundColor: "rgba(8,14,10,0.90)",
+    borderWidth: 1, borderColor: uiColor.border,
+  },
+  filterChipActive:     { backgroundColor: uiColor.primary, borderColor: uiColor.primary },
+  filterChipText:       { color: uiColor.textSecondary, fontSize: 13, fontWeight: "700" },
+  filterChipTextActive: { color: uiColor.primaryText, fontWeight: "900" },
+
+  // Konsolidert høyre kontrollkolonne (§8/§21) — kartlag, spor-registrering, min posisjon
+  controlColumn: {
+    position: "absolute", right: 14, top: 60,
+    gap: 10, zIndex: uiZ.mapControls,
+  },
+  controlBtn: {
+    width: minTouchTarget, height: minTouchTarget, borderRadius: uiRadius.md,
     backgroundColor: "rgba(8,14,10,0.90)",
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "#1E3028",
+    borderWidth: 1, borderColor: uiColor.border,
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 8, elevation: 6,
   },
-  floatBtnActive:      { backgroundColor: "rgba(44,195,107,0.2)",  borderColor: "#2CC36B" },
-  floatBtnActiveBlue:  { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "#3B82F6" },
-  floatBtnActiveCyan:  { backgroundColor: "rgba(34,211,238,0.18)", borderColor: "#22D3EE" },
-  floatBtnActiveYellow: { backgroundColor: "rgba(252,211,77,0.18)", borderColor: "#FCD34D" },
-  floatBtnActiveOrange: { backgroundColor: "rgba(251,146,60,0.18)", borderColor: "#FB923C" },
-  locateBtn: {
-    position: "absolute", right: 14, top: "38%",
-    width: 50, height: 50, borderRadius: 25,
-    backgroundColor: "rgba(8,14,10,0.90)",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "#1E3028",
-    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 8, elevation: 6,
+  controlBtnActive:   { backgroundColor: "rgba(44,195,107,0.18)", borderColor: uiColor.primary },
+  controlBtnDisabled: { opacity: 0.5 },
+
+  // Kartlag-panel
+  layersPanel: {
+    position: "absolute", right: 14, top: 114,
+    width: 240, padding: uiSpacing.lg,
+    zIndex: uiZ.panel,
+  },
+  layersPanelTitle: {
+    color: uiColor.textPrimary, fontSize: 13, fontWeight: "900",
+    textTransform: "uppercase", letterSpacing: 1, marginBottom: uiSpacing.sm,
   },
 
-  filterPanel: {
-    position: "absolute", left: 68, top: "26%",
-    backgroundColor: "rgba(8,14,10,0.98)",
-    borderRadius: 16, padding: 6,
-    borderWidth: 1, borderColor: "#1E3028",
-    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 12, elevation: 10,
-    minWidth: 140,
+  // Desktop engine-panel — starter UNDER artsfilter-raden (top: 60 + rad-
+  // høyde), aldri på samme høyde, for å unngå at panelet dekker filtrene.
+  enginePanelDesktop: {
+    position: "absolute", left: 14, top: 114,
+    width: 300, padding: uiSpacing.xl,
+    zIndex: uiZ.panel,
   },
-  filterItem:           { paddingHorizontal: 14, paddingVertical: 11, borderRadius: 10 },
-  filterItemActive:     { backgroundColor: "#163222" },
-  filterItemText:       { color: "#C8D8D0", fontSize: 14, fontWeight: "700" },
-  filterItemTextActive: { color: "#A9F2BF" },
 
   cameraPanel: {
     position: "absolute", left: 14, right: 14, bottom: 20,
@@ -2278,12 +2343,13 @@ const styles = StyleSheet.create({
     borderTopColor: "#15803D",
   },
 
-  predLegend: {
-    position: "absolute", bottom: 110, left: 12,
-    backgroundColor: "rgba(6,14,8,0.88)", borderRadius: 14,
-    borderWidth: 1, borderColor: "#1C2A22", padding: 12, gap: 7,
+  aktivLegend: {
+    position: "absolute", left: 14, bottom: 130,
+    backgroundColor: "rgba(6,14,8,0.90)", borderRadius: uiRadius.md,
+    borderWidth: 1, borderColor: "#1A2A30", padding: 12, gap: 7,
+    zIndex: uiZ.mapOverlay,
+    maxWidth: 240,
   },
-  aktivLegend: { bottom: 210, borderColor: "#1A2A30" },
   predLegendRad: { flexDirection: "row", alignItems: "center", gap: 8 },
   predLegendDot: { width: 10, height: 10, borderRadius: 5 },
   predLegendTxt: { color: "#C8D8D0", fontSize: 12, fontWeight: "700" },
