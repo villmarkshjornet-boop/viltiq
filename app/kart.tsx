@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, {
   Circle,
+  Heatmap,
   Marker,
   Polygon,
   PROVIDER_GOOGLE,
@@ -68,6 +69,7 @@ import {
   type Species as EngineSpecies,
   type EnvironmentResolver,
   type PredictionZone,
+  type HeatmapPoint,
 } from "@/src/engine";
 import { color as uiColor, radius as uiRadius, spacing as uiSpacing, zIndex as uiZ, elevation as uiElevation, minTouchTarget } from "@/src/design/tokens";
 import Surface from "@/components/ui/Surface";
@@ -866,14 +868,21 @@ export default function KartScreen() {
   // kartet trenger ikke filtrere observasjoner per art før kallet. Bruker
   // den økologiske motoren når miljødata er løst, ellers den rene
   // observasjonsmotoren (identisk med oppførselen før miljølaget fantes).
-  const { prediksjonsoner, besteMotorSone } = useMemo(() => {
-    if (!visPrediksjon) return { prediksjonsoner: [] as PrediksjonssoneVisning[], besteMotorSone: null as PredictionZone | null };
+  const { prediksjonsoner, besteMotorSone, heatmapPerArt } = useMemo(() => {
+    if (!visPrediksjon) {
+      return {
+        prediksjonsoner: [] as PrediksjonssoneVisning[],
+        besteMotorSone: null as PredictionZone | null,
+        heatmapPerArt: {} as Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[] }>>,
+      };
+    }
     const artsfarger: Record<string, string> = {
       Rådyr: "#A78BFA", Elg: "#38BDF8", Hjort: "#FCD34D", Rev: "#FB923C",
     };
     const motorArter: Partial<Record<string, EngineSpecies>> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg" };
 
     const visning: PrediksjonssoneVisning[] = [];
+    const heatmap: Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[] }>> = {};
     let beste: PredictionZone | null = null;
 
     for (const dyr of dyrListe) {
@@ -892,6 +901,12 @@ export default function KartScreen() {
             environment: environmentResolver,
           })
         : runEngine(observasjoner, motorArt);
+
+      // Heatmap (§5–§8 i STEG 4-oppdraget): vektede grid-punkter fra HELE
+      // motorens skårede flate, ikke bare klyngede soner — samme sannhets-
+      // kilde som prediksjonsoner/besteMotorSone under, kun uklynget.
+      heatmap[dyr] = { species: motorArt, points: resultat.heatmapPoints };
+
       const sone = resultat.zones[0];
       if (!sone) continue;
 
@@ -907,8 +922,20 @@ export default function KartScreen() {
       if (!beste || sone.score > beste.score) beste = sone;
     }
 
-    return { prediksjonsoner: visning, besteMotorSone: beste };
+    return { prediksjonsoner: visning, besteMotorSone: beste, heatmapPerArt: heatmap };
   }, [visPrediksjon, observasjoner, environmentResolver, userLocation, radiusKm]);
+
+  // Heatmap-laget følger det aktive artsfilteret (§8: "Ikke bland rådyr-,
+  // elg- og hjortedata til ett uforståelig heatkart når én art er valgt").
+  // Uten et spesifikt artsfilter ("Alle") vises heatmapet for arten med
+  // høyest score akkurat nå — aldri en blanding av flere arters data.
+  const aktivHeatmap = useMemo(() => {
+    if (!visPrediksjon) return null;
+    if (aktivtFilter !== "Alle" && heatmapPerArt[aktivtFilter]) return heatmapPerArt[aktivtFilter] ?? null;
+    if (aktivtFilter !== "Alle") return null; // valgt art uten motorstøtte (f.eks. Rev) — intet heatmap, ikke en gjettet blanding
+    const besteDyr = dyrListe.find((d) => heatmapPerArt[d]?.species && besteMotorSone?.species === heatmapPerArt[d]?.species);
+    return besteDyr ? heatmapPerArt[besteDyr] ?? null : null;
+  }, [visPrediksjon, aktivtFilter, heatmapPerArt, besteMotorSone]);
 
   // Tidbaserte aktive soner (klokkeslett-mønster)
   const aktiveSoner = useMemo<AktivSone[]>(() => {
@@ -1216,17 +1243,28 @@ export default function KartScreen() {
               </Marker>
             ))}
 
-            {/* Prediksjonssoner per art */}
-            {prediksjonsoner.map((p) => (
-              <Circle
-                key={`pred-${p.dyr}`}
-                center={{ latitude: p.latitude, longitude: p.longitude }}
-                radius={p.radius}
-                strokeWidth={2}
-                strokeColor={p.farge + "CC"}
-                fillColor={p.farge + "22"}
-              />
-            ))}
+            {/* ViltIQ heatmap (§5–§7 i STEG 4-oppdraget) — motorens
+                sannsynlighetslandskap for den aktive arten, ikke bare
+                sonesentrene. Erstatter de gamle per-art-sirklene for de tre
+                artene motoren faktisk vurderer. */}
+            {aktivHeatmap && aktivHeatmap.points.length > 0 && (
+              <Heatmap points={aktivHeatmap.points} radius={32} />
+            )}
+
+            {/* Arter uten motorstøtte (i praksis: Rev) beholder den enkle
+                sirkel-visningen — ingen heatmap å hente fra motoren for dem. */}
+            {prediksjonsoner
+              .filter((p) => !heatmapPerArt[p.dyr])
+              .map((p) => (
+                <Circle
+                  key={`pred-${p.dyr}`}
+                  center={{ latitude: p.latitude, longitude: p.longitude }}
+                  radius={p.radius}
+                  strokeWidth={2}
+                  strokeColor={p.farge + "CC"}
+                  fillColor={p.farge + "22"}
+                />
+              ))}
 
             {/* Jaktlag-medlemmers live-posisjoner */}
             {medlsPosisjon.map((m) => (
@@ -1363,7 +1401,7 @@ export default function KartScreen() {
             <Toggle label="Kamera" icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
             <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
             <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
-            <Toggle label="Prediksjon" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
+            <Toggle label="ViltIQ Heatmap" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
             <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor="#22D3EE" />
           </Surface>
         )}

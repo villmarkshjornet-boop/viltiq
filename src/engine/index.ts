@@ -11,6 +11,7 @@ export type {
   EngineObservation,
   EngineResult,
   PredictionZone,
+  HeatmapPoint,
   EngineSignalBreakdown,
   EngineDebugInfo,
   ConfidenceLevel,

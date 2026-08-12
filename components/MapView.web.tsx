@@ -21,6 +21,7 @@ import { forwardRef, useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import type {
     CircleProps,
+    HeatmapProps,
     MapViewHandle,
     MapViewProps,
     MarkerProps,
@@ -29,6 +30,7 @@ import type {
 
 export type {
     CircleProps,
+    HeatmapProps,
     LatLng,
     LongPressEvent,
     MapType,
@@ -37,7 +39,9 @@ export type {
     MarkerProps,
     PolygonProps,
     Region,
+    WeightedLatLng,
 } from "./MapView.types";
+export { HEATMAP_GRADIENT } from "./MapView.types";
 
 export const PROVIDER_GOOGLE = "google"; // kun for API-kompatibilitet, ubrukt på web
 
@@ -106,6 +110,12 @@ export function Polygon(props: PolygonProps) {
   const impl = useLeafletImpl();
   if (!impl) return null;
   return <impl.Polygon {...props} />;
+}
+
+export function Heatmap(props: HeatmapProps) {
+  const impl = useLeafletImpl();
+  if (!impl) return null;
+  return <impl.Heatmap {...props} />;
 }
 
 const styles = StyleSheet.create({

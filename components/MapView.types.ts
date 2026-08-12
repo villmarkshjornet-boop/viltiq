@@ -53,3 +53,24 @@ export type PolygonProps = {
   strokeColor?: string;
   fillColor?: string;
 };
+
+export type WeightedLatLng = LatLng & { weight: number };
+
+export type HeatmapProps = {
+  points: WeightedLatLng[];
+  /** Radius i "kartpiksler" — samme betydning på begge plattformer, men Leaflet/Google tolker skalaen litt ulikt, se implementasjonene. */
+  radius?: number;
+  opacity?: number;
+};
+
+/**
+ * Delt fargeskala for ViltIQs sannsynlighets-heatmap — grønn (lav) → gul →
+ * oransje → rød (svært høy), jf. STEG 4-oppdragets §6. Brukt av BÅDE
+ * react-native-maps sin Heatmap (Android/iOS) og Leaflet.heat (web) slik at
+ * kartet ser likt ut uansett plattform.
+ */
+export const HEATMAP_GRADIENT = {
+  colors: ["#00000000", "#4ADE8099", "#EAB308CC", "#FB923CE0", "#F87171F0", "#DC2626FF"],
+  startPoints: [0.0, 0.2, 0.45, 0.65, 0.85, 1.0],
+  colorMapSize: 256,
+} as const;

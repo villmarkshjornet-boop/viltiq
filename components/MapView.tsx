@@ -9,7 +9,7 @@
 // app/kart.tsx må platform-forgrene selve JSX-en. Alt annet sendes uendret
 // videre til det ekte MapView — null endring i native oppførsel.
 import { forwardRef } from "react";
-import RNMapView, { Circle, Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
+import RNMapView, { Circle, Heatmap, Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
 import type { LongPressEvent, MapViewProps } from "react-native-maps";
 
 type Props = MapViewProps & {
@@ -24,7 +24,7 @@ const MapView = forwardRef<RNMapView, Props>(function MapView(
 });
 
 export default MapView;
-export { Circle, Marker, Polygon, PROVIDER_GOOGLE };
+export { Circle, Heatmap, Marker, Polygon, PROVIDER_GOOGLE };
 export type { LongPressEvent };
 // Typen en `useRef<MapViewHandle>()` faktisk peker på — RNMapView-instansen
 // selv på native (samme type begge web- og native-varianten eksporterer

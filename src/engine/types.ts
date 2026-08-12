@@ -118,6 +118,9 @@ export type EngineDebugInfo = {
   corridors: EngineDebugCorridor[];
 };
 
+/** Ett vektet punkt i det interne scoring-gridet — grunnlaget for et ekte gradient-heatmap (ikke bare sonesentrene). */
+export type HeatmapPoint = { latitude: number; longitude: number; weight: number };
+
 export type EngineResult = {
   engineVersion: string;
   species: Species;
@@ -132,5 +135,12 @@ export type EngineResult = {
   /** De viktigste signalene på tvers av resultatet (speiler beste sone). */
   signals: string[];
   observationsConsidered: number;
+  /**
+   * Vektede punkter (0–1) fra HELE scoring-gridet, ikke bare klyngede soner —
+   * grunnlaget for et faktisk gradient-heatmap-lag på kartet. Samme
+   * underliggende score som zones, bare ikke terskel-/klyngefiltrert.
+   * Tak-begrenset og svake celler filtrert bort, se engine.ts.
+   */
+  heatmapPoints: HeatmapPoint[];
   debug?: EngineDebugInfo;
 };

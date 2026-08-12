@@ -24,16 +24,30 @@ import {
   useMapEvents,
   WMSTileLayer,
 } from "react-leaflet";
-import type {
-  CircleProps,
-  LongPressEvent,
-  MapType,
-  MapViewHandle,
-  MapViewProps,
-  MarkerProps,
-  PolygonProps,
-  Region,
+import {
+  HEATMAP_GRADIENT,
+  type CircleProps,
+  type HeatmapProps,
+  type LongPressEvent,
+  type MapType,
+  type MapViewHandle,
+  type MapViewProps,
+  type MarkerProps,
+  type PolygonProps,
+  type Region,
 } from "./MapView.types";
+
+// Leaflet.heat (se node_modules/leaflet.heat/dist/leaflet-heat.js) er et
+// gammeldags globalt skript som forventer en bar `L`-variabel i sitt eget
+// modul-scope — det gjør IKKE `import L from "leaflet"` selv synlig for.
+// Uten denne linjen settes `L.heatLayer` aldri, og Heatmap-komponenten under
+// ville kastet en ReferenceError. Bruker `require` (ikke en statisk
+// `import`) med VILJE, slik at rekkefølgen garantert er: sett globalen →
+// last plugin-skriptet som leser den. Trygt her fordi denne filen (se
+// toppkommentaren) uansett kun lastes client-side, aldri under SSR.
+(globalThis as unknown as { L?: typeof L }).L = L;
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- se begrunnelse over: rekkefølge mot globalThis.L må være garantert, en statisk import kan omorganiseres av verktøy
+require("leaflet.heat");
 
 // ─── Kartverket / Geonorge — tjeneste-URLer ─────────────────────────────────
 // Verifisert direkte mot GetCapabilities før implementasjon (ikke gjettet):
@@ -348,4 +362,47 @@ export function Polygon({ coordinates, strokeWidth, strokeColor, fillColor }: Po
       }}
     />
   );
+}
+
+// ─── Heatmap ────────────────────────────────────────────────────────────────
+// react-leaflet har ingen offisiell heat-layer-komponent — leaflet.heat er en
+// ren Leaflet-plugin (L.heatLayer), så den kobles inn imperativt via
+// useMap() i stedet for en deklarativ react-leaflet-komponent, akkurat som
+// enhver annen "rå Leaflet"-utvidelse måtte vært gjort.
+const HEATMAP_GRADIENT_MAP: Record<number, string> = Object.fromEntries(
+  HEATMAP_GRADIENT.startPoints.map((stop, i) => [stop, HEATMAP_GRADIENT.colors[i]])
+);
+
+export function Heatmap({ points, radius = 26 }: HeatmapProps) {
+  const map = useMap();
+  const layerRef = useRef<L.HeatLayer | null>(null);
+
+  useEffect(() => {
+    const heatPoints: L.HeatLatLngTuple[] = points.map((p) => [p.latitude, p.longitude, p.weight]);
+
+    if (!layerRef.current) {
+      layerRef.current = L.heatLayer(heatPoints, {
+        radius,
+        blur: radius * 0.7,
+        maxZoom: 17,
+        minOpacity: 0,
+        gradient: HEATMAP_GRADIENT_MAP,
+      }).addTo(map);
+    } else {
+      layerRef.current.setLatLngs(heatPoints);
+      layerRef.current.setOptions({ radius, blur: radius * 0.7, gradient: HEATMAP_GRADIENT_MAP });
+    }
+  }, [points, radius, map]);
+
+  useEffect(() => {
+    return () => {
+      if (layerRef.current) {
+        map.removeLayer(layerRef.current);
+        layerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- kun opprydding ved unmount, ikke ved hver map-referanseendring
+  }, []);
+
+  return null;
 }

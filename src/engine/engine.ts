@@ -17,12 +17,13 @@ import {
   saturateScore,
   scoreGrid,
   type AreaOfInterest,
+  type ScoredCell,
 } from "./grid";
 import { normalizeObservations } from "./normalize";
 import { cameraDiversityBonus, computeMovementCorridors } from "./reinforcement";
 import { effectiveRadiusMeters, distanceWeight } from "./signals";
 import { getSpeciesProfile, type SpeciesProfile } from "./species/profiles";
-import type { EngineDebugInfo, EngineObservation, EngineResult, LatLng, PredictionZone, Species } from "./types";
+import type { EngineDebugInfo, EngineObservation, EngineResult, HeatmapPoint, LatLng, PredictionZone, Species } from "./types";
 import type { EnvironmentResolver } from "./environment/types";
 import { getEcologyProfile } from "./ecology/profiles";
 import {
@@ -82,6 +83,29 @@ function findContributingObservations(
   });
 }
 
+/** Øvre grense på antall punkter sendt til et heatmap-lag — beskytter rendering-ytelsen (§22) uavhengig av grid-oppløsning. */
+const MAX_HEATMAP_POINTS = 600;
+/** Under denne vekten bidrar punktet ikke synlig til et heatmap uansett — ikke verdt å sende det. */
+const MIN_HEATMAP_WEIGHT = 0.03;
+
+/**
+ * Bygger vektede heatmap-punkter fra HELE det skårede gridet (ikke bare
+ * klyngede soner) — samme rå score som zones bruker, kun uten terskel-/
+ * klyngefiltreringen, slik at kartet kan tegne et faktisk gradient-landskap
+ * i stedet for isolerte sirkler.
+ */
+function buildHeatmapPoints(scoredCells: readonly ScoredCell[], cfg: EngineConfig): HeatmapPoint[] {
+  return scoredCells
+    .map((cell) => ({
+      latitude: cell.center.latitude,
+      longitude: cell.center.longitude,
+      weight: saturateScore(cell.score, cfg.zones.scoreSaturation) / 100,
+    }))
+    .filter((p) => p.weight >= MIN_HEATMAP_WEIGHT)
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, MAX_HEATMAP_POINTS);
+}
+
 function emptyResult(species: Species, nowMs: number, cfg: EngineConfig, inputCount: number, debug: boolean): EngineResult {
   const profile = getSpeciesProfile(species);
   return {
@@ -94,6 +118,7 @@ function emptyResult(species: Species, nowMs: number, cfg: EngineConfig, inputCo
     summary: `Ingen observasjoner av ${profile.label.toLowerCase()} funnet i dette området med dagens data.`,
     signals: [],
     observationsConsidered: 0,
+    heatmapPoints: [],
     debug: debug
       ? {
           totalObservationsInput: inputCount,
@@ -217,6 +242,7 @@ function runPipeline(
     summary,
     signals: zones.length > 0 ? zones[0].dominantSignals : [],
     observationsConsidered: observations.length,
+    heatmapPoints: buildHeatmapPoints(scoredCells, cfg),
     debug: debugInfo,
   };
 }

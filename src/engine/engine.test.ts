@@ -353,3 +353,40 @@ test("Ytelse: et realistisk stort datasett (300 observasjoner) kjører raskt", (
   assert.ok(elapsed < 3000, `forventet under 3000ms, brukte ${elapsed}ms`);
   assert.ok(result.zones.length <= DEFAULT_ENGINE_CONFIG.zones.maxZones);
 });
+
+// ===========================================================================
+// heatmapPoints — grunnlaget for et gradient-heatmap-lag på kartet (STEG 4)
+// ===========================================================================
+
+test("heatmapPoints: tomt for et resultat uten observasjoner", () => {
+  const result = runEngine([] as never, "hjort", { now: NOW });
+  assert.deepEqual(result.heatmapPoints, []);
+});
+
+test("heatmapPoints: ikke-tomt og alle vekter innenfor [0,1] når det finnes observasjoner", () => {
+  const result = runEngine(
+    [obs({ observationSource: "camera", cameraId: "camA", tid: hoursAgoIso(0) })] as never,
+    "hjort",
+    { now: NOW }
+  );
+  assert.ok(result.heatmapPoints.length > 0, "forventet minst ett heatmap-punkt for et gyldig scoret grid");
+  for (const p of result.heatmapPoints) {
+    assert.ok(p.weight >= 0 && p.weight <= 1, `vekt ${p.weight} utenfor [0,1]`);
+    assert.ok(Number.isFinite(p.latitude) && Number.isFinite(p.longitude));
+  }
+});
+
+test("heatmapPoints: sortert synkende på vekt og aldri flere enn det dokumenterte taket", () => {
+  const many = Array.from({ length: 150 }, (_, i) => {
+    const pos = movePoint(60, 10, (i * 41) % 360, (i % 40) * 60);
+    return obs({ latitude: pos.latitude, longitude: pos.longitude, observationSource: "camera", cameraId: `c${i % 5}`, tid: hoursAgoIso(i % 100) });
+  });
+  const result = runEngine(many as never, "hjort", { now: NOW });
+  assert.ok(result.heatmapPoints.length <= 600, `forventet maks 600 punkter, fikk ${result.heatmapPoints.length}`);
+  for (let i = 1; i < result.heatmapPoints.length; i++) {
+    assert.ok(
+      result.heatmapPoints[i - 1].weight >= result.heatmapPoints[i].weight,
+      "heatmapPoints skal være sortert synkende på vekt"
+    );
+  }
+});
