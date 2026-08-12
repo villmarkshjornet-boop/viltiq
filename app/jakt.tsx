@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { Link, useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   type DimensionValue,
@@ -14,14 +14,22 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
+import Surface from "../components/ui/Surface";
 import {
   lagreFelling,
   slettFelling,
   subscribeFellings,
   type Felling,
 } from "../src/services/felling";
-import { getUserPosition } from "../src/services/location";
+import { getUserPosition, type UserPosition } from "../src/services/location";
+import { subscribeToNearbyObservations } from "../src/services/observations";
+import { getSettings } from "../src/services/settings";
+import type { Observasjon } from "../src/types/observation";
 import { getKvoter, oppdaterKvote, type Kvoter } from "../src/services/kvoter";
+import { runEngine, PRIORITERTE_ARTER, getSpeciesProfile, type PredictionZone, type Species } from "../src/engine";
+import { color as uiColor } from "../src/design/tokens";
+
+const NORSK_ART: Record<Species, string> = { hjort: "Hjort", radyr: "Rådyr", elg: "Elg", annet: "Annet" };
 
 const DYR_LISTE  = ["Rådyr", "Elg", "Hjort", "Rev", "Annet"];
 const KJØNN      = ["Hannkjønn", "Hunkjønn", "Ukjent"] as const;
@@ -59,12 +67,20 @@ function ChipRow<T extends string>({
 
 const KVOTE_DYR = ["Rådyr", "Elg", "Hjort", "Rev"];
 
-export default function FellingScreen() {
+export default function JaktScreen() {
   const [fellings,    setFellings]    = useState<Felling[]>([]);
   const [kvoter,      setKvoter]      = useState<Kvoter>({});
   const [modalVis,    setModalVis]    = useState(false);
   const [kvoteModal,  setKvoteModal]  = useState(false);
   const [lagrer,      setLagrer]      = useState(false);
+
+  // ── Dagens jakt (§17A): gjenbruker ViltIQ Engine (ren observasjonsbasert
+  // runEngine — samme motor som kartet, ikke en egen vurdering) for å
+  // anbefale ett område/en art akkurat nå. Bevisst KUN den synkrone
+  // observasjonsmotoren her (ikke den økologiske varianten med miljøoppslag)
+  // for å holde Jakt-siden rask og alltid tilgjengelig uten nettverkskall.
+  const [observasjoner, setObservasjoner] = useState<Observasjon[]>([]);
+  const [userLocation,  setUserLocation]  = useState<UserPosition | null>(null);
 
   // Skjema-state
   const [valgtDyr,   setValgtDyr]   = useState("Rådyr");
@@ -76,19 +92,45 @@ export default function FellingScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      let unsub: (() => void) | undefined;
+      let unsubFellings: (() => void) | undefined;
+      let unsubObs: (() => void) | undefined;
       let aktiv = true;
       (async () => {
         const k = await getKvoter();
         if (aktiv) setKvoter(k);
-        unsub = subscribeFellings(
+        unsubFellings = subscribeFellings(
           (data) => { if (aktiv) setFellings(data); },
           () => {}
         );
+
+        const settings = await getSettings();
+        if (!aktiv) return;
+        const pos = await getUserPosition();
+        if (!aktiv) return;
+        if (pos) {
+          setUserLocation(pos);
+          unsubObs = subscribeToNearbyObservations(
+            { center: pos, radiusKm: settings.radiusKm },
+            (items) => { if (aktiv) setObservasjoner(items); },
+            () => { /* stille — "Dagens jakt" er en hjelp, ikke kritisk */ }
+          );
+        }
       })();
-      return () => { aktiv = false; unsub?.(); };
+      return () => { aktiv = false; unsubFellings?.(); unsubObs?.(); };
     }, [])
   );
+
+  const dagensJakt = useMemo(() => {
+    let beste: { species: Species; zone: PredictionZone } | null = null;
+    for (const species of PRIORITERTE_ARTER) {
+      const resultat = runEngine(observasjoner, species);
+      const sone = resultat.zones[0];
+      if (sone && (!beste || sone.score > beste.zone.score)) {
+        beste = { species, zone: sone };
+      }
+    }
+    return beste;
+  }, [observasjoner]);
 
   function åpneModal() {
     setValgtDyr("Rådyr");
@@ -162,13 +204,48 @@ export default function FellingScreen() {
         <View style={s.header}>
           <View>
             <Text style={s.eyebrow}>ViltIQ</Text>
-            <Text style={s.title}>Fellingsprotokoll</Text>
+            <Text style={s.title}>Jakt</Text>
           </View>
           <Pressable style={s.nyBtn} onPress={åpneModal}>
             <Ionicons name="add" size={20} color="#060E08" />
             <Text style={s.nyBtnTxt}>Logg felling</Text>
           </Pressable>
         </View>
+
+        {/* ── Dagens jakt (§17A) — motorens anbefaling for området nå ── */}
+        <Surface style={s.dagensKort}>
+          <Text style={s.dagensEyebrow}>Dagens jakt</Text>
+          {dagensJakt ? (
+            <>
+              <Text style={s.dagensArt}>
+                {getSpeciesProfile(dagensJakt.species).label} · {dagensJakt.zone.level.toLowerCase()} aktivitet
+              </Text>
+              <Text style={s.dagensForklaring}>{dagensJakt.zone.explanation}</Text>
+              <Link
+                href={{
+                  pathname: "/kart",
+                  params: {
+                    focusLat: String(dagensJakt.zone.center.latitude),
+                    focusLng: String(dagensJakt.zone.center.longitude),
+                    filter: NORSK_ART[dagensJakt.species],
+                  },
+                }}
+                asChild
+              >
+                <Pressable style={s.dagensBtn}>
+                  <Ionicons name="map-outline" size={15} color={uiColor.primaryText} />
+                  <Text style={s.dagensBtnTxt}>Åpne i kart</Text>
+                </Pressable>
+              </Link>
+            </>
+          ) : (
+            <Text style={s.dagensForklaring}>
+              {userLocation
+                ? "Ikke nok ferske observasjoner i området til en tydelig anbefaling ennå."
+                : "Trenger posisjon for å vurdere dagens jakt — sjekk stedstjenester."}
+            </Text>
+          )}
+        </Surface>
 
         {/* ── Sammendrag ── */}
         {fellings.length > 0 && (
@@ -385,6 +462,16 @@ const s = StyleSheet.create({
   title:   { color: "#FFFFFF", fontSize: 28, fontWeight: "900", letterSpacing: -0.5 },
   nyBtn:   { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#2CC36B", borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10, marginTop: 6 },
   nyBtnTxt: { color: "#060E08", fontSize: 14, fontWeight: "800" },
+
+  dagensKort:       { marginHorizontal: 20, marginBottom: 14, padding: 18 },
+  dagensEyebrow:    { color: "#2CC36B", fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8 },
+  dagensArt:        { color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginBottom: 6 },
+  dagensForklaring: { color: "#7A9A88", fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  dagensBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: "#2CC36B", borderRadius: 12, paddingVertical: 11, alignSelf: "flex-start", paddingHorizontal: 16,
+  },
+  dagensBtnTxt: { color: "#04110A", fontSize: 13, fontWeight: "900" },
 
   // Kvoter
   kvoteKort:       { marginHorizontal: 20, marginBottom: 14, backgroundColor: "#0B1610", borderRadius: 18, borderWidth: 1, borderColor: "#192420", padding: 16 },

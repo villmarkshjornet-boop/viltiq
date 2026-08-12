@@ -246,6 +246,11 @@ export default function InnstillingerScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
+            <Pressable onPress={() => router.back()} style={styles.backRow} hitSlop={8}>
+              <Ionicons name="chevron-back" size={18} color="#A9F2BF" />
+              <Text style={styles.backText}>Tilbake</Text>
+            </Pressable>
+
             <View style={styles.brandRow}>
               <View style={styles.brandDot} />
               <Text style={styles.brandText}>ViltIQ</Text>
@@ -617,6 +622,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 18,
   },
+  backRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 14,
+  },
+  backText: { color: "#A9F2BF", fontSize: 15, fontWeight: "700" },
   brandRow: {
     flexDirection: "row",
     alignItems: "center",

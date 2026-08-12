@@ -40,7 +40,7 @@ export default function RootLayout() {
         <Stack.Screen name="logg"          options={{ headerShown: false }} />
         <Stack.Screen name="kart"          options={{ headerShown: false }} />
         <Stack.Screen name="statistikk"    options={{ headerShown: false }} />
-        <Stack.Screen name="felling"       options={{ headerShown: false }} />
+        <Stack.Screen name="jakt"          options={{ headerShown: false }} />
         <Stack.Screen name="innstillinger" options={{ headerShown: false }} />
         <Stack.Screen name="kamera/[id]"   options={{ headerShown: false }} />
       </Stack>

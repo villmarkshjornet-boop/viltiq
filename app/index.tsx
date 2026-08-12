@@ -263,14 +263,21 @@ export default function HomeScreen() {
           <View style={styles.topRow}>
             <View>
               <Text style={styles.eyebrow}>ViltIQ</Text>
-              <Text style={styles.pageTitle}>Oversikt</Text>
+              <Text style={styles.pageTitle}>Hjem</Text>
             </View>
-            <Link href="/logg" asChild>
-              <Pressable style={styles.logBtn}>
-                <Ionicons name="add" size={18} color="#04110A" />
-                <Text style={styles.logBtnText}>Logg</Text>
-              </Pressable>
-            </Link>
+            <View style={styles.topRowActions}>
+              <Link href="/innstillinger" asChild>
+                <Pressable style={styles.settingsBtn} hitSlop={8}>
+                  <Ionicons name="settings-outline" size={19} color="#A9B8AE" />
+                </Pressable>
+              </Link>
+              <Link href="/logg" asChild>
+                <Pressable style={styles.logBtn}>
+                  <Ionicons name="add" size={18} color="#04110A" />
+                  <Text style={styles.logBtnText}>Logg</Text>
+                </Pressable>
+              </Link>
+            </View>
           </View>
 
           {/* ── Filter-chips ── */}
@@ -555,6 +562,12 @@ const styles = StyleSheet.create({
     letterSpacing: 2.5, textTransform: "uppercase", marginBottom: 6,
   },
   pageTitle: { color: "#FFFFFF", fontSize: 30, fontWeight: "900", letterSpacing: -0.4 },
+  topRowActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  settingsBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "#0C1610", borderWidth: 1, borderColor: "#192420",
+  },
   logBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: "#2CC36B", borderRadius: 999,

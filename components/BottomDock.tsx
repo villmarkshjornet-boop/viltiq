@@ -3,7 +3,7 @@ import { Link, usePathname } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 type TabProps = {
-  href: "/" | "/kart" | "/logg" | "/felling" | "/innstillinger";
+  href: "/" | "/kart" | "/logg" | "/jakt";
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   active: boolean;
@@ -45,8 +45,7 @@ export default function BottomDock() {
         <Tab href="/" icon="home" label="Hjem" active={isActive("/")} />
         <Tab href="/kart" icon="map" label="Kart" active={isActive("/kart")} />
         <Tab href="/logg" icon="add-circle-outline" label="Logg" active={isActive("/logg")} />
-        <Tab href="/felling" icon="trophy-outline" label="Felling" active={isActive("/felling")} />
-        <Tab href="/innstillinger" icon="settings" label="Innst." active={isActive("/innstillinger")} />
+        <Tab href="/jakt" icon="trophy-outline" label="Jakt" active={isActive("/jakt")} />
       </View>
     </View>
   );

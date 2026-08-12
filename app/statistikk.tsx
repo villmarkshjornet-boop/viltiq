@@ -585,10 +585,10 @@ export default function StatistikkScreen() {
                     <Text style={styles.lenkTekst}>Logg obs</Text>
                   </Pressable>
                 </Link>
-                <Link href="/felling" asChild>
+                <Link href="/jakt" asChild>
                   <Pressable style={[styles.lenkKnapp, styles.lenkKnappAlt]}>
                     <Ionicons name="trophy-outline" size={15} color="#FDE68A" />
-                    <Text style={[styles.lenkTekst, { color: "#FDE68A" }]}>Felling</Text>
+                    <Text style={[styles.lenkTekst, { color: "#FDE68A" }]}>Jakt</Text>
                   </Pressable>
                 </Link>
               </View>
