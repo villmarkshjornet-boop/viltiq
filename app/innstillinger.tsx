@@ -37,6 +37,7 @@ import {
     saveSettings,
     type AppSettings,
 } from "../src/services/settings";
+import { color as uiColor, radius as uiRadius } from "../src/design/tokens";
 
 const radiusOptions: Array<10 | 25 | 50> = [10, 25, 50];
 
@@ -247,7 +248,7 @@ export default function InnstillingerScreen() {
         >
           <View style={styles.header}>
             <Pressable onPress={() => router.back()} style={styles.backRow} hitSlop={8}>
-              <Ionicons name="chevron-back" size={18} color="#A9F2BF" />
+              <Ionicons name="chevron-back" size={18} color={uiColor.primarySoft} />
               <Text style={styles.backText}>Tilbake</Text>
             </Pressable>
 
@@ -265,7 +266,7 @@ export default function InnstillingerScreen() {
 
           {loading ? (
             <View style={styles.loadingCard}>
-              <ActivityIndicator size="large" color="#7CFFB2" />
+              <ActivityIndicator size="large" color={uiColor.primarySoft} />
               <Text style={styles.loadingTitle}>Laster innstillinger...</Text>
               <Text style={styles.loadingText}>
                 Henter lagret radius og varselvalg.
@@ -278,7 +279,7 @@ export default function InnstillingerScreen() {
 
                 <View style={styles.heroTop}>
                   <View style={styles.heroIcon}>
-                    <Ionicons name="locate" size={24} color="#A7F3D0" />
+                    <Ionicons name="locate" size={24} color={uiColor.primarySoft} />
                   </View>
 
                   <View style={styles.heroTextWrap}>
@@ -367,7 +368,7 @@ export default function InnstillingerScreen() {
                           : "notifications-off"
                       }
                       size={22}
-                      color="#A7F3D0"
+                      color={uiColor.primarySoft}
                     />
                   </View>
 
@@ -471,7 +472,7 @@ export default function InnstillingerScreen() {
 
                     {/* Forlat jaktlag */}
                     <Pressable style={styles.forlatKnapp} onPress={handterForlat}>
-                      <Ionicons name="exit-outline" size={15} color="#F87171" />
+                      <Ionicons name="exit-outline" size={15} color={uiColor.danger} />
                       <Text style={styles.forlatTxt}>Forlat jaktlag</Text>
                     </Pressable>
                   </>
@@ -488,14 +489,14 @@ export default function InnstillingerScreen() {
                           style={styles.jaktlagKnapp}
                           onPress={() => { setJaktlagPanel("bliMed"); setJaktlagFeil(""); }}
                         >
-                          <Ionicons name="enter-outline" size={16} color="#A9F2BF" />
+                          <Ionicons name="enter-outline" size={16} color={uiColor.primarySoft} />
                           <Text style={styles.jaktlagKnappTxt}>Bli med</Text>
                         </Pressable>
                         <Pressable
                           style={[styles.jaktlagKnapp, styles.jaktlagKnappAlt]}
                           onPress={() => { setJaktlagPanel("opprett"); setJaktlagFeil(""); }}
                         >
-                          <Ionicons name="add-circle-outline" size={16} color="#A9F2BF" />
+                          <Ionicons name="add-circle-outline" size={16} color={uiColor.primarySoft} />
                           <Text style={styles.jaktlagKnappTxt}>Opprett nytt</Text>
                         </Pressable>
                       </View>
@@ -510,7 +511,7 @@ export default function InnstillingerScreen() {
                           value={invitKode}
                           onChangeText={setInvitKode}
                           placeholder="F.EKS. AB12CD"
-                          placeholderTextColor="#3D5446"
+                          placeholderTextColor={uiColor.textFaint}
                           autoCapitalize="characters"
                           maxLength={6}
                         />
@@ -541,7 +542,7 @@ export default function InnstillingerScreen() {
                           value={jaktlagNavn}
                           onChangeText={setJaktlagNavn}
                           placeholder="F.eks. Nordmarka Jaktlag"
-                          placeholderTextColor="#3D5446"
+                          placeholderTextColor={uiColor.textFaint}
                         />
                         {!!jaktlagFeil && <Text style={styles.jaktlagFeil}>{jaktlagFeil}</Text>}
                         <View style={styles.jaktlagKnappRad}>
@@ -565,7 +566,7 @@ export default function InnstillingerScreen() {
               </View>
 
               <View style={styles.infoCard}>
-                <Ionicons name="shield-checkmark" size={20} color="#A7F3D0" />
+                <Ionicons name="shield-checkmark" size={20} color={uiColor.primarySoft} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.infoTitle}>Personvern og posisjon</Text>
                   <Text style={styles.infoText}>
@@ -585,14 +586,14 @@ export default function InnstillingerScreen() {
 
               {saving ? (
                 <View style={styles.savingRow}>
-                  <ActivityIndicator size="small" color="#7CFFB2" />
+                  <ActivityIndicator size="small" color={uiColor.primarySoft} />
                   <Text style={styles.savingText}>Lagrer...</Text>
                 </View>
               ) : null}
 
               {/* ── Logg ut ── */}
               <Pressable style={styles.loggUtKnapp} onPress={handterLoggUt}>
-                <Ionicons name="log-out-outline" size={18} color="#F87171" />
+                <Ionicons name="log-out-outline" size={18} color={uiColor.danger} />
                 <Text style={styles.loggUtTxt}>Logg ut</Text>
               </Pressable>
             </>
@@ -608,7 +609,7 @@ export default function InnstillingerScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: "#07100B",
+    backgroundColor: uiColor.background,
   },
   screen: {
     flex: 1,
@@ -628,7 +629,7 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 14,
   },
-  backText: { color: "#A9F2BF", fontSize: 15, fontWeight: "700" },
+  backText: { color: uiColor.primarySoft, fontSize: 15, fontWeight: "700" },
   brandRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -638,48 +639,48 @@ const styles = StyleSheet.create({
   brandDot: {
     width: 10,
     height: 10,
-    borderRadius: 999,
-    backgroundColor: "#2CC36B",
-    shadowColor: "#2CC36B",
+    borderRadius: uiRadius.pill,
+    backgroundColor: uiColor.primary,
+    shadowColor: uiColor.primary,
     shadowOpacity: 0.45,
     shadowRadius: 9,
     shadowOffset: { width: 0, height: 0 },
   },
   brandText: {
-    color: "#A2B5A8",
+    color: uiColor.textMuted,
     fontSize: 13,
     fontWeight: "800",
     letterSpacing: 1.15,
     textTransform: "uppercase",
   },
   title: {
-    color: "#F8FAFC",
+    color: uiColor.textPrimary,
     fontSize: 35,
     fontWeight: "900",
   },
   subtitle: {
-    color: "#8EA0AA",
+    color: uiColor.textSecondary,
     fontSize: 15,
     lineHeight: 23,
     marginTop: 8,
     maxWidth: "94%",
   },
   loadingCard: {
-    backgroundColor: "#0E1712",
+    backgroundColor: uiColor.surface,
     borderWidth: 1,
-    borderColor: "#1A2720",
+    borderColor: uiColor.border,
     borderRadius: 24,
     padding: 24,
     alignItems: "center",
   },
   loadingTitle: {
-    color: "#FFFFFF",
+    color: uiColor.textPrimary,
     fontSize: 18,
     fontWeight: "800",
     marginTop: 14,
   },
   loadingText: {
-    color: "#A9B6BF",
+    color: uiColor.textSecondary,
     fontSize: 14,
     marginTop: 6,
   },
@@ -688,7 +689,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#102018",
     borderWidth: 1,
-    borderColor: "#254934",
+    borderColor: uiColor.borderStrong,
     borderRadius: 30,
     padding: 20,
     marginBottom: 16,
@@ -699,7 +700,7 @@ const styles = StyleSheet.create({
     top: -45,
     width: 160,
     height: 160,
-    borderRadius: 999,
+    borderRadius: uiRadius.pill,
     backgroundColor: "rgba(124,255,178,0.10)",
   },
   heroTop: {
@@ -713,7 +714,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: "#183225",
     borderWidth: 1,
-    borderColor: "#2E6145",
+    borderColor: uiColor.borderStrong,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -721,20 +722,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   heroEyebrow: {
-    color: "#8AB097",
+    color: uiColor.textMuted,
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 1.1,
   },
   heroTitle: {
-    color: "#FFFFFF",
+    color: uiColor.textPrimary,
     fontSize: 36,
     fontWeight: "900",
     marginTop: 4,
   },
   heroText: {
-    color: "#D0DAE1",
+    color: uiColor.textSecondary,
     fontSize: 15,
     lineHeight: 22,
     marginTop: 6,
@@ -749,24 +750,24 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.07)",
-    borderRadius: 18,
+    borderRadius: uiRadius.lg,
     padding: 14,
   },
   heroStatValue: {
-    color: "#FFFFFF",
+    color: uiColor.textPrimary,
     fontSize: 18,
     fontWeight: "900",
   },
   heroStatLabel: {
-    color: "#94A3B8",
+    color: uiColor.textMuted,
     fontSize: 12,
     marginTop: 4,
     fontWeight: "700",
   },
   card: {
-    backgroundColor: "#0E1712",
+    backgroundColor: uiColor.surface,
     borderWidth: 1,
-    borderColor: "#1A2720",
+    borderColor: uiColor.border,
     borderRadius: 24,
     padding: 18,
     marginBottom: 16,
@@ -778,7 +779,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   cardEyebrow: {
-    color: "#778980",
+    color: uiColor.textMuted,
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
@@ -786,26 +787,26 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   cardTitle: {
-    color: "#FFFFFF",
+    color: uiColor.textPrimary,
     fontSize: 19,
     fontWeight: "900",
   },
   cardText: {
-    color: "#A9B6BF",
+    color: uiColor.textSecondary,
     fontSize: 14,
     lineHeight: 21,
     marginTop: 8,
   },
   miniBadge: {
-    backgroundColor: "#163222",
+    backgroundColor: uiColor.surfaceHover,
     borderWidth: 1,
-    borderColor: "#29583B",
-    borderRadius: 999,
+    borderColor: uiColor.borderStrong,
+    borderRadius: uiRadius.pill,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   miniBadgeText: {
-    color: "#9BE7B0",
+    color: uiColor.primarySoft,
     fontSize: 12,
     fontWeight: "900",
   },
@@ -816,33 +817,33 @@ const styles = StyleSheet.create({
   },
   radiusChip: {
     flex: 1,
-    backgroundColor: "#101816",
+    backgroundColor: uiColor.surface,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 22,
+    borderRadius: uiRadius.xl,
     paddingVertical: 18,
     alignItems: "center",
   },
   radiusChipActive: {
-    backgroundColor: "#163222",
-    borderColor: "#2F6D49",
+    backgroundColor: uiColor.surfaceHover,
+    borderColor: uiColor.borderStrong,
   },
   radiusValue: {
-    color: "#D9E2E8",
+    color: uiColor.textPrimary,
     fontSize: 24,
     fontWeight: "900",
   },
   radiusValueActive: {
-    color: "#A9F2BF",
+    color: uiColor.primarySoft,
   },
   radiusLabel: {
-    color: "#7C8B95",
+    color: uiColor.textMuted,
     fontSize: 12,
     fontWeight: "800",
     marginTop: 2,
   },
   radiusLabelActive: {
-    color: "#A9F2BF",
+    color: uiColor.primarySoft,
   },
   switchRow: {
     flexDirection: "row",
@@ -852,10 +853,10 @@ const styles = StyleSheet.create({
   switchIcon: {
     width: 46,
     height: 46,
-    borderRadius: 18,
+    borderRadius: uiRadius.lg,
     backgroundColor: "#13261D",
     borderWidth: 1,
-    borderColor: "#254934",
+    borderColor: uiColor.borderStrong,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -871,36 +872,36 @@ const styles = StyleSheet.create({
   statusDot: {
     width: 9,
     height: 9,
-    borderRadius: 999,
+    borderRadius: uiRadius.pill,
   },
   statusDotOn: {
-    backgroundColor: "#7CFFB2",
+    backgroundColor: uiColor.primarySoft,
   },
   statusDotOff: {
-    backgroundColor: "#64748B",
+    backgroundColor: uiColor.textFaint,
   },
   statusText: {
-    color: "#CFE7DB",
+    color: uiColor.textSecondary,
     fontSize: 13,
     fontWeight: "700",
   },
   infoCard: {
     flexDirection: "row",
     gap: 12,
-    backgroundColor: "#101916",
+    backgroundColor: uiColor.surface,
     borderWidth: 1,
     borderColor: "rgba(110,231,183,0.12)",
-    borderRadius: 22,
+    borderRadius: uiRadius.xl,
     padding: 18,
     marginBottom: 16,
   },
   infoTitle: {
-    color: "#FFFFFF",
+    color: uiColor.textPrimary,
     fontSize: 16,
     fontWeight: "900",
   },
   infoText: {
-    color: "#A9B6BF",
+    color: uiColor.textSecondary,
     fontSize: 14,
     lineHeight: 21,
     marginTop: 6,
@@ -922,14 +923,14 @@ const styles = StyleSheet.create({
     borderColor: "rgba(34,197,94,0.18)",
   },
   messageSuccessText: {
-    color: "#86EFAC",
+    color: uiColor.primarySoft,
   },
   messageError: {
     backgroundColor: "rgba(239,68,68,0.10)",
     borderColor: "rgba(239,68,68,0.18)",
   },
   messageErrorText: {
-    color: "#FCA5A5",
+    color: uiColor.danger,
   },
   messageInfo: {
     backgroundColor: "rgba(148,163,184,0.10)",
@@ -946,7 +947,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   savingText: {
-    color: "#A9F2BF",
+    color: uiColor.primarySoft,
     fontSize: 13,
     fontWeight: "800",
   },
@@ -957,22 +958,22 @@ const styles = StyleSheet.create({
     marginTop: 14, paddingTop: 14,
     borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)",
   },
-  kodeLabel: { color: "#778980", fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
-  kodeTekst: { color: "#A9F2BF", fontSize: 22, fontWeight: "900", letterSpacing: 3 },
-  kodeHint:  { color: "#3D5446", fontSize: 12, fontWeight: "600" },
+  kodeLabel: { color: uiColor.textMuted, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
+  kodeTekst: { color: uiColor.primarySoft, fontSize: 22, fontWeight: "900", letterSpacing: 3 },
+  kodeHint:  { color: uiColor.textFaint, fontSize: 12, fontWeight: "600" },
 
   medlSection: {
     marginTop: 14, paddingTop: 14,
     borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)",
   },
   medlHeader:    { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  medlHeaderTxt: { color: "#778980", fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
+  medlHeaderTxt: { color: uiColor.textMuted, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
   medlBadge: {
     backgroundColor: "rgba(44,195,107,0.12)",
-    borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2,
+    borderRadius: uiRadius.pill, paddingHorizontal: 7, paddingVertical: 2,
     borderWidth: 1, borderColor: "rgba(44,195,107,0.2)",
   },
-  medlBadgeTxt: { color: "#2CC36B", fontSize: 11, fontWeight: "900" },
+  medlBadgeTxt: { color: uiColor.primary, fontSize: 11, fontWeight: "900" },
   medlRad: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingVertical: 8,
@@ -980,41 +981,41 @@ const styles = StyleSheet.create({
   },
   medlAvatar: {
     width: 30, height: 30, borderRadius: 15,
-    backgroundColor: "#163222", borderWidth: 1, borderColor: "#254934",
+    backgroundColor: uiColor.surfaceHover, borderWidth: 1, borderColor: uiColor.borderStrong,
     alignItems: "center", justifyContent: "center",
   },
-  medlAvatarTxt:    { color: "#2CC36B", fontSize: 13, fontWeight: "900" },
-  medlEpost:        { color: "#C8D8D0", fontSize: 13, flex: 1 },
-  medlRolleBadge:   { backgroundColor: "#0E1A14", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: "#1E2E20" },
-  medlRolleBadgeLeder: { backgroundColor: "#163222", borderColor: "#2CC36B" },
-  medlRolleTxt:     { color: "#6B8A76", fontSize: 11, fontWeight: "800" },
-  medlRolleTxtLeder:{ color: "#A9F2BF" },
+  medlAvatarTxt:    { color: uiColor.primary, fontSize: 13, fontWeight: "900" },
+  medlEpost:        { color: uiColor.textSecondary, fontSize: 13, flex: 1 },
+  medlRolleBadge:   { backgroundColor: uiColor.surface, borderRadius: uiRadius.pill, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: uiColor.border },
+  medlRolleBadgeLeder: { backgroundColor: uiColor.surfaceHover, borderColor: uiColor.primary },
+  medlRolleTxt:     { color: uiColor.textMuted, fontSize: 11, fontWeight: "800" },
+  medlRolleTxtLeder:{ color: uiColor.primarySoft },
 
   forlatKnapp: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 7, marginTop: 14, paddingVertical: 12,
     borderWidth: 1, borderColor: "rgba(248,113,113,0.18)",
-    borderRadius: 14, backgroundColor: "rgba(248,113,113,0.06)",
+    borderRadius: uiRadius.md, backgroundColor: "rgba(248,113,113,0.06)",
   },
-  forlatTxt: { color: "#F87171", fontSize: 14, fontWeight: "700" },
+  forlatTxt: { color: uiColor.danger, fontSize: 14, fontWeight: "700" },
 
   loggUtKnapp: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 8, marginTop: 8, marginBottom: 8,
     borderWidth: 1, borderColor: "rgba(248,113,113,0.2)",
-    borderRadius: 18, paddingVertical: 16,
+    borderRadius: uiRadius.lg, paddingVertical: 16,
     backgroundColor: "rgba(248,113,113,0.06)",
   },
-  loggUtTxt: { color: "#F87171", fontSize: 15, fontWeight: "800" },
+  loggUtTxt: { color: uiColor.danger, fontSize: 15, fontWeight: "800" },
 
   jaktlagKnappRad:      { flexDirection: "row", gap: 10, marginTop: 14 },
-  jaktlagKnapp:         { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "#0E1A10", borderWidth: 1, borderColor: "#1E2E20", borderRadius: 14, paddingVertical: 13 },
-  jaktlagKnappTxt:      { color: "#A9F2BF", fontSize: 14, fontWeight: "700" },
-  jaktlagKnappAlt:      { borderColor: "#254934" },
+  jaktlagKnapp:         { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border, borderRadius: uiRadius.md, paddingVertical: 13 },
+  jaktlagKnappTxt:      { color: uiColor.primarySoft, fontSize: 14, fontWeight: "700" },
+  jaktlagKnappAlt:      { borderColor: uiColor.borderStrong },
   jaktlagSkjema:        { marginTop: 14 },
-  jaktlagSkjemaLabel:   { color: "#4D6858", fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 4 },
-  jaktlagInput:         { backgroundColor: "#080F0B", borderRadius: 14, borderWidth: 1, borderColor: "#1E2E20", color: "#FFFFFF", fontSize: 16, paddingHorizontal: 16, paddingVertical: 14 },
-  jaktlagFeil:          { color: "#FCA5A5", fontSize: 13, marginTop: 6 },
-  jaktlagKnappPrimær:   { backgroundColor: "#2CC36B", borderColor: "#2CC36B" },
+  jaktlagSkjemaLabel:   { color: uiColor.textFaint, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 4 },
+  jaktlagInput:         { backgroundColor: uiColor.surface, borderRadius: uiRadius.md, borderWidth: 1, borderColor: uiColor.border, color: uiColor.textPrimary, fontSize: 16, paddingHorizontal: 16, paddingVertical: 14 },
+  jaktlagFeil:          { color: uiColor.danger, fontSize: 13, marginTop: 6 },
+  jaktlagKnappPrimær:   { backgroundColor: uiColor.primary, borderColor: uiColor.primary },
   jaktlagKnappPrimærTxt:{ color: "#060E08", fontSize: 14, fontWeight: "900" },
 });
