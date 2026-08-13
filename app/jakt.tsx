@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
 import Surface from "../components/ui/Surface";
+import EngineStatusPanel from "../components/ui/EngineStatusPanel";
 import {
   lagreFelling,
   oppdaterFelling,
@@ -32,7 +33,7 @@ import {
   oppdaterKategori,
   type Kvoter,
 } from "../src/services/kvoter";
-import { runEngine, PRIORITERTE_ARTER, getSpeciesProfile, type PredictionZone, type Species } from "../src/engine";
+import { runEngine, PRIORITERTE_ARTER, type PredictionZone, type Species } from "../src/engine";
 import { color as uiColor, spacing as uiSpacing, radius as uiRadius, typography as uiType } from "../src/design/tokens";
 import { beregnKvoteRader, fellingerUtenGyldigKategori } from "../src/lib/kvoteBeregning";
 import { visAlert } from "../src/lib/confirmAlert";
@@ -320,15 +321,16 @@ export default function JaktScreen() {
           </Pressable>
         </View>
 
-        {/* ── Dagens jakt (§17A) — motorens anbefaling for området nå ── */}
+        {/* ── Dagens jakt (§17A) — motorens anbefaling for området nå.
+            Redesign-oppdraget: gjenbruker EngineStatusPanel (samme
+            komponent som Hjem sin "Beste område nå") i stedet for egen
+            hånd-implementert art/nivå-tekst, slik at hero-språket aldri kan
+            drifte fra hverandre mellom de to skjermene. ── */}
         <Surface variant="elevated" style={s.dagensKort}>
           <Text style={s.dagensEyebrow}>Dagens jakt</Text>
           {dagensJakt ? (
             <>
-              <Text style={s.dagensArt}>
-                {getSpeciesProfile(dagensJakt.species).label} · {dagensJakt.zone.level.toLowerCase()} aktivitet
-              </Text>
-              <Text style={s.dagensForklaring}>{dagensJakt.zone.explanation}</Text>
+              <EngineStatusPanel zone={dagensJakt.zone} />
               <Link
                 href={{
                   pathname: "/kart",
@@ -653,11 +655,11 @@ const s = StyleSheet.create({
 
   dagensKort:       { marginHorizontal: uiSpacing.xl, marginBottom: uiSpacing.lg, padding: uiSpacing.xl - 2 },
   dagensEyebrow:    { ...uiType.eyebrow, color: uiColor.primary, marginBottom: uiSpacing.sm },
-  dagensArt:        { color: uiColor.textPrimary, fontSize: 18, fontWeight: "900", marginBottom: 6 },
   dagensForklaring: { color: uiColor.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: uiSpacing.md },
   dagensBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: uiColor.primary, borderRadius: uiRadius.md, paddingVertical: 11, alignSelf: "flex-start", paddingHorizontal: uiSpacing.lg,
+    backgroundColor: uiColor.primary, borderRadius: uiRadius.md, paddingVertical: 13,
+    marginTop: uiSpacing.lg,
   },
   dagensBtnTxt: { color: uiColor.primaryText, fontSize: 13, fontWeight: "900" },
 
