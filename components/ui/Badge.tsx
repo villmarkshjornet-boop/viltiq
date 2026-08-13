@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
-import { radius, spacing } from "@/src/design/tokens";
+import { alpha, radius, spacing } from "@/src/design/tokens";
 
 type BadgeProps = {
   label: string;
@@ -10,7 +10,7 @@ type BadgeProps = {
 /** Liten fargekodet etikett — brukes for aktivitetsnivå, confidence, status. Bevisst IKKE prosent med mindre verdien faktisk er en prosent (§17). */
 export default function Badge({ label, color: c, size = "md" }: BadgeProps) {
   return (
-    <View style={[styles.base, size === "sm" && styles.sm, { backgroundColor: c + "20" }]}>
+    <View style={[styles.base, size === "sm" && styles.sm, { backgroundColor: c + alpha.soft }]}>
       <View style={[styles.dot, { backgroundColor: c }]} />
       <Text style={[styles.text, size === "sm" && styles.textSm, { color: c }]}>{label}</Text>
     </View>

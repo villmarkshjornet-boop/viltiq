@@ -61,6 +61,56 @@ export function confidenceColor(level: string): string {
   return color.confidenceLav;
 }
 
+/**
+ * Modal/bottom sheet-bakteppe. Én verdi — erstatter tre innbyrdes ulike
+ * overlay-opasiteter (0.70/0.72/0.75) som hadde sneket seg inn i
+ * jakt/logg/onboarding før dette ble et delt token (Redesign-oppdraget §31).
+ */
+export const overlay = {
+  scrim: "rgba(3,8,5,0.72)",
+} as const;
+
+/**
+ * Translucent "instrument"-overflater — kartkontroller, bottom-dock — der en
+ * helt opak Surface ville sett ut som en grå boks oppå kartet (Redesign-
+ * oppdraget §16/§35). Avledet av color.surface/background, ingen ny valør.
+ */
+export const glass = {
+  controlBg: "rgba(8,14,10,0.90)",
+  controlBgStrong: "rgba(8,14,10,0.98)",
+  controlBorder: "rgba(42,71,56,0.55)",
+} as const;
+
+/**
+ * Navngitte alpha-suffikser for hex+alpha-strenger (f.eks. color.primary +
+ * alpha.soft). Erstatter den tidligere ad hoc-varianten (`c + "20"`,
+ * `accentColor + "40"`) i Badge/Toggle med noe som kan gjenbrukes og
+ * begrunnes ett sted (Redesign-oppdraget §41).
+ */
+export const alpha = {
+  soft: "33",   // ~20%
+  medium: "66", // ~40%
+} as const;
+
+/**
+ * Svært dempet glød bak hero-kort (Hjem/Jakt), farget etter motorens
+ * aktivitetsnivå — ALDRI en heldekket farget boks (§12/§13). Bevisst
+ * separate par fra HEATMAP_GRADIENT i components/MapView.types.ts, som er en
+ * hel skala for selve kartflaten, ikke et enkeltpunkt-glød bak et kort.
+ */
+export const heat = {
+  glowHigh: ["rgba(251,146,60,0.20)", "rgba(251,146,60,0.00)"] as const,
+  glowSevere: ["rgba(248,113,113,0.22)", "rgba(248,113,113,0.00)"] as const,
+  glowLow: ["rgba(76,222,128,0.10)", "rgba(76,222,128,0.00)"] as const,
+} as const;
+
+/** Varighet (ms) for mikroanimasjoner (§11) — base matcher BottomSheet sin tidligere Animated.timing-varighet, så overgangen til Reanimated ikke endrer følelsen av eksisterende bevegelse. */
+export const motion = {
+  fast: 120,
+  base: 220,
+  slow: 360,
+} as const;
+
 export const spacing = {
   xs: 4,
   sm: 8,
@@ -87,6 +137,12 @@ export const typography = {
   body: { fontSize: 14, fontWeight: "500" as const, lineHeight: 21 },
   bodyStrong: { fontSize: 14, fontWeight: "800" as const },
   metadata: { fontSize: 12, fontWeight: "700" as const },
+  /** Ett hakk over pageTitle — forbeholdt ett tall/ord per skjerm som virkelig skal dominere (hero-art på Hjem/Jakt). */
+  display: { fontSize: 34, fontWeight: "900" as const, letterSpacing: -0.6 },
+  /** Under metadata — statuslinjer (GPS-presisjon, tidsstempel) som skal være lesbare men aldri konkurrere om oppmerksomhet. */
+  caption: { fontSize: 11, fontWeight: "600" as const },
+  /** Distinkt fra primaryValue — for et rått motor-score-tall (f.eks. "82") plassert VED SIDEN AV kvalitativ tekst, ikke istedenfor den. */
+  numericScore: { fontSize: 20, fontWeight: "900" as const, letterSpacing: -0.3 },
 } as const;
 
 /**

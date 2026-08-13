@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { color, minTouchTarget, radius, spacing } from "@/src/design/tokens";
+import { alpha, color, minTouchTarget, radius, spacing } from "@/src/design/tokens";
 
 type ToggleProps = {
   label: string;
@@ -20,7 +20,7 @@ export default function Toggle({ label, active, onToggle, icon, accentColor = co
         )}
         <Text style={[styles.label, active && { color: color.textPrimary }]}>{label}</Text>
       </View>
-      <View style={[styles.track, active && { backgroundColor: accentColor + "40" }]}>
+      <View style={[styles.track, active && { backgroundColor: accentColor + alpha.medium }]}>
         <View style={[styles.thumb, active && { backgroundColor: accentColor, alignSelf: "flex-end" }]} />
       </View>
     </Pressable>
