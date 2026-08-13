@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useRef } from "react";
-import { Animated, Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { color, elevation, radius, spacing, zIndex } from "@/src/design/tokens";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { color, elevation, motion, radius, spacing, zIndex } from "@/src/design/tokens";
 
 export type SheetSnap = "collapsed" | "medium" | "expanded";
 
@@ -24,6 +25,13 @@ type BottomSheetProps = {
  * IKKE en fri dra-i-hvilken-som-helst-høyde-implementasjon — det gir en
  * enklere, mer testbar og mer forutsigbar interaksjon, med lavere risiko for
  * gestkonflikt med kartets egne pan/zoom-gester under.
+ *
+ * Redesign-oppdraget §11/§41: første reelle bruk av react-native-reanimated i
+ * appen (tidligere kun sideeffekt-importert i app/_layout.tsx for Expo
+ * Router). Erstatter React Native sin gamle Animated.timing med
+ * withTiming — samme varighet (motion.base = 220ms, uendret følelse), men på
+ * UI-tråden, og etablerer mønsteret resten av mikroanimasjons-arbeidet i
+ * appen bygger videre på.
  */
 export default function BottomSheet({
   snap,
@@ -35,19 +43,22 @@ export default function BottomSheet({
   summary,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
-  const heightAnim = useRef(new Animated.Value(collapsedHeight)).current;
+  const heightValue = useSharedValue(collapsedHeight);
   const contentHeightRef = useRef(0);
 
   const targetHeight =
     snap === "expanded" ? expandedHeight : snap === "medium" ? mediumHeight : collapsedHeight;
 
   useEffect(() => {
-    Animated.timing(heightAnim, {
-      toValue: targetHeight,
-      duration: 220,
-      useNativeDriver: false,
-    }).start();
-  }, [targetHeight, heightAnim]);
+    heightValue.value = withTiming(targetHeight, {
+      duration: motion.base,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [targetHeight, heightValue]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: heightValue.value,
+  }));
 
   function cycleSnap() {
     if (snap === "collapsed") onSnapChange("medium");
@@ -64,7 +75,8 @@ export default function BottomSheet({
       style={[
         styles.wrap,
         elevation.panel,
-        { height: heightAnim, paddingBottom: insets.bottom },
+        animatedStyle,
+        { paddingBottom: insets.bottom },
       ]}
     >
       <Pressable onPress={cycleSnap} style={styles.handleArea} hitSlop={8}>
