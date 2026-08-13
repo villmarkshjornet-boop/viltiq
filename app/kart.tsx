@@ -76,6 +76,7 @@ import Surface from "@/components/ui/Surface";
 import Toggle from "@/components/ui/Toggle";
 import BottomSheet, { type SheetSnap } from "@/components/ui/BottomSheet";
 import EngineStatusPanel from "@/components/ui/EngineStatusPanel";
+import { MarkerBadge, MarkerRing } from "@/components/ui/Marker";
 import { visAlert } from "@/src/lib/confirmAlert";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
@@ -1168,19 +1169,14 @@ export default function KartScreen() {
               />
             ))}
 
-            {/* Beste sone — elg-pin */}
+            {/* Beste sone */}
             {bestZone && (
               <Marker
                 coordinate={{ latitude: bestZone.latitude, longitude: bestZone.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
                 tracksViewChanges={false}
               >
-                <View style={styles.moosePinWrap}>
-                  <View style={styles.moosePinBubble}>
-                    <Text style={styles.moosePinEmoji}>🦌</Text>
-                  </View>
-                  <View style={styles.moosePinArrow} />
-                </View>
+                <MarkerBadge kind="best-zone" size="lg" emoji="🦌" />
               </Marker>
             )}
 
@@ -1202,12 +1198,12 @@ export default function KartScreen() {
                 description={o.kommentar || undefined}
                 onPress={() => bekreftSlettObservasjonFraKart(o)}
               >
-                <View style={styles.obsPinWrap}>
-                  <View style={[styles.obsPinBubble, o.dyr === "Rev" && styles.obsPinBubbleRev]}>
-                    <Text style={styles.obsPinEmoji}>{dyrEmoji(o.dyr)}</Text>
-                  </View>
-                  <View style={[styles.obsPinArrow, o.dyr === "Rev" && styles.obsPinArrowRev]} />
-                </View>
+                <MarkerBadge
+                  kind="observation"
+                  size="sm"
+                  emoji={dyrEmoji(o.dyr)}
+                  accentColor={o.dyr === "Rev" ? uiColor.levelHøy : undefined}
+                />
               </Marker>
             ))}
 
@@ -1222,12 +1218,7 @@ export default function KartScreen() {
                 description={o.kommentar || undefined}
                 onPress={() => bekreftSlettObservasjonFraKart(o)}
               >
-                <View style={styles.sporPinWrap}>
-                  <View style={styles.sporPinBubble}>
-                    <Ionicons name="paw-outline" size={14} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.sporPinArrow} />
-                </View>
+                <MarkerBadge kind="spor" size="sm" icon="paw-outline" />
               </Marker>
             ))}
 
@@ -1241,12 +1232,7 @@ export default function KartScreen() {
                 title={p.label || p.pointType}
                 description={p.kommentar || undefined}
               >
-                <View style={styles.annetPinWrap}>
-                  <View style={styles.annetPinBubble}>
-                    <Ionicons name="pricetag-outline" size={14} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.annetPinArrow} />
-                </View>
+                <MarkerBadge kind="annet" size="sm" icon="pricetag-outline" />
               </Marker>
             ))}
 
@@ -1268,14 +1254,11 @@ export default function KartScreen() {
                     <Ionicons
                       name="navigate"
                       size={14}
-                      color="#93C5FD"
+                      color={uiColor.info}
                       style={{ transform: [{ rotate: `${k.directionDegrees}deg` }] }}
                     />
                   </View>
-                  <View style={styles.cameraPinBubble}>
-                    <Ionicons name="camera" size={16} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.cameraPinArrow} />
+                  <MarkerBadge kind="kamera" size="md" icon="camera" />
                 </View>
               </Marker>
             ))}
@@ -1312,7 +1295,7 @@ export default function KartScreen() {
                 onPress={() => setSheetSnap("expanded")}
               >
                 <View style={styles.hotspotRingWrap}>
-                  <View style={styles.hotspotRing} />
+                  <MarkerRing variant="hotspot" />
                 </View>
               </Marker>
             )}
@@ -1341,20 +1324,15 @@ export default function KartScreen() {
                 tracksViewChanges={false}
                 title={m.epost || "Jeger"}
               >
-                <View style={styles.medlPinWrap}>
-                  <View style={styles.medlPinBubble}>
-                    <Text style={styles.medlPinInitial}>
-                      {(m.epost?.[0] ?? "J").toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.medlPinArrow} />
-                </View>
+                <MarkerBadge kind="party" size="sm" emoji={(m.epost?.[0] ?? "J").toUpperCase()} />
               </Marker>
             ))}
 
-            {/* Valgt ny-pin */}
+            {/* Valgt ny-pin — der brukeren nettopp trykket for å registrere noe */}
             {selectedPin && (
-              <Marker coordinate={selectedPin} pinColor="#FACC15" />
+              <Marker coordinate={selectedPin} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
+                <MarkerBadge kind="candidate" size="md" icon="add" />
+              </Marker>
             )}
           </MapView>
         ) : (
@@ -2318,115 +2296,21 @@ const styles = StyleSheet.create({
   },
   pinMenuText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", flex: 1 },
 
-  moosePinWrap:   { alignItems: "center" },
-  moosePinBubble: {
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: "#FACC15",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2.5, borderColor: "#B45309",
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 6, elevation: 6,
-  },
-  moosePinEmoji: { fontSize: 26 },
-  moosePinArrow: {
-    width: 0, height: 0,
-    borderLeftWidth: 7, borderRightWidth: 7, borderTopWidth: 12,
-    borderStyle: "solid",
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderTopColor: "#B45309",
-  },
-
-  // STEG 5 §5/§7 — trykkbar hotspot-ring. Bevisst en ring (område), ikke en
-  // pin (punkt), for å unngå å late som om dette er en eksakt dyre-posisjon.
-  // Touch-arealet er minTouchTarget selv om den visuelle ringen er mindre.
+  // Redesign-oppdraget §22/§23: pin-formede markører (beste-sone/obs/spor/
+  // annet/kamera/party) kommer nå fra components/ui/Marker.tsx sin
+  // MarkerBadge — ett ViltIQ-markørspråk i stedet for 8 separate,
+  // hardkodede bubble/pil-trioer. Kun det som er spesifikt for KAMERA sin
+  // sammensatte retningspil + badge, og hotspot-ringens touch-areal, er
+  // igjen her — resten av markørstylingen bor i den delte komponenten.
   hotspotRingWrap: {
     width: minTouchTarget, height: minTouchTarget,
     alignItems: "center", justifyContent: "center",
   },
-  hotspotRing: {
-    width: 26, height: 26, borderRadius: 13,
-    borderWidth: 3, borderColor: "#A78BFA",
-    backgroundColor: "rgba(167,139,250,0.18)",
-  },
-
-  obsPinWrap:   { alignItems: "center" },
-  obsPinBubble: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "#EAB308",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2, borderColor: "#A16207",
-  },
-  obsPinBubbleRev: { backgroundColor: "#FB923C", borderColor: "#C2410C" },
-  obsPinEmoji: { fontSize: 15 },
-  obsPinArrow: {
-    width: 0, height: 0,
-    borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
-    borderStyle: "solid",
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderTopColor: "#A16207",
-  },
-  obsPinArrowRev: { borderTopColor: "#C2410C" },
-
-  sporPinWrap:   { alignItems: "center" },
-  sporPinBubble: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: "#78716C",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2, borderColor: "#44403C",
-  },
-  sporPinArrow: {
-    width: 0, height: 0,
-    borderLeftWidth: 4, borderRightWidth: 4, borderTopWidth: 7,
-    borderStyle: "solid",
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderTopColor: "#44403C",
-  },
-
-  annetPinWrap:   { alignItems: "center" },
-  annetPinBubble: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: "#A78BFA",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2, borderColor: "#7C3AED",
-  },
-  annetPinArrow: {
-    width: 0, height: 0,
-    borderLeftWidth: 4, borderRightWidth: 4, borderTopWidth: 7,
-    borderStyle: "solid",
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderTopColor: "#7C3AED",
-  },
-
   cameraPinWrap:   { alignItems: "center" },
   cameraDirArrowWrap: {
     position: "absolute", top: -17, alignItems: "center", justifyContent: "center", zIndex: 1,
   },
-  cameraPinBubble: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: "#2563EB",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2, borderColor: "#1D4ED8",
-  },
-  cameraPinArrow: {
-    width: 0, height: 0,
-    borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
-    borderStyle: "solid",
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderTopColor: "#1D4ED8",
-  },
 
-  bottomCard: {
-    position: "absolute", left: 0, right: 0, bottom: 0,
-    backgroundColor: "#0C1610",
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    borderTopWidth: 1, borderTopColor: "#1A2B20",
-    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30,
-    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 18,
-    shadowOffset: { width: 0, height: -4 }, elevation: 14,
-  },
-  dragHandle: {
-    width: 36, height: 4, borderRadius: 2,
-    backgroundColor: "#2A3D2C", alignSelf: "center", marginBottom: 12,
-  },
   bottomRow:    { flexDirection: "row", alignItems: "center", gap: 8 },
   bottomTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
   bottomTitle:  { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
@@ -2457,22 +2341,6 @@ const styles = StyleSheet.create({
     justifyContent: "center", gap: 4, marginTop: 10,
   },
   moreLinkText: { color: "#2CC36B", fontSize: 13, fontWeight: "700" },
-
-  medlPinWrap:    { alignItems: "center" },
-  medlPinBubble:  {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "#16A34A",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 2, borderColor: "#15803D",
-  },
-  medlPinInitial: { color: "#FFFFFF", fontSize: 14, fontWeight: "900" },
-  medlPinArrow:   {
-    width: 0, height: 0,
-    borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
-    borderStyle: "solid",
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderTopColor: "#15803D",
-  },
 
   aktivLegend: {
     position: "absolute", left: 14, bottom: 130,
