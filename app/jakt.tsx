@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
-  Alert,
   type DimensionValue,
   Modal,
   Pressable,
@@ -36,6 +35,7 @@ import {
 import { runEngine, PRIORITERTE_ARTER, getSpeciesProfile, type PredictionZone, type Species } from "../src/engine";
 import { color as uiColor, spacing as uiSpacing, radius as uiRadius, typography as uiType } from "../src/design/tokens";
 import { beregnKvoteRader, fellingerUtenGyldigKategori } from "../src/lib/kvoteBeregning";
+import { visAlert } from "../src/lib/confirmAlert";
 
 const NORSK_ART: Record<Species, string> = { hjort: "Hjort", radyr: "Rådyr", elg: "Elg", annet: "Annet" };
 
@@ -215,14 +215,14 @@ export default function JaktScreen() {
       setRedigererFelling(null);
     } catch (e) {
       console.log("lagre felling-feil:", e);
-      Alert.alert("Feil", "Klarte ikke lagre felling. Prøv igjen.");
+      visAlert("Feil", "Klarte ikke lagre felling. Prøv igjen.");
     } finally {
       setLagrer(false);
     }
   }
 
   function bekreftSlett(f: Felling) {
-    Alert.alert(
+    visAlert(
       "Slett felling",
       `Slette ${f.dyr} felt ${formaterDato(f.dato)}?`,
       [
@@ -234,7 +234,7 @@ export default function JaktScreen() {
             try {
               await slettFelling(f.id);
             } catch (e: any) {
-              Alert.alert("Feil", e?.message || "Klarte ikke slette fellingen.");
+              visAlert("Feil", e?.message || "Klarte ikke slette fellingen.");
             }
           },
         },
@@ -262,7 +262,7 @@ export default function JaktScreen() {
     const navn = (nyKatNavn[dyr] ?? "").trim();
     const maks = parseInt(nyKatMaks[dyr] ?? "", 10);
     if (!navn || !Number.isFinite(maks) || maks < 0) {
-      Alert.alert("Ugyldig kategori", "Skriv et navn og et gyldig maks-antall (0 eller mer).");
+      visAlert("Ugyldig kategori", "Skriv et navn og et gyldig maks-antall (0 eller mer).");
       return;
     }
     await leggTilKategori(dyr, navn, maks);
@@ -285,7 +285,7 @@ export default function JaktScreen() {
   }
 
   function bekreftFjernKategori(dyr: string, kategoriId: string, navn: string) {
-    Alert.alert(
+    visAlert(
       "Fjern kategori",
       `Fjerne kvote-kategorien «${navn}» for ${dyr}? Fellinger som er knyttet til den slettes ikke, men teller ikke lenger mot noen kvote før du kobler dem til en annen kategori.`,
       [

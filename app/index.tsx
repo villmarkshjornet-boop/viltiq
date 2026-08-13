@@ -3,7 +3,6 @@ import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -33,6 +32,7 @@ import type { Observasjon } from "../src/types/observation";
 import { dyrEmoji, erAktivRegistrering, hentRelativTid } from "../src/lib/aktivitet";
 import { vindRetningLabel } from "../src/lib/geo";
 import { måneFase } from "../src/lib/maane";
+import { visAlert } from "../src/lib/confirmAlert";
 import {
   runEngine,
   PRIORITERTE_ARTER,
@@ -118,7 +118,7 @@ export default function HomeScreen() {
   );
 
   async function slettObs(obs: Observasjon) {
-    Alert.alert(
+    visAlert(
       "Slette registreringen?",
       `${obs.dyr} · ${obs.type} fjernes fra Hjem, Logg, kartet og ViltIQs analysegrunnlag.`,
       [
@@ -130,7 +130,7 @@ export default function HomeScreen() {
             try {
               await deleteObservation(obs.id);
             } catch (e: any) {
-              Alert.alert("Feil", e?.message || "Klarte ikke slette observasjonen.");
+              visAlert("Feil", e?.message || "Klarte ikke slette observasjonen.");
             }
           },
         },

@@ -3,7 +3,6 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -38,6 +37,7 @@ import {
     type AppSettings,
 } from "../src/services/settings";
 import { color as uiColor, radius as uiRadius } from "../src/design/tokens";
+import { visAlert } from "../src/lib/confirmAlert";
 
 const radiusOptions: Array<10 | 25 | 50> = [10, 25, 50];
 
@@ -113,7 +113,7 @@ export default function InnstillingerScreen() {
 
   async function handterForlat() {
     if (!jaktlag) return;
-    Alert.alert(
+    visAlert(
       "Forlat jaktlag",
       `Er du sikker på at du vil forlate ${jaktlag.navn}? Du kan bli med igjen via invitasjonskoden.`,
       [
@@ -137,7 +137,7 @@ export default function InnstillingerScreen() {
   }
 
   async function handterLoggUt() {
-    Alert.alert(
+    visAlert(
       "Logg ut",
       "Er du sikker på at du vil logge ut?",
       [

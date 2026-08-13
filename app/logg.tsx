@@ -3,7 +3,6 @@ import * as Location from "expo-location";
 import { Link } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -24,6 +23,7 @@ import {
 import type { Observasjon } from "../src/types/observation";
 import { anonymiserPosisjon } from "../src/lib/geo";
 import { AKTIV_REGISTRERING_TERSKEL_TIMER, dyrEmoji, erAktivRegistrering } from "../src/lib/aktivitet";
+import { visAlert } from "../src/lib/confirmAlert";
 
 type Fane = "aktive" | "historikk";
 
@@ -153,7 +153,7 @@ export default function LoggScreen() {
       setMelding("Observasjonen er slettet.");
       setStatusTone("info");
     } catch (err: any) {
-      Alert.alert("Feil", err?.message || "Klarte ikke slette observasjonen.");
+      visAlert("Feil", err?.message || "Klarte ikke slette observasjonen.");
     }
   }
 
@@ -367,7 +367,7 @@ export default function LoggScreen() {
                       )}
                       <Pressable
                         onPress={() =>
-                          Alert.alert(
+                          visAlert(
                             "Slett observasjon",
                             `Slett ${obs.dyr} · ${obs.type}?`,
                             [
@@ -379,7 +379,7 @@ export default function LoggScreen() {
                                   try {
                                     await deleteObservation(obs.id);
                                   } catch (e: any) {
-                                    Alert.alert("Feil", e?.message || "Klarte ikke slette observasjonen.");
+                                    visAlert("Feil", e?.message || "Klarte ikke slette observasjonen.");
                                   }
                                 },
                               },

@@ -4,7 +4,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -77,6 +76,7 @@ import Surface from "@/components/ui/Surface";
 import Toggle from "@/components/ui/Toggle";
 import BottomSheet, { type SheetSnap } from "@/components/ui/BottomSheet";
 import EngineStatusPanel from "@/components/ui/EngineStatusPanel";
+import { visAlert } from "@/src/lib/confirmAlert";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 
@@ -609,9 +609,9 @@ export default function KartScreen() {
         directionDegrees: kameraRetningNy,
       });
       closePinPanel();
-      Alert.alert("Kamera lagret", "Viltkameraet er plassert på kartet.");
+      visAlert("Kamera lagret", "Viltkameraet er plassert på kartet.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke lagre kamera.");
+      visAlert("Feil", e?.message || "Klarte ikke lagre kamera.");
     } finally {
       setSavingPin(false);
     }
@@ -633,9 +633,9 @@ export default function KartScreen() {
         observationSource: "manual",
       });
       closePinPanel();
-      Alert.alert("Lagret", "Observasjonen er lagret.");
+      visAlert("Lagret", "Observasjonen er lagret.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke lagre observasjon.");
+      visAlert("Feil", e?.message || "Klarte ikke lagre observasjon.");
     } finally {
       setSavingPin(false);
     }
@@ -657,9 +657,9 @@ export default function KartScreen() {
         sporType: sporTypeValgt,
       });
       closePinPanel();
-      Alert.alert("Spor lagret", "Sporet er registrert på kartet.");
+      visAlert("Spor lagret", "Sporet er registrert på kartet.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke lagre spor.");
+      visAlert("Feil", e?.message || "Klarte ikke lagre spor.");
     } finally {
       setSavingPin(false);
     }
@@ -677,9 +677,9 @@ export default function KartScreen() {
         kommentar: annetKommentar,
       });
       closePinPanel();
-      Alert.alert("Lagret", "Punktet er lagret på kartet.");
+      visAlert("Lagret", "Punktet er lagret på kartet.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke lagre punktet.");
+      visAlert("Feil", e?.message || "Klarte ikke lagre punktet.");
     } finally {
       setSavingPin(false);
     }
@@ -706,9 +706,9 @@ export default function KartScreen() {
         alder:    regAlder,
       });
       setCameraView("info");
-      Alert.alert("Lagret", "Observasjonen er registrert på kameraet.");
+      visAlert("Lagret", "Observasjonen er registrert på kameraet.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke lagre observasjon.");
+      visAlert("Feil", e?.message || "Klarte ikke lagre observasjon.");
     } finally {
       setSavingCameraAction(false);
     }
@@ -724,9 +724,9 @@ export default function KartScreen() {
         notes: editNotat,
       });
       setCameraView("info");
-      Alert.alert("Lagret", "Kameraet er oppdatert.");
+      visAlert("Lagret", "Kameraet er oppdatert.");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke oppdatere kamera.");
+      visAlert("Feil", e?.message || "Klarte ikke oppdatere kamera.");
     } finally {
       setSavingCameraAction(false);
     }
@@ -738,13 +738,13 @@ export default function KartScreen() {
       setSelectedCamera(null);
       setCameraView("info");
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke fjerne kamera.");
+      visAlert("Feil", e?.message || "Klarte ikke fjerne kamera.");
     }
   }
 
   function bekreftFjernKamera() {
     if (!selectedCamera) return;
-    Alert.alert(
+    visAlert(
       "Fjerne viltkamera?",
       "Kameraet fjernes fra kartet, men tidligere observasjoner og statistikk beholdes.",
       [
@@ -776,9 +776,9 @@ export default function KartScreen() {
         observationSource: "track",
         sporType: "Fotspor",
       });
-      Alert.alert("Sporpunkt lagret", `${dyrEmoji(valgtDyr)} ${valgtDyr} · Spor registrert her.`);
+      visAlert("Sporpunkt lagret", `${dyrEmoji(valgtDyr)} ${valgtDyr} · Spor registrert her.`);
     } catch (e: any) {
-      Alert.alert("Feil", e?.message || "Klarte ikke lagre sporpunkt.");
+      visAlert("Feil", e?.message || "Klarte ikke lagre sporpunkt.");
     } finally {
       setSporpunktLaster(false);
     }
@@ -790,7 +790,7 @@ export default function KartScreen() {
   // motorens neste beregning (heatmap/soner) leser automatisk den oppdaterte
   // observasjonslisten — ingen egen "cache" å rydde opp separat.
   function bekreftSlettObservasjonFraKart(obs: Observasjon) {
-    Alert.alert(
+    visAlert(
       "Slette registreringen?",
       `${obs.dyr} · ${obs.type} fjernes fra kartet, historikken og ViltIQs analysegrunnlag.`,
       [
@@ -802,7 +802,7 @@ export default function KartScreen() {
             try {
               await deleteObservation(obs.id);
             } catch (e: any) {
-              Alert.alert("Feil", e?.message || "Klarte ikke slette registreringen.");
+              visAlert("Feil", e?.message || "Klarte ikke slette registreringen.");
             }
           },
         },
