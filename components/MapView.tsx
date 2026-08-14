@@ -11,6 +11,7 @@
 import { forwardRef } from "react";
 import RNMapView, { Circle, Heatmap, Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
 import type { LongPressEvent, MapViewProps } from "react-native-maps";
+export { HEATMAP_GRADIENT } from "./MapView.types";
 
 type Props = MapViewProps & {
   showPropertyBoundaries?: boolean;

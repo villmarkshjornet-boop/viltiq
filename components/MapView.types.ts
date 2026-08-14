@@ -61,16 +61,30 @@ export type HeatmapProps = {
   /** Radius i "kartpiksler" — samme betydning på begge plattformer, men Leaflet/Google tolker skalaen litt ulikt, se implementasjonene. */
   radius?: number;
   opacity?: number;
+  /**
+   * Redesign-oppdraget: eksplisitt gradient-prop slik at NATIVE (react-
+   * native-maps sin Heatmap, som ellers faller tilbake til bibliotekets
+   * EGEN standardgradient) faktisk kan få den samme fargeskalaen som web
+   * (LeafletMapImpl bruker HEATMAP_GRADIENT direkte og trenger ikke denne
+   * proppen, men tar imot den for en konsistent kontrakt). Default:
+   * HEATMAP_GRADIENT.
+   */
+  gradient?: { colors: string[]; startPoints: number[]; colorMapSize: number };
 };
 
 /**
- * Delt fargeskala for ViltIQs sannsynlighets-heatmap — grønn (lav) → gul →
- * oransje → rød (svært høy), jf. STEG 4-oppdragets §6. Brukt av BÅDE
- * react-native-maps sin Heatmap (Android/iOS) og Leaflet.heat (web) slik at
- * kartet ser likt ut uansett plattform.
+ * Delt fargeskala for ViltIQs sannsynlighets-heatmap — svak → gul → oransje
+ * → rød → intens rød. Brukt av BÅDE react-native-maps sin Heatmap (Android/
+ * iOS) og Leaflet.heat (web) slik at kartet ser likt ut uansett plattform.
+ *
+ * Redesign-oppdraget §5/§6: grønn skal ALDRI bety "høy sannsynlighet" —
+ * grønn er merkevare/handling/aktiv, ikke motorens heat-skala. Skalaen
+ * startet tidligere på en gjennomsiktig grønn (#4ADE8099), som brøt akkurat
+ * dette skillet — byttet til en dempet, lav-alpha GUL i stedet, slik at
+ * hele skalaen er monotont varm (gul→oransje→rød) uten noe grønt innslag.
  */
 export const HEATMAP_GRADIENT = {
-  colors: ["#00000000", "#4ADE8099", "#EAB308CC", "#FB923CE0", "#F87171F0", "#DC2626FF"],
-  startPoints: [0.0, 0.2, 0.45, 0.65, 0.85, 1.0],
+  colors: ["#00000000", "#EAB30855", "#EAB308CC", "#FB923CE0", "#F87171F0", "#DC2626FF"],
+  startPoints: [0.0, 0.15, 0.4, 0.6, 0.8, 1.0],
   colorMapSize: 256,
 } as const;

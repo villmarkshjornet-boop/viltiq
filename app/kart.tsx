@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, {
   Circle,
   Heatmap,
+  HEATMAP_GRADIENT,
   Marker,
   Polygon,
   PROVIDER_GOOGLE,
@@ -117,6 +118,15 @@ type PinAction = "menu" | "kamera" | "dyr" | "spor" | "annet";
 type CameraView = "info" | "observasjon" | "rediger";
 
 // ─── Konstanter ───────────────────────────────────────────────────────────────
+
+// react-native-maps sin Heatmap.gradient-prop vil ha vanlige (ikke
+// readonly) arrays — HEATMAP_GRADIENT selv er `as const` for andre
+// forbrukere (LeafletMapImpl), så én mutbar kopi lages her, én gang.
+const heatmapGradientProp = {
+  colors: [...HEATMAP_GRADIENT.colors],
+  startPoints: [...HEATMAP_GRADIENT.startPoints],
+  colorMapSize: HEATMAP_GRADIENT.colorMapSize,
+};
 
 const dyrListe    = ["Rådyr", "Elg", "Hjort", "Rev"];
 const dyrFilter   = ["Alle", ...dyrListe];
@@ -1278,9 +1288,16 @@ export default function KartScreen() {
                 bredere/jevnere flater når man zoomer ut og mer lokal
                 variasjon når man zoomer inn — uten noe eget GIS-lag. Se
                 components/LeafletMapImpl.tsx sin Heatmap-komponent for
-                web-implementasjonen. */}
+                web-implementasjonen.
+
+                Redesign-oppdraget: `gradient` ble aldri sendt inn her før —
+                web fikk HEATMAP_GRADIENT uansett (LeafletMapImpl hardkoder
+                den internt), men native falt stille tilbake til react-
+                native-maps sin EGEN standardgradient, så de to plattformene
+                sannsynligvis så forskjellige ut. Nå eksplisitt likt begge
+                steder. */}
             {aktivHeatmap && aktivHeatmap.points.length > 0 && (
-              <Heatmap points={aktivHeatmap.points} radius={32} />
+              <Heatmap points={aktivHeatmap.points} radius={32} gradient={heatmapGradientProp} />
             )}
 
             {/* STEG 5 §5: trykkbar hotspot-markør — åpner den fulle
