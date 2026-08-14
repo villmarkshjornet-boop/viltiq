@@ -72,7 +72,7 @@ import {
   type PredictionZone,
   type HeatmapPoint,
 } from "@/src/engine";
-import { color as uiColor, radius as uiRadius, spacing as uiSpacing, zIndex as uiZ, elevation as uiElevation, minTouchTarget } from "@/src/design/tokens";
+import { color as uiColor, radius as uiRadius, spacing as uiSpacing, zIndex as uiZ, elevation as uiElevation, minTouchTarget, glass as uiGlass, alpha as uiAlpha, typography as uiType } from "@/src/design/tokens";
 import Surface from "@/components/ui/Surface";
 import Toggle from "@/components/ui/Toggle";
 import BottomSheet, { type SheetSnap } from "@/components/ui/BottomSheet";
@@ -2123,7 +2123,7 @@ const styles = StyleSheet.create({
   filterBarContent: { paddingHorizontal: 14, gap: 8, paddingRight: 8 },
   filterChip: {
     paddingHorizontal: 14, paddingVertical: 9, borderRadius: uiRadius.pill,
-    backgroundColor: "rgba(8,14,10,0.90)",
+    backgroundColor: uiGlass.controlBg,
     borderWidth: 1, borderColor: uiColor.border,
   },
   filterChipActive:     { backgroundColor: uiColor.primary, borderColor: uiColor.primary },
@@ -2137,12 +2137,12 @@ const styles = StyleSheet.create({
   },
   controlBtn: {
     width: minTouchTarget, height: minTouchTarget, borderRadius: uiRadius.md,
-    backgroundColor: "rgba(8,14,10,0.90)",
+    backgroundColor: uiGlass.controlBg,
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: uiColor.border,
+    borderWidth: 1, borderColor: uiGlass.controlBorder,
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 8, elevation: 6,
   },
-  controlBtnActive:   { backgroundColor: "rgba(44,195,107,0.18)", borderColor: uiColor.primary },
+  controlBtnActive:   { backgroundColor: uiColor.primary + uiAlpha.soft, borderColor: uiColor.primary },
   controlBtnDisabled: { opacity: 0.5 },
 
   // Kartlag-panel
@@ -2330,39 +2330,39 @@ const styles = StyleSheet.create({
 
   bottomRow:    { flexDirection: "row", alignItems: "center", gap: 8 },
   bottomTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
-  bottomTitle:  { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
-  bottomMeta:   { color: "#3D5446", fontSize: 12, marginBottom: 10 },
-  bottomLoadText: { color: "#4D6858", fontSize: 14 },
-  bottomError:    { color: "#F87171", fontSize: 13 },
+  bottomTitle:  { ...uiType.sectionTitle, color: uiColor.textPrimary },
+  bottomMeta:   { ...uiType.caption, color: uiColor.textFaint, marginBottom: 10 },
+  bottomLoadText: { ...uiType.body, color: uiColor.textMuted },
+  bottomError:    { ...uiType.metadata, color: uiColor.danger },
 
   scoreBadge: {
-    backgroundColor: "rgba(44,195,107,0.14)",
-    borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6,
-    borderWidth: 1, borderColor: "rgba(44,195,107,0.25)",
+    backgroundColor: uiColor.primary + uiAlpha.soft,
+    borderRadius: uiRadius.pill, paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: uiColor.primary + uiAlpha.soft,
   },
-  scoreBadgeText: { color: "#2CC36B", fontSize: 12, fontWeight: "900" },
+  scoreBadgeText: { ...uiType.metadata, color: uiColor.primary },
 
   recentRow: {
     flexDirection: "row", alignItems: "center",
     gap: 8, paddingVertical: 6,
-    borderBottomWidth: 1, borderBottomColor: "#111C14",
+    borderBottomWidth: 1, borderBottomColor: uiColor.border,
   },
   recentEmoji:  { fontSize: 16 },
-  recentAnimal: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", flex: 1 },
-  recentTime:   { color: "#3D5446", fontSize: 12 },
+  recentAnimal: { ...uiType.bodyStrong, color: uiColor.textPrimary, flex: 1 },
+  recentTime:   { ...uiType.caption, color: uiColor.textFaint },
 
-  noDataText: { color: "#3D5446", fontSize: 13, lineHeight: 20 },
+  noDataText: { ...uiType.body, color: uiColor.textFaint },
 
   moreLinkRow: {
     flexDirection: "row", alignItems: "center",
     justifyContent: "center", gap: 4, marginTop: 10,
   },
-  moreLinkText: { color: "#2CC36B", fontSize: 13, fontWeight: "700" },
+  moreLinkText: { ...uiType.metadata, color: uiColor.primary },
 
   aktivLegend: {
     position: "absolute", left: 14, bottom: 130,
-    backgroundColor: "rgba(6,14,8,0.90)", borderRadius: uiRadius.md,
-    borderWidth: 1, borderColor: "#1A2A30", padding: 12, gap: 7,
+    backgroundColor: uiGlass.controlBg, borderRadius: uiRadius.md,
+    borderWidth: 1, borderColor: uiGlass.controlBorder, padding: 12, gap: 7,
     zIndex: uiZ.mapOverlay,
     maxWidth: 240,
   },
