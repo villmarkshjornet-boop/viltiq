@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -13,7 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
 import Surface from "../components/ui/Surface";
 import EngineStatusPanel from "../components/ui/EngineStatusPanel";
-import { color as uiColor, spacing as uiSpacing } from "../src/design/tokens";
+import ListRow from "../components/ui/ListRow";
+import { color as uiColor, spacing as uiSpacing, radius as uiRadius, typography as uiType, heat as uiHeat } from "../src/design/tokens";
 import { subscribeToVisibleCameras } from "../src/services/cameras";
 import { getAktivtJaktlagId } from "../src/services/jaktlag";
 import {
@@ -41,6 +43,19 @@ import {
 } from "../src/engine";
 
 const NORSK_ART: Record<Species, string> = { hjort: "Hjort", radyr: "Rådyr", elg: "Elg", annet: "Annet" };
+
+/**
+ * Redesign-oppdraget §12/§13: hero-kortet skal ha en SVAK glød bak seg som
+ * antyder aktivitetsnivå — varm ved høy aktivitet, rolig/kjølig ved lav —
+ * ALDRI et heldekket farget kort. "Moderat" holdes bevisst dempet (samme
+ * som "Lav") — kun Høy/Svært høy får den varme tonen, jf. brief-eksempelet
+ * "hold uttrykket roligere/kjøligere" for alt som ikke er tydelig høyt.
+ */
+function heroGlow(level: string): readonly [string, string] {
+  if (level === "Svært høy") return uiHeat.glowSevere;
+  if (level === "Høy") return uiHeat.glowHigh;
+  return uiHeat.glowLow;
+}
 
 // ─── Komponent ────────────────────────────────────────────────────────────────
 
@@ -182,12 +197,12 @@ export default function HomeScreen() {
             <View style={styles.topRowActions}>
               <Link href="/innstillinger" asChild>
                 <Pressable style={styles.settingsBtn} hitSlop={8}>
-                  <Ionicons name="settings-outline" size={19} color="#A9B8AE" />
+                  <Ionicons name="settings-outline" size={19} color={uiColor.textSecondary} />
                 </Pressable>
               </Link>
               <Link href="/logg" asChild>
                 <Pressable style={styles.logBtn}>
-                  <Ionicons name="add" size={18} color="#04110A" />
+                  <Ionicons name="add" size={18} color={uiColor.primaryText} />
                   <Text style={styles.logBtnText}>Logg</Text>
                 </Pressable>
               </Link>
@@ -210,7 +225,7 @@ export default function HomeScreen() {
             </View>
           ) : feiltekst ? (
             <View style={styles.errorCard}>
-              <Ionicons name="warning-outline" size={20} color="#F87171" />
+              <Ionicons name="warning-outline" size={20} color={uiColor.danger} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.errorTitle}>Kunne ikke laste data</Text>
                 <Text style={styles.errorText}>{feiltekst}</Text>
@@ -218,8 +233,19 @@ export default function HomeScreen() {
             </View>
           ) : (
             <>
-              {/* ── Beste område nå — hovedinnholdet på Hjem (§1) ── */}
-              <Surface variant="elevated" style={styles.besteCard}>
+              {/* ── Beste område nå — hovedinnholdet på Hjem (§1). Svak glød
+                  bak kortet antyder aktivitetsnivå (§12/§13) — ALDRI et
+                  heldekket farget kort, kun en dempet aura som stikker ut
+                  rundt kantene siden Surface selv er ugjennomsiktig. ── */}
+              <View style={styles.besteGlowWrap}>
+                {besteAnbefaling && (
+                  <LinearGradient
+                    colors={heroGlow(besteAnbefaling.zone.level)}
+                    style={StyleSheet.absoluteFillObject}
+                    pointerEvents="none"
+                  />
+                )}
+                <Surface variant="elevated" style={styles.besteCard}>
                 <Text style={styles.besteEyebrow}>Beste område nå</Text>
                 {besteAnbefaling ? (
                   <>
@@ -247,7 +273,8 @@ export default function HomeScreen() {
                     Ingen tydelig vurdering ennå — legg inn observasjoner i Logg for å bygge opp datagrunnlaget.
                   </Text>
                 )}
-              </Surface>
+                </Surface>
+              </View>
 
               {/* ── Nylig relevant aktivitet (§1) — IKKE en permanent historikkliste ── */}
               <View style={styles.recentHeader}>
@@ -257,46 +284,42 @@ export default function HomeScreen() {
 
               {relevantAktivitet.length === 0 ? (
                 <View style={styles.emptyCard}>
-                  <Ionicons name="binoculars-outline" size={28} color="#2A3D30" />
+                  <Ionicons name="binoculars-outline" size={28} color={uiColor.borderStrong} />
                   <Text style={styles.emptyTitle}>Ingen ny aktivitet</Text>
                   <Text style={styles.emptyText}>
                     Ingenting registrert de siste 48 timene ennå.
                   </Text>
                 </View>
               ) : (
-                relevantAktivitet.map((obs) => (
-                  <View key={obs.id} style={styles.obsCard}>
-                    <View style={styles.obsIconWrap}>
-                      <Text style={styles.obsIcon}>{dyrEmoji(obs.dyr)}</Text>
-                    </View>
-                    <View style={styles.obsBody}>
-                      <View style={styles.obsTopRow}>
-                        <Text style={styles.obsAnimal}>{obs.dyr}</Text>
-                        <Text style={styles.obsTime}>{hentRelativTid(obs.tid)}</Text>
-                      </View>
-                      <Text style={styles.obsMeta}>{obs.type}</Text>
-                    </View>
-                    <Pressable
-                      onPress={() => slettObs(obs)}
-                      style={styles.obsDeleteBtn}
-                      hitSlop={12}
-                    >
-                      <Ionicons name="trash-outline" size={16} color="#2E4236" />
-                    </Pressable>
-                  </View>
-                ))
+                <Surface style={styles.recentListCard}>
+                  {relevantAktivitet.map((obs, i) => (
+                    <ListRow
+                      key={obs.id}
+                      emoji={dyrEmoji(obs.dyr)}
+                      title={obs.dyr}
+                      subtitle={obs.type}
+                      meta={hentRelativTid(obs.tid)}
+                      divider={i < relevantAktivitet.length - 1}
+                      trailing={
+                        <Pressable onPress={() => slettObs(obs)} style={styles.obsDeleteBtn} hitSlop={12}>
+                          <Ionicons name="close" size={15} color={uiColor.textFaint} />
+                        </Pressable>
+                      }
+                    />
+                  ))}
+                </Surface>
               )}
 
               {/* ── Viltkamera — kompakt, sekundær rad ── */}
               <View style={styles.kameraCard}>
                 <View style={styles.kameraLeft}>
-                  <Ionicons name="camera-outline" size={16} color="#60A5FA" />
+                  <Ionicons name="camera-outline" size={16} color={uiColor.info} />
                   <Text style={styles.kameraTitle}>{kameraCount} aktive viltkamera</Text>
                 </View>
                 <Link href="/kart" asChild>
                   <Pressable style={styles.kameraBtn}>
                     <Text style={styles.kameraBtnText}>Se i kart</Text>
-                    <Ionicons name="chevron-forward" size={13} color="#60A5FA" />
+                    <Ionicons name="chevron-forward" size={13} color={uiColor.info} />
                   </Pressable>
                 </Link>
               </View>
@@ -322,11 +345,8 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "flex-end",
     justifyContent: "space-between", marginBottom: uiSpacing.md,
   },
-  eyebrow: {
-    color: uiColor.primary, fontSize: 11, fontWeight: "800",
-    letterSpacing: 2.5, textTransform: "uppercase", marginBottom: 6,
-  },
-  pageTitle: { color: uiColor.textPrimary, fontSize: 30, fontWeight: "900", letterSpacing: -0.4 },
+  eyebrow: { ...uiType.eyebrow, color: uiColor.primary, marginBottom: 6 },
+  pageTitle: { ...uiType.pageTitle, color: uiColor.textPrimary, fontSize: 30 },
   topRowActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   settingsBtn: {
     width: 40, height: 40, borderRadius: 20,
@@ -335,16 +355,13 @@ const styles = StyleSheet.create({
   },
   logBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: uiColor.primary, borderRadius: 999,
+    backgroundColor: uiColor.primary, borderRadius: uiRadius.pill,
     paddingHorizontal: 16, paddingVertical: 10,
   },
   logBtnText: { color: uiColor.primaryText, fontSize: 14, fontWeight: "900" },
 
   // Kompakt statuslinje — sekundær tekst, ikke et kort (§1)
-  statusLinje: {
-    color: uiColor.textMuted, fontSize: 13, fontWeight: "600",
-    marginBottom: uiSpacing.xl,
-  },
+  statusLinje: { ...uiType.caption, color: uiColor.textMuted, marginBottom: uiSpacing.xl },
 
   // Loading / Error
   loadCard: {
@@ -356,14 +373,16 @@ const styles = StyleSheet.create({
   loadText:  { color: uiColor.textMuted, fontSize: 14, marginTop: 6, textAlign: "center" },
   errorCard: {
     flexDirection: "row", alignItems: "flex-start", gap: 12,
-    backgroundColor: "#160D0D", borderWidth: 1, borderColor: "#3B1A1A",
+    backgroundColor: uiColor.danger + "14", borderWidth: 1, borderColor: uiColor.danger + "33",
     borderRadius: 18, padding: 18, marginBottom: 16,
   },
-  errorTitle: { color: "#FCA5A5", fontSize: 15, fontWeight: "800" },
-  errorText:  { color: "#A07070", fontSize: 13, marginTop: 4, lineHeight: 20 },
+  errorTitle: { color: uiColor.danger, fontSize: 15, fontWeight: "800" },
+  errorText:  { color: uiColor.textSecondary, fontSize: 13, marginTop: 4, lineHeight: 20 },
 
-  // Beste område nå
-  besteCard: { padding: uiSpacing.xl, marginBottom: uiSpacing.lg },
+  // Beste område nå — glødwrap gir plass rundt kortet for at LinearGradient
+  // faktisk skal synes (Surface selv er ugjennomsiktig).
+  besteGlowWrap: { marginBottom: uiSpacing.lg, borderRadius: uiRadius.xl + 6, padding: 8 },
+  besteCard: { padding: uiSpacing.xl },
   besteEyebrow: {
     color: uiColor.textMuted, fontSize: 11, fontWeight: "800",
     textTransform: "uppercase", letterSpacing: 1.2, marginBottom: uiSpacing.md,
@@ -381,8 +400,8 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center",
     justifyContent: "space-between", marginBottom: 12,
   },
-  recentTitle: { color: uiColor.textPrimary, fontSize: 17, fontWeight: "900" },
-  recentCount: { color: uiColor.textFaint, fontSize: 13, fontWeight: "600" },
+  recentTitle: { ...uiType.sectionTitle, color: uiColor.textPrimary, fontSize: 17 },
+  recentCount: { ...uiType.caption, color: uiColor.textFaint },
   emptyCard: {
     backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
     borderRadius: 20, padding: 28, alignItems: "center", marginBottom: 12,
@@ -390,22 +409,11 @@ const styles = StyleSheet.create({
   emptyTitle: { color: uiColor.textMuted, fontSize: 15, fontWeight: "800", marginTop: 12 },
   emptyText:  { color: uiColor.textFaint, fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 20 },
 
-  obsCard: {
-    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
-    borderRadius: 18, padding: 14, marginBottom: 8,
-    flexDirection: "row", alignItems: "center", gap: 12,
-  },
-  obsIconWrap: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#152019", alignItems: "center", justifyContent: "center",
-  },
-  obsIcon:    { fontSize: 20 },
-  obsBody:    { flex: 1 },
-  obsTopRow:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 3 },
-  obsAnimal:  { color: uiColor.textPrimary, fontSize: 15, fontWeight: "800" },
-  obsTime:    { color: uiColor.textFaint, fontSize: 12, fontWeight: "600" },
-  obsMeta:    { color: uiColor.textMuted, fontSize: 13 },
-  obsDeleteBtn: { paddingLeft: 4, paddingTop: 2 },
+  // Redesign-oppdraget §14: én lett Surface med ListRow-rader (delt
+  // primitiv) i stedet for fem separate fullkort — se components/ui/
+  // ListRow.tsx.
+  recentListCard: { paddingHorizontal: uiSpacing.lg, marginBottom: 12 },
+  obsDeleteBtn: { padding: 4 },
 
   // Viltkamera — kompakt sekundær rad
   kameraCard: {
@@ -415,5 +423,5 @@ const styles = StyleSheet.create({
   kameraLeft:  { flexDirection: "row", alignItems: "center", gap: 8 },
   kameraTitle: { color: uiColor.textMuted, fontSize: 13, fontWeight: "700" },
   kameraBtn:   { flexDirection: "row", alignItems: "center", gap: 4 },
-  kameraBtnText: { color: "#60A5FA", fontSize: 13, fontWeight: "800" },
+  kameraBtnText: { color: uiColor.info, fontSize: 13, fontWeight: "800" },
 });
