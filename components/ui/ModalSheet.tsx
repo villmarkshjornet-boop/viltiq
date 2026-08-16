@@ -27,13 +27,18 @@ type ModalSheetProps = {
  * native Alert.alert), som bevisst omgår <Modal> helt pga. en tidligere
  * funnet RN-Web-bug. Denne komponenten er kun for skjermer/lister/skjema,
  * som er det alle 6 eksisterende <Modal>-bruk faktisk er.
+ *
+ * Bakgrunn (overlay) og ark (sheet) er bevisst SØSKEN, ikke ark nøstet inni
+ * bakgrunnens Pressable — unngår behovet for stopPropagation/responder-
+ * hacks for å la trykk inni arket unngå å lukke modalen.
  */
 export default function ModalSheet({ visible, onClose, children, maxHeightPercent = 90 }: ModalSheetProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
+      <View style={styles.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <Animated.View
           entering={SlideInDown.duration(motion.base)}
           style={[
@@ -42,12 +47,10 @@ export default function ModalSheet({ visible, onClose, children, maxHeightPercen
             { maxHeight: `${maxHeightPercent}%`, paddingBottom: insets.bottom + spacing.lg },
           ]}
         >
-          <Pressable onPress={(e) => e.stopPropagation()}>
-            <View style={styles.handle} />
-            {children}
-          </Pressable>
+          <View style={styles.handle} />
+          {children}
         </Animated.View>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -68,6 +71,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
+    overflow: "hidden",
   },
   handle: {
     width: 36,

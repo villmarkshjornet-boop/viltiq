@@ -3,7 +3,6 @@ import { Link, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   type DimensionValue,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
 import Surface from "../components/ui/Surface";
 import EngineStatusPanel from "../components/ui/EngineStatusPanel";
+import ModalSheet from "../components/ui/ModalSheet";
+import ListRow from "../components/ui/ListRow";
 import {
   lagreFelling,
   oppdaterFelling,
@@ -259,6 +260,22 @@ export default function JaktScreen() {
     [fellings, kvoter]
   );
 
+  // Redesign-oppdraget §27: grupper de flate kategori-radene (fra
+  // kvoteBeregning.ts, uendret) etter art for visning — art-overskrift +
+  // aggregert totalbar, deretter kompakte per-kategori-rader under. Ren
+  // presentasjonsgruppering, ingen ny beregning.
+  const kvoteGrupper = useMemo(() => {
+    const grupper = new Map<string, { dyr: string; felt: number; maks: number; kategorier: typeof kvoteRader }>();
+    for (const rad of kvoteRader) {
+      const g = grupper.get(rad.dyr) ?? { dyr: rad.dyr, felt: 0, maks: 0, kategorier: [] };
+      g.felt += rad.felt;
+      g.maks += rad.maks;
+      g.kategorier.push(rad);
+      grupper.set(rad.dyr, g);
+    }
+    return [...grupper.values()];
+  }, [kvoteRader]);
+
   async function leggTilKategoriHandler(dyr: string) {
     const navn = (nyKatNavn[dyr] ?? "").trim();
     const maks = parseInt(nyKatMaks[dyr] ?? "", 10);
@@ -397,20 +414,31 @@ export default function JaktScreen() {
               </Text>
             </View>
           ) : (
-            kvoteRader.map((rad) => {
-              const pst  = rad.maks > 0 ? Math.min(rad.felt / rad.maks, 1) : 0;
-              const over = rad.maks > 0 && rad.felt >= rad.maks;
+            kvoteGrupper.map((gruppe, gi) => {
+              const totalPst  = gruppe.maks > 0 ? Math.min(gruppe.felt / gruppe.maks, 1) : 0;
+              const totalOver = gruppe.maks > 0 && gruppe.felt >= gruppe.maks;
               return (
-                <View key={rad.kategoriId} style={s.kvoteRad}>
-                  <Text style={s.kvoteDyr} numberOfLines={1}>
-                    {dyrEmoji(rad.dyr)} {rad.dyr} · {rad.navn}
-                  </Text>
-                  <View style={s.kvoteBarWrap}>
-                    <View style={[s.kvoteBar, { width: `${Math.round(pst * 100)}%` as DimensionValue, backgroundColor: over ? uiColor.danger : uiColor.primary }]} />
+                <View key={gruppe.dyr} style={gi > 0 && s.kvoteGruppeSpacing}>
+                  <View style={s.kvoteArtRad}>
+                    <Text style={s.kvoteArtNavn}>{dyrEmoji(gruppe.dyr)} {gruppe.dyr}</Text>
+                    <Text style={[s.kvoteArtTall, totalOver && s.kvoteTallOver]}>
+                      {gruppe.felt} / {gruppe.maks > 0 ? gruppe.maks : "—"}
+                    </Text>
                   </View>
-                  <Text style={[s.kvoteTall, over && s.kvoteTallOver]}>
-                    {rad.felt}/{rad.maks > 0 ? rad.maks : "—"}
-                  </Text>
+                  <View style={s.kvoteBarWrap}>
+                    <View style={[s.kvoteBar, { width: `${Math.round(totalPst * 100)}%` as DimensionValue, backgroundColor: totalOver ? uiColor.danger : uiColor.primary }]} />
+                  </View>
+                  {gruppe.kategorier.map((rad) => {
+                    const over = rad.maks > 0 && rad.felt >= rad.maks;
+                    return (
+                      <View key={rad.kategoriId} style={s.kvoteKatRad}>
+                        <Text style={s.kvoteKatNavn}>{rad.navn}</Text>
+                        <Text style={[s.kvoteKatTall, over && s.kvoteTallOver]}>
+                          {rad.felt}/{rad.maks > 0 ? rad.maks : "—"}
+                        </Text>
+                      </View>
+                    );
+                  })}
                 </View>
               );
             })
@@ -435,35 +463,37 @@ export default function JaktScreen() {
               <Text style={s.tomtSub}>Trykk «Logg felling» for å registrere din første felling.</Text>
             </View>
           ) : (
-            fellings.map((f) => {
-              const katNavn = kategorierFor(f.dyr).find((k) => k.id === f.kategoriId)?.navn;
-              return (
-                <Surface key={f.id} style={s.kort}>
-                  <View style={s.kortTop}>
-                    <View style={s.kortEmojiBoks}>
-                      <Text style={s.kortEmoji}>{dyrEmoji(f.dyr)}</Text>
-                    </View>
-                    <View style={s.kortInfo}>
-                      <Text style={s.kortDyr}>{f.dyr}{katNavn ? ` · ${katNavn}` : ""}</Text>
-                      <Text style={s.kortMeta}>
-                        {f.kjønn} · {f.aldersklasse}
-                        {f.vektKg != null ? ` · ${f.vektKg} kg` : ""}
+            <Surface style={s.fellingerKort}>
+              {fellings.map((f, i) => {
+                const katNavn = kategorierFor(f.dyr).find((k) => k.id === f.kategoriId)?.navn;
+                return (
+                  <View key={f.id}>
+                    <ListRow
+                      emoji={dyrEmoji(f.dyr)}
+                      title={f.dyr + (katNavn ? ` · ${katNavn}` : "")}
+                      subtitle={`${f.kjønn} · ${f.aldersklasse}${f.vektKg != null ? ` · ${f.vektKg} kg` : ""}`}
+                      meta={formaterDato(f.dato)}
+                      divider={i < fellings.length - 1 && !f.kommentar}
+                      trailing={
+                        <View style={s.fellingActions}>
+                          <Pressable style={s.ikonKnapp} onPress={() => åpneRedigerModal(f)} hitSlop={8}>
+                            <Ionicons name="pencil-outline" size={15} color={uiColor.textMuted} />
+                          </Pressable>
+                          <Pressable style={s.ikonKnapp} onPress={() => bekreftSlett(f)} hitSlop={8}>
+                            <Ionicons name="trash-outline" size={15} color={uiColor.textMuted} />
+                          </Pressable>
+                        </View>
+                      }
+                    />
+                    {!!f.kommentar && (
+                      <Text style={[s.kortKommentar, i < fellings.length - 1 && s.kortKommentarDivider]}>
+                        {f.kommentar}
                       </Text>
-                      <Text style={s.kortDato}>{formaterDato(f.dato)}</Text>
-                    </View>
-                    <Pressable style={s.ikonKnapp} onPress={() => åpneRedigerModal(f)} hitSlop={8}>
-                      <Ionicons name="pencil-outline" size={16} color={uiColor.textMuted} />
-                    </Pressable>
-                    <Pressable style={s.ikonKnapp} onPress={() => bekreftSlett(f)} hitSlop={8}>
-                      <Ionicons name="trash-outline" size={16} color={uiColor.textMuted} />
-                    </Pressable>
+                    )}
                   </View>
-                  {!!f.kommentar && (
-                    <Text style={s.kortKommentar}>{f.kommentar}</Text>
-                  )}
-                </Surface>
-              );
-            })
+                );
+              })}
+            </Surface>
           )}
         </ScrollView>
 
@@ -471,10 +501,7 @@ export default function JaktScreen() {
       </View>
 
       {/* ── Modal: Kategorier/kvoter (§4) ── */}
-      <Modal visible={kvoteModal} transparent animationType="slide">
-        <View style={m.overlay}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
+      <ModalSheet visible={kvoteModal} onClose={() => setKvoteModal(false)}>
             <Text style={m.tittel}>Kvote-kategorier</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
               {KVOTE_DYR.map((dyr) => (
@@ -534,15 +561,10 @@ export default function JaktScreen() {
                 <Text style={m.lagreTxt}>Ferdig</Text>
               </Pressable>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </ModalSheet>
 
       {/* ── Modal: Ny/rediger felling ── */}
-      <Modal visible={modalVis} transparent animationType="slide">
-        <View style={m.overlay}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
+      <ModalSheet visible={modalVis} onClose={() => { setModalVis(false); setRedigererFelling(null); }}>
             <Text style={m.tittel}>{redigererFelling ? "Rediger felling" : "Registrer felling"}</Text>
 
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -632,9 +654,7 @@ export default function JaktScreen() {
                 </Pressable>
               </View>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </ModalSheet>
     </SafeAreaView>
   );
 }
@@ -669,11 +689,18 @@ const s = StyleSheet.create({
   kvoteKortTittel: { color: uiColor.textPrimary, fontSize: 15, fontWeight: "900" },
   kvoteEditKnapp:  { flexDirection: "row", alignItems: "center", gap: 5 },
   kvoteEditTxt:    { color: uiColor.primary, fontSize: 12, fontWeight: "700" },
-  kvoteRad:        { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: uiSpacing.sm + 2 },
-  kvoteDyr:        { color: uiColor.textSecondary, fontSize: 13, fontWeight: "700", width: 130 },
-  kvoteBarWrap:    { flex: 1, height: 6, backgroundColor: uiColor.background, borderRadius: 3, overflow: "hidden" },
+  // Redesign-oppdraget §27: art-gruppe (overskrift + aggregert totalbar)
+  // med kompakte per-kategori-rader under — ikke lenger én flat linje per
+  // kategori uten hierarki.
+  kvoteGruppeSpacing: { marginTop: uiSpacing.md + 2 },
+  kvoteArtRad:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  kvoteArtNavn:    { ...uiType.bodyStrong, color: uiColor.textPrimary },
+  kvoteArtTall:    { ...uiType.metadata, color: uiColor.textMuted },
+  kvoteBarWrap:    { height: 6, backgroundColor: uiColor.background, borderRadius: 3, overflow: "hidden" },
   kvoteBar:        { height: "100%", borderRadius: 3 },
-  kvoteTall:       { color: uiColor.textMuted, fontSize: 12, fontWeight: "800", width: 40, textAlign: "right" },
+  kvoteKatRad:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingLeft: uiSpacing.md, marginTop: 5 },
+  kvoteKatNavn:    { ...uiType.caption, color: uiColor.textSecondary },
+  kvoteKatTall:    { ...uiType.caption, color: uiColor.textFaint },
   kvoteTallOver:   { color: uiColor.danger },
   kvoteTomt:       { paddingVertical: 4 },
   kvoteTomtTekst:  { color: uiColor.textMuted, fontSize: 13, lineHeight: 19 },
@@ -691,22 +718,17 @@ const s = StyleSheet.create({
   tomtTittel:  { color: uiColor.textPrimary, fontSize: 18, fontWeight: "800", marginBottom: uiSpacing.sm },
   tomtSub:     { color: uiColor.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 },
 
-  kort:       { padding: uiSpacing.lg },
-  kortTop:    { flexDirection: "row", alignItems: "flex-start", gap: uiSpacing.md },
-  kortEmojiBoks: { width: 44, height: 44, borderRadius: uiRadius.md, backgroundColor: uiColor.surfaceHover, alignItems: "center", justifyContent: "center" },
-  kortEmoji:  { fontSize: 22 },
-  kortInfo:   { flex: 1 },
-  kortDyr:    { color: uiColor.textPrimary, fontSize: 16, fontWeight: "800" },
-  kortMeta:   { color: uiColor.textSecondary, fontSize: 13, marginTop: 2 },
-  kortDato:   { color: uiColor.textFaint, fontSize: 12, marginTop: 4 },
+  // Redesign-oppdraget §27: fellinger vist som ListRow-rader i én Surface
+  // (samme mønster som Hjem sin "Nylig relevant aktivitet") i stedet for
+  // ett fullt Surface-kort per felling.
+  fellingerKort: { paddingHorizontal: uiSpacing.lg, marginBottom: 12 },
+  fellingActions: { flexDirection: "row", gap: 2 },
   ikonKnapp:  { padding: 6 },
-  kortKommentar: { color: uiColor.textMuted, fontSize: 13, marginTop: uiSpacing.sm + 2, lineHeight: 18 },
+  kortKommentar: { color: uiColor.textMuted, fontSize: 13, marginTop: -6, marginBottom: uiSpacing.sm, lineHeight: 18 },
+  kortKommentarDivider: { borderBottomWidth: 1, borderBottomColor: uiColor.border, paddingBottom: uiSpacing.sm },
 });
 
 const m = StyleSheet.create({
-  overlay:  { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
-  sheet:    { backgroundColor: uiColor.surface, borderTopLeftRadius: uiRadius.xl + 6, borderTopRightRadius: uiRadius.xl + 6, paddingHorizontal: uiSpacing.xxl - 6, paddingBottom: 40, paddingTop: uiSpacing.md + 2, maxHeight: "90%" },
-  handle:   { width: 40, height: 4, borderRadius: 2, backgroundColor: uiColor.border, alignSelf: "center", marginBottom: uiSpacing.xl },
   tittel:   { color: uiColor.textPrimary, fontSize: 20, fontWeight: "900", marginBottom: uiSpacing.xl },
   label:    { color: uiColor.textMuted, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: uiSpacing.sm },
   input:    { backgroundColor: uiColor.background, borderRadius: uiRadius.md, borderWidth: 1, borderColor: uiColor.border, color: uiColor.textPrimary, fontSize: 15, paddingHorizontal: uiSpacing.lg, paddingVertical: 13, marginBottom: uiSpacing.lg + 2 },
