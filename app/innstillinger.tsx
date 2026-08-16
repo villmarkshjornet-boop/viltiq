@@ -36,7 +36,13 @@ import {
     saveSettings,
     type AppSettings,
 } from "../src/services/settings";
-import { color as uiColor, radius as uiRadius } from "../src/design/tokens";
+import {
+    alpha as uiAlpha,
+    color as uiColor,
+    radius as uiRadius,
+    spacing as uiSpacing,
+    typography as uiType,
+} from "../src/design/tokens";
 import { visAlert } from "../src/lib/confirmAlert";
 
 const radiusOptions: Array<10 | 25 | 50> = [10, 25, 50];
@@ -275,8 +281,6 @@ export default function InnstillingerScreen() {
           ) : (
             <>
               <View style={styles.heroCard}>
-                <View style={styles.heroGlow} />
-
                 <View style={styles.heroTop}>
                   <View style={styles.heroIcon}>
                     <Ionicons name="locate" size={24} color={uiColor.primarySoft} />
@@ -615,8 +619,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   container: {
-    paddingHorizontal: 18,
-    paddingTop: 10,
+    paddingHorizontal: uiSpacing.xl,
+    paddingTop: uiSpacing.md,
     paddingBottom: 162,
   },
   header: {
@@ -626,14 +630,14 @@ const styles = StyleSheet.create({
   backRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: uiSpacing.xs,
     marginBottom: 14,
   },
   backText: { color: uiColor.primarySoft, fontSize: 15, fontWeight: "700" },
   brandRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: uiSpacing.sm,
     marginBottom: 14,
   },
   brandDot: {
@@ -641,35 +645,26 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: uiRadius.pill,
     backgroundColor: uiColor.primary,
-    shadowColor: uiColor.primary,
-    shadowOpacity: 0.45,
-    shadowRadius: 9,
-    shadowOffset: { width: 0, height: 0 },
   },
   brandText: {
+    ...uiType.eyebrow,
     color: uiColor.textMuted,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 1.15,
-    textTransform: "uppercase",
   },
   title: {
+    ...uiType.pageTitle,
     color: uiColor.textPrimary,
-    fontSize: 35,
-    fontWeight: "900",
   },
   subtitle: {
+    ...uiType.body,
     color: uiColor.textSecondary,
-    fontSize: 15,
-    lineHeight: 23,
-    marginTop: 8,
+    marginTop: uiSpacing.sm,
     maxWidth: "94%",
   },
   loadingCard: {
     backgroundColor: uiColor.surface,
     borderWidth: 1,
     borderColor: uiColor.border,
-    borderRadius: 24,
+    borderRadius: uiRadius.xl,
     padding: 24,
     alignItems: "center",
   },
@@ -685,23 +680,12 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   heroCard: {
-    position: "relative",
-    overflow: "hidden",
-    backgroundColor: "#102018",
+    backgroundColor: uiColor.surfaceElevated,
     borderWidth: 1,
     borderColor: uiColor.borderStrong,
-    borderRadius: 30,
-    padding: 20,
-    marginBottom: 16,
-  },
-  heroGlow: {
-    position: "absolute",
-    right: -40,
-    top: -45,
-    width: 160,
-    height: 160,
-    borderRadius: uiRadius.pill,
-    backgroundColor: "rgba(124,255,178,0.10)",
+    borderRadius: uiRadius.xl,
+    padding: uiSpacing.xl,
+    marginBottom: uiSpacing.lg,
   },
   heroTop: {
     flexDirection: "row",
@@ -711,8 +695,8 @@ const styles = StyleSheet.create({
   heroIcon: {
     width: 50,
     height: 50,
-    borderRadius: 20,
-    backgroundColor: "#183225",
+    borderRadius: uiRadius.lg,
+    backgroundColor: uiColor.surfaceHover,
     borderWidth: 1,
     borderColor: uiColor.borderStrong,
     alignItems: "center",
@@ -722,16 +706,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   heroEyebrow: {
+    ...uiType.eyebrow,
     color: uiColor.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
   },
   heroTitle: {
+    ...uiType.display,
     color: uiColor.textPrimary,
-    fontSize: 36,
-    fontWeight: "900",
     marginTop: 4,
   },
   heroText: {
@@ -747,9 +727,9 @@ const styles = StyleSheet.create({
   },
   heroStat: {
     flex: 1,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: uiColor.surfaceHover,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
+    borderColor: uiColor.border,
     borderRadius: uiRadius.lg,
     padding: 14,
   },
@@ -759,31 +739,27 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   heroStatLabel: {
+    ...uiType.metadata,
     color: uiColor.textMuted,
-    fontSize: 12,
     marginTop: 4,
-    fontWeight: "700",
   },
   card: {
     backgroundColor: uiColor.surface,
     borderWidth: 1,
     borderColor: uiColor.border,
-    borderRadius: 24,
+    borderRadius: uiRadius.xl,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: uiSpacing.lg,
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 12,
+    gap: uiSpacing.md,
     alignItems: "flex-start",
   },
   cardEyebrow: {
+    ...uiType.eyebrow,
     color: uiColor.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
     marginBottom: 5,
   },
   cardTitle: {
@@ -792,17 +768,16 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   cardText: {
+    ...uiType.body,
     color: uiColor.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
+    marginTop: uiSpacing.sm,
   },
   miniBadge: {
     backgroundColor: uiColor.surfaceHover,
     borderWidth: 1,
     borderColor: uiColor.borderStrong,
     borderRadius: uiRadius.pill,
-    paddingHorizontal: 12,
+    paddingHorizontal: uiSpacing.md,
     paddingVertical: 7,
   },
   miniBadgeText: {
@@ -819,7 +794,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: uiColor.surface,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: uiColor.border,
     borderRadius: uiRadius.xl,
     paddingVertical: 18,
     alignItems: "center",
@@ -854,7 +829,7 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: uiRadius.lg,
-    backgroundColor: "#13261D",
+    backgroundColor: uiColor.surfaceHover,
     borderWidth: 1,
     borderColor: uiColor.borderStrong,
     alignItems: "center",
@@ -863,11 +838,11 @@ const styles = StyleSheet.create({
   statusLine: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginTop: 16,
+    gap: uiSpacing.sm,
+    marginTop: uiSpacing.lg,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopColor: uiColor.border,
   },
   statusDot: {
     width: 9,
@@ -887,27 +862,25 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     flexDirection: "row",
-    gap: 12,
+    gap: uiSpacing.md,
     backgroundColor: uiColor.surface,
     borderWidth: 1,
-    borderColor: "rgba(110,231,183,0.12)",
+    borderColor: uiColor.border,
     borderRadius: uiRadius.xl,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: uiSpacing.lg,
   },
   infoTitle: {
+    ...uiType.sectionTitle,
     color: uiColor.textPrimary,
-    fontSize: 16,
-    fontWeight: "900",
   },
   infoText: {
+    ...uiType.body,
     color: uiColor.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 6,
+    marginTop: uiSpacing.sm,
   },
   messageBox: {
-    borderRadius: 16,
+    borderRadius: uiRadius.lg,
     paddingVertical: 14,
     paddingHorizontal: 14,
     marginBottom: 14,
@@ -919,32 +892,32 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   messageSuccess: {
-    backgroundColor: "rgba(34,197,94,0.10)",
-    borderColor: "rgba(34,197,94,0.18)",
+    backgroundColor: uiColor.success + uiAlpha.soft,
+    borderColor: uiColor.success + uiAlpha.medium,
   },
   messageSuccessText: {
     color: uiColor.primarySoft,
   },
   messageError: {
-    backgroundColor: "rgba(239,68,68,0.10)",
-    borderColor: "rgba(239,68,68,0.18)",
+    backgroundColor: uiColor.danger + uiAlpha.soft,
+    borderColor: uiColor.danger + uiAlpha.medium,
   },
   messageErrorText: {
     color: uiColor.danger,
   },
   messageInfo: {
-    backgroundColor: "rgba(148,163,184,0.10)",
-    borderColor: "rgba(148,163,184,0.18)",
+    backgroundColor: uiColor.info + uiAlpha.soft,
+    borderColor: uiColor.info + uiAlpha.medium,
   },
   messageInfoText: {
-    color: "#CBD5E1",
+    color: uiColor.info,
   },
   savingRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    marginTop: 4,
+    gap: uiSpacing.sm,
+    marginTop: uiSpacing.xs,
   },
   savingText: {
     color: uiColor.primarySoft,
@@ -956,55 +929,55 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center",
     justifyContent: "space-between",
     marginTop: 14, paddingTop: 14,
-    borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopWidth: 1, borderTopColor: uiColor.border,
   },
-  kodeLabel: { color: uiColor.textMuted, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
+  kodeLabel: { ...uiType.eyebrow, color: uiColor.textMuted, marginBottom: uiSpacing.xs },
   kodeTekst: { color: uiColor.primarySoft, fontSize: 22, fontWeight: "900", letterSpacing: 3 },
   kodeHint:  { color: uiColor.textFaint, fontSize: 12, fontWeight: "600" },
 
   medlSection: {
     marginTop: 14, paddingTop: 14,
-    borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopWidth: 1, borderTopColor: uiColor.border,
   },
-  medlHeader:    { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  medlHeaderTxt: { color: uiColor.textMuted, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
+  medlHeader:    { flexDirection: "row", alignItems: "center", gap: uiSpacing.sm, marginBottom: 10 },
+  medlHeaderTxt: { ...uiType.eyebrow, color: uiColor.textMuted },
   medlBadge: {
-    backgroundColor: "rgba(44,195,107,0.12)",
+    backgroundColor: uiColor.primary + uiAlpha.soft,
     borderRadius: uiRadius.pill, paddingHorizontal: 7, paddingVertical: 2,
-    borderWidth: 1, borderColor: "rgba(44,195,107,0.2)",
+    borderWidth: 1, borderColor: uiColor.primary + uiAlpha.medium,
   },
   medlBadgeTxt: { color: uiColor.primary, fontSize: 11, fontWeight: "900" },
   medlRad: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)",
+    paddingVertical: uiSpacing.sm,
+    borderBottomWidth: 1, borderBottomColor: uiColor.border,
   },
   medlAvatar: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 30, height: 30, borderRadius: uiRadius.pill,
     backgroundColor: uiColor.surfaceHover, borderWidth: 1, borderColor: uiColor.borderStrong,
     alignItems: "center", justifyContent: "center",
   },
   medlAvatarTxt:    { color: uiColor.primary, fontSize: 13, fontWeight: "900" },
   medlEpost:        { color: uiColor.textSecondary, fontSize: 13, flex: 1 },
-  medlRolleBadge:   { backgroundColor: uiColor.surface, borderRadius: uiRadius.pill, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: uiColor.border },
+  medlRolleBadge:   { backgroundColor: uiColor.surface, borderRadius: uiRadius.pill, paddingHorizontal: uiSpacing.sm, paddingVertical: 3, borderWidth: 1, borderColor: uiColor.border },
   medlRolleBadgeLeder: { backgroundColor: uiColor.surfaceHover, borderColor: uiColor.primary },
   medlRolleTxt:     { color: uiColor.textMuted, fontSize: 11, fontWeight: "800" },
   medlRolleTxtLeder:{ color: uiColor.primarySoft },
 
   forlatKnapp: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 7, marginTop: 14, paddingVertical: 12,
-    borderWidth: 1, borderColor: "rgba(248,113,113,0.18)",
-    borderRadius: uiRadius.md, backgroundColor: "rgba(248,113,113,0.06)",
+    gap: 7, marginTop: 14, paddingVertical: uiSpacing.md,
+    borderWidth: 1, borderColor: uiColor.danger + uiAlpha.medium,
+    borderRadius: uiRadius.md, backgroundColor: uiColor.danger + uiAlpha.soft,
   },
   forlatTxt: { color: uiColor.danger, fontSize: 14, fontWeight: "700" },
 
   loggUtKnapp: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8, marginTop: 8, marginBottom: 8,
-    borderWidth: 1, borderColor: "rgba(248,113,113,0.2)",
-    borderRadius: uiRadius.lg, paddingVertical: 16,
-    backgroundColor: "rgba(248,113,113,0.06)",
+    gap: uiSpacing.sm, marginTop: uiSpacing.sm, marginBottom: uiSpacing.sm,
+    borderWidth: 1, borderColor: uiColor.danger + uiAlpha.medium,
+    borderRadius: uiRadius.lg, paddingVertical: uiSpacing.lg,
+    backgroundColor: uiColor.danger + uiAlpha.soft,
   },
   loggUtTxt: { color: uiColor.danger, fontSize: 15, fontWeight: "800" },
 
@@ -1013,9 +986,9 @@ const styles = StyleSheet.create({
   jaktlagKnappTxt:      { color: uiColor.primarySoft, fontSize: 14, fontWeight: "700" },
   jaktlagKnappAlt:      { borderColor: uiColor.borderStrong },
   jaktlagSkjema:        { marginTop: 14 },
-  jaktlagSkjemaLabel:   { color: uiColor.textFaint, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 4 },
-  jaktlagInput:         { backgroundColor: uiColor.surface, borderRadius: uiRadius.md, borderWidth: 1, borderColor: uiColor.border, color: uiColor.textPrimary, fontSize: 16, paddingHorizontal: 16, paddingVertical: 14 },
+  jaktlagSkjemaLabel:   { ...uiType.eyebrow, color: uiColor.textFaint, marginBottom: uiSpacing.sm, marginTop: uiSpacing.xs },
+  jaktlagInput:         { backgroundColor: uiColor.surface, borderRadius: uiRadius.md, borderWidth: 1, borderColor: uiColor.border, color: uiColor.textPrimary, fontSize: 16, paddingHorizontal: uiSpacing.lg, paddingVertical: 14 },
   jaktlagFeil:          { color: uiColor.danger, fontSize: 13, marginTop: 6 },
   jaktlagKnappPrimær:   { backgroundColor: uiColor.primary, borderColor: uiColor.primary },
-  jaktlagKnappPrimærTxt:{ color: "#060E08", fontSize: 14, fontWeight: "900" },
+  jaktlagKnappPrimærTxt:{ color: uiColor.primaryText, fontSize: 14, fontWeight: "900" },
 });
