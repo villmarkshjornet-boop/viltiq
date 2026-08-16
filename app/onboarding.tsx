@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -14,6 +14,14 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import ModalSheet from "../components/ui/ModalSheet";
+import {
+  color as uiColor,
+  heat as uiHeat,
+  radius as uiRadius,
+  spacing as uiSpacing,
+  typography as uiType,
+} from "../src/design/tokens";
 import { loggInn, registrer } from "../src/services/auth";
 
 type AuthModus = "logginn" | "registrer";
@@ -91,10 +99,20 @@ export default function OnboardingScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Logo */}
-          <View style={s.logoWrap}>
-            <View style={s.logoDot} />
-            <Text style={s.logoText}>ViltIQ</Text>
+          {/* Logo — svak, rolig glød bak merket (samme teknikk som hero-kortet
+              på Hjem, §12/§13: ALDRI en heldekket farget boks, kun en dempet
+              aura). Gir det aller første skjermbildet et rolig merkevare-øyeblikk
+              uten å bikke over i noe markedsførings-aktig. */}
+          <View style={s.logoGlowWrap}>
+            <LinearGradient
+              colors={uiHeat.glowLow}
+              style={StyleSheet.absoluteFillObject}
+              pointerEvents="none"
+            />
+            <View style={s.logoWrap}>
+              <View style={s.logoDot} />
+              <Text style={s.logoText}>ViltIQ</Text>
+            </View>
           </View>
 
           <Text style={s.tittel}>Kom i gang</Text>
@@ -132,7 +150,7 @@ export default function OnboardingScreen() {
               value={epost}
               onChangeText={setEpost}
               placeholder="jeger@jaktlag.no"
-              placeholderTextColor="#3D5446"
+              placeholderTextColor={uiColor.textFaint}
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
@@ -145,7 +163,7 @@ export default function OnboardingScreen() {
               value={passord}
               onChangeText={setPassord}
               placeholder="Minst 6 tegn"
-              placeholderTextColor="#3D5446"
+              placeholderTextColor={uiColor.textFaint}
               secureTextEntry
               returnKeyType="done"
               onSubmitEditing={handterAuth}
@@ -158,7 +176,7 @@ export default function OnboardingScreen() {
                 onPress={() => setSamtykke((v) => !v)}
               >
                 <View style={[s.checkbox, samtykke && s.checkboxChecked]}>
-                  {samtykke && <Ionicons name="checkmark" size={13} color="#060E08" />}
+                  {samtykke && <Ionicons name="checkmark" size={13} color={uiColor.primaryText} />}
                 </View>
                 <Text style={s.samtykkeTxt}>
                   Jeg godtar{" "}
@@ -174,7 +192,7 @@ export default function OnboardingScreen() {
 
             {!!feil && (
               <View style={s.feilBoks}>
-                <Ionicons name="warning-outline" size={15} color="#F87171" />
+                <Ionicons name="warning-outline" size={15} color={uiColor.danger} />
                 <Text style={s.feilTxt}>{feil}</Text>
               </View>
             )}
@@ -188,7 +206,7 @@ export default function OnboardingScreen() {
               disabled={laster}
             >
               {laster
-                ? <ActivityIndicator color="#060E08" />
+                ? <ActivityIndicator color={uiColor.primaryText} />
                 : <Text style={s.primærTxt}>
                     {authModus === "logginn" ? "Logg inn" : "Opprett konto"}
                   </Text>
@@ -198,7 +216,7 @@ export default function OnboardingScreen() {
 
           {/* Info */}
           <View style={s.infoWrap}>
-            <Ionicons name="people-outline" size={16} color="#3D5446" />
+            <Ionicons name="people-outline" size={16} color={uiColor.textFaint} />
             <Text style={s.infoTxt}>
               Jaktlag kan opprettes eller bli med i etter innlogging — under Innstillinger.
             </Text>
@@ -206,34 +224,29 @@ export default function OnboardingScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Personvern-modal */}
-      <Modal
-        visible={visPersonvern}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setVisPersonvern(false)}
-      >
-        <View style={s.modalOverlay}>
-          <View style={s.modalKort}>
-            <View style={s.modalTopp}>
-              <Text style={s.modalTittel}>Personvernerklæring</Text>
-              <Pressable onPress={() => setVisPersonvern(false)} style={s.lukkKnapp}>
-                <Ionicons name="close" size={18} color="#6B8A76" />
-              </Pressable>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={s.modalTekst}>{PERSONVERN_TEKST}</Text>
-            </ScrollView>
-            <Pressable
-              style={s.modalGodtaKnapp}
-              onPress={() => { setSamtykke(true); setVisPersonvern(false); }}
-            >
-              <Ionicons name="checkmark-circle" size={18} color="#060E08" />
-              <Text style={s.modalGodtaTxt}>Godta og lukk</Text>
-            </Pressable>
-          </View>
+      {/* Personvern-modal — migrert til delt ModalSheet-primitiv (§31), samme
+          lukk-semantikk som før: X-knapp lukker uten samtykke, "Godta og
+          lukk" setter samtykke=true OG lukker. ModalSheet legger i tillegg
+          til trykk-utenfor-for-å-lukke, i tråd med resten av appens allerede
+          migrerte modaler (logg.tsx, jakt.tsx). */}
+      <ModalSheet visible={visPersonvern} onClose={() => setVisPersonvern(false)}>
+        <View style={s.modalTopp}>
+          <Text style={s.modalTittel}>Personvernerklæring</Text>
+          <Pressable onPress={() => setVisPersonvern(false)} style={s.lukkKnapp} hitSlop={8}>
+            <Ionicons name="close" size={18} color={uiColor.textMuted} />
+          </Pressable>
         </View>
-      </Modal>
+        <ScrollView style={s.modalScroll} showsVerticalScrollIndicator={false}>
+          <Text style={s.modalTekst}>{PERSONVERN_TEKST}</Text>
+        </ScrollView>
+        <Pressable
+          style={s.modalGodtaKnapp}
+          onPress={() => { setSamtykke(true); setVisPersonvern(false); }}
+        >
+          <Ionicons name="checkmark-circle" size={18} color={uiColor.primaryText} />
+          <Text style={s.modalGodtaTxt}>Godta og lukk</Text>
+        </Pressable>
+      </ModalSheet>
     </SafeAreaView>
   );
 }
@@ -255,65 +268,59 @@ function tolkFeil(code?: string, message?: string): string {
 }
 
 const s = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: "#060E08" },
-  scroll: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 60 },
+  safe:   { flex: 1, backgroundColor: uiColor.background },
+  scroll: { paddingHorizontal: uiSpacing.xl, paddingTop: uiSpacing.xxl, paddingBottom: 60 },
 
-  logoWrap: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 52 },
-  logoDot:  { width: 10, height: 10, borderRadius: 5, backgroundColor: "#2CC36B" },
-  logoText: { color: "#2CC36B", fontSize: 13, fontWeight: "900", letterSpacing: 2, textTransform: "uppercase" },
+  logoGlowWrap: { alignSelf: "flex-start", marginBottom: uiSpacing.xxxl + 12, borderRadius: uiRadius.xl, padding: uiSpacing.sm },
+  logoWrap: { flexDirection: "row", alignItems: "center", gap: 10 },
+  logoDot:  { width: 10, height: 10, borderRadius: 5, backgroundColor: uiColor.primary },
+  logoText: { color: uiColor.primary, fontSize: 13, fontWeight: "900", letterSpacing: 2, textTransform: "uppercase" },
 
-  tittel: { color: "#FFFFFF", fontSize: 34, fontWeight: "900", letterSpacing: -0.5, marginBottom: 10 },
-  sub:    { color: "#4D6858", fontSize: 15, lineHeight: 23, marginBottom: 28 },
+  tittel: { ...uiType.display, color: uiColor.textPrimary, marginBottom: 10 },
+  sub:    { ...uiType.body, fontSize: 15, lineHeight: 23, color: uiColor.textMuted, marginBottom: uiSpacing.xxl },
 
-  modusRad:         { flexDirection: "row", gap: 8, marginBottom: 20 },
-  modusKnapp:       { flex: 1, paddingVertical: 13, borderRadius: 14, backgroundColor: "#0B1610", borderWidth: 1, borderColor: "#192420", alignItems: "center" },
-  modusKnappActive: { backgroundColor: "#122C1C", borderColor: "#2CC36B" },
-  modusTxt:         { color: "#6B8A76", fontSize: 14, fontWeight: "700" },
-  modusTxtActive:   { color: "#A9F2BF", fontWeight: "800" },
+  modusRad:         { flexDirection: "row", gap: uiSpacing.sm, marginBottom: uiSpacing.xl },
+  modusKnapp:       { flex: 1, paddingVertical: 13, borderRadius: uiRadius.md, backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border, alignItems: "center" },
+  modusKnappActive: { backgroundColor: uiColor.surfaceElevated, borderColor: uiColor.primary },
+  modusTxt:         { ...uiType.bodyStrong, fontWeight: "700", color: uiColor.textMuted },
+  modusTxtActive:   { color: uiColor.primarySoft, fontWeight: "800" },
 
-  kortWrap: { backgroundColor: "#0B1610", borderRadius: 22, borderWidth: 1, borderColor: "#192420", padding: 20 },
-  label:    { color: "#4D6858", fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 8 },
-  input:    { backgroundColor: "#0E1A10", borderRadius: 14, borderWidth: 1, borderColor: "#1E2E20", color: "#FFFFFF", fontSize: 16, paddingHorizontal: 16, paddingVertical: 14 },
+  kortWrap: { backgroundColor: uiColor.surface, borderRadius: uiRadius.xl, borderWidth: 1, borderColor: uiColor.border, padding: uiSpacing.xl },
+  label:    { ...uiType.eyebrow, letterSpacing: 1, color: uiColor.textMuted, marginBottom: uiSpacing.sm, marginTop: uiSpacing.sm },
+  input:    { backgroundColor: uiColor.surfaceElevated, borderRadius: uiRadius.md, borderWidth: 1, borderColor: uiColor.border, color: uiColor.textPrimary, fontSize: 16, paddingHorizontal: uiSpacing.lg, paddingVertical: 14 },
 
-  samtykkeRad:   { flexDirection: "row", alignItems: "flex-start", gap: 12, marginTop: 16 },
+  samtykkeRad: { flexDirection: "row", alignItems: "flex-start", gap: uiSpacing.md, marginTop: uiSpacing.lg },
   checkbox: {
     width: 22, height: 22, borderRadius: 6,
-    borderWidth: 1.5, borderColor: "#2E4836",
-    backgroundColor: "#0E1A10",
+    borderWidth: 1.5, borderColor: uiColor.borderStrong,
+    backgroundColor: uiColor.surfaceElevated,
     alignItems: "center", justifyContent: "center",
     marginTop: 1,
   },
-  checkboxChecked: { backgroundColor: "#2CC36B", borderColor: "#2CC36B" },
-  samtykkeTxt:   { color: "#8EA0AA", fontSize: 14, lineHeight: 22, flex: 1 },
-  personvernLink:{ color: "#2CC36B", fontWeight: "700", textDecorationLine: "underline" },
+  checkboxChecked: { backgroundColor: uiColor.primary, borderColor: uiColor.primary },
+  samtykkeTxt:    { ...uiType.body, fontSize: 14, lineHeight: 22, color: uiColor.textSecondary, flex: 1 },
+  personvernLink: { color: uiColor.primary, fontWeight: "700", textDecorationLine: "underline" },
 
-  feilBoks: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(248,113,113,0.08)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(248,113,113,0.2)", padding: 12, marginTop: 12 },
-  feilTxt:  { color: "#FCA5A5", fontSize: 13, flex: 1 },
+  feilBoks: { flexDirection: "row", alignItems: "center", gap: uiSpacing.sm, backgroundColor: uiColor.danger + "14", borderRadius: uiRadius.sm + 2, borderWidth: 1, borderColor: uiColor.danger + "33", padding: uiSpacing.md, marginTop: uiSpacing.md },
+  feilTxt:  { fontSize: 13, color: uiColor.danger, flex: 1 },
 
-  primærKnapp:    { backgroundColor: "#2CC36B", borderRadius: 14, paddingVertical: 17, alignItems: "center", marginTop: 20 },
+  primærKnapp:    { backgroundColor: uiColor.primary, borderRadius: uiRadius.md, paddingVertical: 17, alignItems: "center", marginTop: uiSpacing.xl },
   primærKnappDis: { opacity: 0.45 },
-  primærTxt:      { color: "#060E08", fontSize: 16, fontWeight: "900" },
+  primærTxt:      { ...uiType.sectionTitle, color: uiColor.primaryText },
 
-  infoWrap: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 24, paddingHorizontal: 4 },
-  infoTxt:  { color: "#3D5446", fontSize: 13, lineHeight: 20, flex: 1 },
+  infoWrap: { flexDirection: "row", alignItems: "flex-start", gap: uiSpacing.sm + 2, marginTop: uiSpacing.xl, paddingHorizontal: 4 },
+  infoTxt:  { ...uiType.body, fontSize: 13, lineHeight: 20, color: uiColor.textFaint, flex: 1 },
 
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "flex-end" },
-  modalKort: {
-    backgroundColor: "#0C1610",
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    borderWidth: 1, borderBottomWidth: 0, borderColor: "#1E3226",
-    paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40,
-    maxHeight: "85%",
-  },
-  modalTopp:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
-  modalTittel: { color: "#FFFFFF", fontSize: 18, fontWeight: "900" },
-  lukkKnapp:   { width: 34, height: 34, borderRadius: 17, backgroundColor: "#111827", alignItems: "center", justifyContent: "center" },
-  modalTekst:  { color: "#8EA0AA", fontSize: 13, lineHeight: 22, marginBottom: 24 },
+  // Personvern-modal — kun innhold; overlay/ark/håndtak/animasjon kommer fra ModalSheet.
+  modalTopp:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: uiSpacing.lg },
+  modalTittel: { ...uiType.sectionTitle, fontSize: 18, color: uiColor.textPrimary },
+  lukkKnapp:   { width: 34, height: 34, borderRadius: 17, backgroundColor: uiColor.surfaceHover, alignItems: "center", justifyContent: "center" },
+  modalScroll: { flex: 1 },
+  modalTekst:  { ...uiType.body, fontSize: 13, lineHeight: 22, color: uiColor.textSecondary, marginBottom: uiSpacing.xl },
   modalGodtaKnapp: {
-    backgroundColor: "#2CC36B", borderRadius: 14, paddingVertical: 16,
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    marginTop: 8,
+    backgroundColor: uiColor.primary, borderRadius: uiRadius.md, paddingVertical: 16,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: uiSpacing.sm,
+    marginTop: uiSpacing.xs,
   },
-  modalGodtaTxt: { color: "#060E08", fontSize: 15, fontWeight: "900" },
+  modalGodtaTxt: { ...uiType.bodyStrong, fontSize: 15, fontWeight: "900", color: uiColor.primaryText },
 });
