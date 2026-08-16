@@ -3,20 +3,30 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Circle, Marker, Polygon } from "../../components/MapView";
 import BottomDock from "../../components/BottomDock";
 import RetningVelger from "../../components/RetningVelger";
+import Badge from "../../components/ui/Badge";
+import ListRow from "../../components/ui/ListRow";
+import ModalSheet from "../../components/ui/ModalSheet";
+import Surface from "../../components/ui/Surface";
 
 import { auth } from "../../src/config/firebase";
+import {
+  alpha,
+  color as uiColor,
+  radius as uiRadius,
+  spacing as uiSpacing,
+  typography as uiType,
+} from "../../src/design/tokens";
 import { hentTidsvekt } from "../../src/lib/aktivitet";
 import {
   calculateCameraActivity,
@@ -148,32 +158,25 @@ function byggHeatmap(data: ObservasjonMedDistance[]): HeatSone[] {
   return soner;
 }
 
+// Samme grønn→gul→rød semantikk som før (høyere score = mer alarmerende),
+// men nå bygget på designsystemets status-tokens i stedet for frittstående
+// rgba-verdier — se tokens.ts sin note om at grønt er forbeholdt
+// merkevare/suksess og IKKE varme-/konfidensindikatorer for seg selv; her er
+// det bevisst danger/warning/success (samme akse som aktivitetsnivå bruker),
+// ikke levelColor()/confidenceColor() (som tilhører en annen, inkompatibel
+// skala i src/engine).
 function hentHeatFarge(score: number) {
-  if (score >= 10) return "rgba(220,38,38,0.28)";
-  if (score >= 6) return "rgba(234,179,8,0.24)";
-  if (score >= 3) return "rgba(34,197,94,0.20)";
-  return "rgba(34,197,94,0.12)";
+  if (score >= 10) return uiColor.danger + "47"; // ~28%
+  if (score >= 6) return uiColor.warning + "3D"; // ~24%
+  if (score >= 3) return uiColor.success + "33"; // ~20%
+  return uiColor.success + "1F"; // ~12%
 }
 
-function hentAktivitetsBadgeStyle(nivå: CameraActivityLevel) {
-  if (nivå === "high") {
-    return {
-      bg: styles.levelHighBg,
-      text: styles.levelHighText,
-    };
-  }
-
-  if (nivå === "medium") {
-    return {
-      bg: styles.levelMediumBg,
-      text: styles.levelMediumText,
-    };
-  }
-
-  return {
-    bg: styles.levelLowBg,
-    text: styles.levelLowText,
-  };
+/** Aktivitetsnivå (lav/medium/høy) → statusfarge for Badge. */
+function nivaFarge(nivå: CameraActivityLevel) {
+  if (nivå === "high") return uiColor.danger;
+  if (nivå === "medium") return uiColor.warning;
+  return uiColor.success;
 }
 
 export default function KameraDetaljScreen() {
@@ -636,15 +639,13 @@ export default function KameraDetaljScreen() {
     );
   }
 
-  const aktivitetsBadge = hentAktivitetsBadgeStyle(aktivitet.level);
-
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.screen}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           <View style={styles.headerTop}>
             <Pressable style={styles.backChip} onPress={() => router.back()}>
-              <Ionicons name="chevron-back" size={16} color="#D7E6DC" />
+              <Ionicons name="chevron-back" size={16} color={uiColor.textSecondary} />
               <Text style={styles.backChipText}>Tilbake</Text>
             </Pressable>
           </View>
@@ -655,7 +656,7 @@ export default function KameraDetaljScreen() {
             <Text style={styles.subtitle}>Referansepunkt, retning og aktivitet rundt kameraet.</Text>
           </View>
 
-          <View style={styles.heroCard}>
+          <Surface variant="elevated" style={styles.heroCard}>
             <View style={styles.heroGlow} />
 
             <View style={styles.heroTopRow}>
@@ -670,15 +671,9 @@ export default function KameraDetaljScreen() {
               </View>
 
               <View style={styles.heroBadgeCol}>
-                <View style={[styles.heroBadge, aktivitetsBadge.bg]}>
-                  <Text style={[styles.heroBadgeText, aktivitetsBadge.text]}>
-                    {NIVÅ_LABEL[aktivitet.level]}
-                  </Text>
-                </View>
+                <Badge label={NIVÅ_LABEL[aktivitet.level]} color={nivaFarge(aktivitet.level)} />
                 {lavKonfidens ? (
-                  <View style={styles.konfidensBadge}>
-                    <Text style={styles.konfidensBadgeText}>Lite datagrunnlag</Text>
-                  </View>
+                  <Badge label="Lite datagrunnlag" color={uiColor.textSecondary} size="sm" />
                 ) : null}
               </View>
             </View>
@@ -699,7 +694,7 @@ export default function KameraDetaljScreen() {
                 <Text style={styles.heroStatLabel}>toppdyr</Text>
               </View>
             </View>
-          </View>
+          </Surface>
 
           <View style={styles.topActionsRow}>
             <Pressable style={styles.primaryButtonHalf} onPress={() => setCheckModal(true)}>
@@ -711,7 +706,7 @@ export default function KameraDetaljScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.card}>
+          <Surface style={styles.card}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>Kamerainfo</Text>
 
@@ -762,7 +757,7 @@ export default function KameraDetaljScreen() {
                   value={name}
                   onChangeText={setName}
                   placeholder="Navn på kamera"
-                  placeholderTextColor="#5C7568"
+                  placeholderTextColor={uiColor.textMuted}
                   style={styles.input}
                 />
 
@@ -780,7 +775,7 @@ export default function KameraDetaljScreen() {
                   value={notes}
                   onChangeText={setNotes}
                   placeholder="F.eks. trekk, åteplass, sti, høyde"
-                  placeholderTextColor="#5C7568"
+                  placeholderTextColor={uiColor.textMuted}
                   style={[styles.input, styles.textArea]}
                   multiline
                 />
@@ -796,9 +791,9 @@ export default function KameraDetaljScreen() {
                 </View>
               </>
             )}
-          </View>
+          </Surface>
 
-          <View style={styles.card}>
+          <Surface style={styles.card}>
             <Text style={styles.cardTitle}>Driftsstatus</Text>
 
             <View style={styles.statusGrid}>
@@ -822,9 +817,9 @@ export default function KameraDetaljScreen() {
                 <Text style={styles.statusMiniValue}>{kamera.baitStatus || "Ukjent"}</Text>
               </View>
             </View>
-          </View>
+          </Surface>
 
-          <View style={styles.card}>
+          <Surface style={styles.card}>
             <View style={styles.cardHeaderSimple}>
               <Text style={styles.cardTitle}>Kartpreview</Text>
               <Text style={styles.cardCaption}>Retning og aktivitet rundt kamera</Text>
@@ -858,8 +853,8 @@ export default function KameraDetaljScreen() {
                   longitude: kamera.longitude,
                 }}
                 radius={AKTIVITET_RADIUS_METER}
-                fillColor="rgba(56, 189, 248, 0.06)"
-                strokeColor="rgba(56, 189, 248, 0.35)"
+                fillColor={uiColor.info + "0F"}
+                strokeColor={uiColor.info + "59"}
                 strokeWidth={2}
               />
 
@@ -870,8 +865,8 @@ export default function KameraDetaljScreen() {
                   kamera.directionDegrees,
                   60
                 )}
-                fillColor="rgba(59,130,246,0.18)"
-                strokeColor="rgba(59,130,246,0.55)"
+                fillColor={uiColor.info + "2E"}
+                strokeColor={uiColor.info + "8C"}
                 strokeWidth={1.5}
               />
 
@@ -882,7 +877,7 @@ export default function KameraDetaljScreen() {
                 }}
                 title={kamera.name}
                 description={`${kamera.directionDegrees}° (${vindRetningLabel(kamera.directionDegrees)})`}
-                pinColor="#2CC36B"
+                pinColor={uiColor.primary}
               />
 
               {observasjonerINaerheten.slice(0, 20).map((obs, index) => (
@@ -894,7 +889,7 @@ export default function KameraDetaljScreen() {
                   }}
                   title={`${obs.dyr} · ${obs.type}`}
                   description={obs.kommentar || formatDato(obs.tid)}
-                  pinColor="#60A5FA"
+                  pinColor={uiColor.info}
                 />
               ))}
             </MapView>
@@ -902,9 +897,9 @@ export default function KameraDetaljScreen() {
             <Text style={styles.mapInfo}>
               Blå sektor viser kameraretning. Varmefelt viser hvor aktivitet samler seg.
             </Text>
-          </View>
+          </Surface>
 
-          <View style={styles.card}>
+          <Surface style={styles.card}>
             <View style={styles.cardHeaderSimple}>
               <Text style={styles.cardTitle}>Statistikk</Text>
               <Text style={styles.cardCaption}>
@@ -918,11 +913,7 @@ export default function KameraDetaljScreen() {
                 <Text style={styles.value}>{formaterPeriode(aktivitet.activeDays)}</Text>
               </View>
 
-              <View style={[styles.heroBadge, aktivitetsBadge.bg]}>
-                <Text style={[styles.heroBadgeText, aktivitetsBadge.text]}>
-                  {NIVÅ_LABEL[aktivitet.level]}
-                </Text>
-              </View>
+              <Badge label={NIVÅ_LABEL[aktivitet.level]} color={nivaFarge(aktivitet.level)} />
             </View>
 
             {lavKonfidens ? (
@@ -948,7 +939,7 @@ export default function KameraDetaljScreen() {
               </View>
             </View>
 
-            <Text style={[styles.subSectionTitle, { marginTop: 8 }]}>Artsfordeling</Text>
+            <Text style={[styles.subSectionTitle, { marginTop: uiSpacing.sm }]}>Artsfordeling</Text>
 
             {artsfordeling.length > 0 ? (
               artsfordeling.map((art) => (
@@ -963,7 +954,7 @@ export default function KameraDetaljScreen() {
               <Text style={styles.emptyInfo}>Ingen dyredata ennå.</Text>
             )}
 
-            <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Aktivitet over tid</Text>
+            <Text style={[styles.subSectionTitle, { marginTop: uiSpacing.xl - 2 }]}>Aktivitet over tid</Text>
 
             <View style={styles.periodGrid}>
               <View style={styles.periodCell}>
@@ -988,7 +979,7 @@ export default function KameraDetaljScreen() {
               </View>
             </View>
 
-            <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Tidsmønster</Text>
+            <Text style={[styles.subSectionTitle, { marginTop: uiSpacing.xl - 2 }]}>Tidsmønster</Text>
 
             {tidsmønster ? (
               (Object.keys(TIDSVINDU_LABEL) as Tidsvindu[]).map((key) => {
@@ -1021,9 +1012,9 @@ export default function KameraDetaljScreen() {
               <Text style={styles.summaryTitle}>Automatisk oppsummering</Text>
               <Text style={styles.summaryText}>{oppsummeringTekst}</Text>
             </View>
-          </View>
+          </Surface>
 
-          <View style={styles.card}>
+          <Surface style={styles.card}>
             <Text style={styles.cardTitle}>Observasjoner på kamera</Text>
 
             {sisteObservasjon ? (
@@ -1044,46 +1035,46 @@ export default function KameraDetaljScreen() {
               <Text style={styles.emptyInfo}>Ingen observasjoner registrert på dette kameraet ennå.</Text>
             )}
 
-            <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Siste observasjoner</Text>
+            <Text style={[styles.subSectionTitle, { marginTop: uiSpacing.xl - 2 }]}>Siste observasjoner</Text>
 
             {kameraObservasjoner.length > 0 ? (
-              kameraObservasjoner.slice(0, 8).map((obs, index) => {
-                const canDelete = kanSletteObservasjon(obs);
+              <View style={styles.obsListe}>
+                {kameraObservasjoner.slice(0, 8).map((obs, index) => {
+                  const canDelete = kanSletteObservasjon(obs);
+                  const erSiste = index === kameraObservasjoner.slice(0, 8).length - 1;
 
-                return (
-                  <View key={`${obs.id || obs.tid}-list-${index}`} style={styles.obsRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.obsTitle}>
-                        {obs.dyr} · {obs.type}
-                      </Text>
-                      <Text style={styles.obsMeta}>{formatDato(obs.tid)}</Text>
-                      {!!obs.kommentar && <Text style={styles.obsComment}>{obs.kommentar}</Text>}
-                    </View>
-
-                    <View style={styles.obsActions}>
-                      <View style={styles.distanceBadge}>
-                        <Text style={styles.distanceBadgeText}>{obs.antall} dyr</Text>
-                      </View>
-
-                      {canDelete ? (
-                        <Pressable
-                          style={styles.deleteObsButton}
-                          onPress={() => bekreftSlettObservasjon(obs)}
-                        >
-                          <Ionicons name="trash-outline" size={15} color="#FCA5A5" />
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  </View>
-                );
-              })
+                  return (
+                    <ListRow
+                      key={`${obs.id || obs.tid}-list-${index}`}
+                      title={`${obs.dyr} · ${obs.type}`}
+                      subtitle={obs.kommentar || undefined}
+                      meta={formatDato(obs.tid)}
+                      divider={!erSiste}
+                      trailing={
+                        <View style={styles.obsTrailing}>
+                          <Badge label={`${obs.antall} dyr`} color={uiColor.primary} size="sm" />
+                          {canDelete ? (
+                            <Pressable
+                              style={styles.deleteObsButton}
+                              onPress={() => bekreftSlettObservasjon(obs)}
+                              hitSlop={8}
+                            >
+                              <Ionicons name="trash-outline" size={15} color={uiColor.danger} />
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      }
+                    />
+                  );
+                })}
+              </View>
             ) : (
               <Text style={styles.emptyInfo}>Ingen observasjoner å vise.</Text>
             )}
-          </View>
+          </Surface>
 
           {andreObservasjonerINaerheten.length > 0 ? (
-            <View style={styles.card}>
+            <Surface style={styles.card}>
               <View style={styles.cardHeaderSimple}>
                 <Text style={styles.cardTitle}>Andre observasjoner i nærheten</Text>
                 <Text style={styles.cardCaption}>
@@ -1091,184 +1082,177 @@ export default function KameraDetaljScreen() {
                 </Text>
               </View>
 
-              {andreObservasjonerINaerheten.slice(0, 5).map((obs, index) => (
-                <View key={`${obs.id || obs.tid}-nearby-${index}`} style={styles.obsRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.obsTitle}>
-                      {obs.dyr} · {obs.type}
-                    </Text>
-                    <Text style={styles.obsMeta}>{formatDato(obs.tid)}</Text>
-                  </View>
+              <View style={styles.obsListe}>
+                {andreObservasjonerINaerheten.slice(0, 5).map((obs, index) => {
+                  const erSiste = index === andreObservasjonerINaerheten.slice(0, 5).length - 1;
 
-                  <View style={styles.distanceBadge}>
-                    <Text style={styles.distanceBadgeText}>{Math.round(obs.distance)} m</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+                  return (
+                    <ListRow
+                      key={`${obs.id || obs.tid}-nearby-${index}`}
+                      title={`${obs.dyr} · ${obs.type}`}
+                      subtitle={formatDato(obs.tid)}
+                      divider={!erSiste}
+                      trailing={<Badge label={`${Math.round(obs.distance)} m`} color={uiColor.info} size="sm" />}
+                    />
+                  );
+                })}
+              </View>
+            </Surface>
           ) : null}
         </ScrollView>
 
-        <Modal visible={checkModal} transparent animationType="fade">
-          <View style={styles.modal}>
-            <View style={styles.modalCard}>
-              <Text style={styles.cardTitle}>Registrer sjekk</Text>
+        <ModalSheet visible={checkModal} onClose={() => setCheckModal(false)}>
+          <Text style={styles.modalTitle}>Registrer sjekk</Text>
 
-              <Text style={styles.label}>Batteri</Text>
-              <View style={styles.choiceRow}>
-                {["OK", "Lavt"].map((val) => (
-                  <Pressable
-                    key={val}
-                    style={[styles.choice, battery === val && styles.choiceActive]}
-                    onPress={() => setBattery(val)}
-                  >
-                    <Text style={[styles.choiceText, battery === val && styles.choiceTextActive]}>
-                      {val}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={styles.label}>Minnekort</Text>
-              <View style={styles.choiceRow}>
-                {["OK", "Byttet"].map((val) => (
-                  <Pressable
-                    key={val}
-                    style={[styles.choice, memory === val && styles.choiceActive]}
-                    onPress={() => setMemory(val)}
-                  >
-                    <Text style={[styles.choiceText, memory === val && styles.choiceTextActive]}>
-                      {val}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={styles.label}>Åte</Text>
-              <View style={styles.choiceRow}>
-                {["Ja", "Nei"].map((val) => (
-                  <Pressable
-                    key={val}
-                    style={[styles.choice, bait === val && styles.choiceActive]}
-                    onPress={() => setBait(val)}
-                  >
-                    <Text style={[styles.choiceText, bait === val && styles.choiceTextActive]}>
-                      {val}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <TextInput
-                placeholder="Notat fra sjekk"
-                placeholderTextColor="#999"
-                style={styles.input}
-                value={checkNote}
-                onChangeText={setCheckNote}
-              />
-
-              <View style={styles.buttonRow}>
-                <Pressable style={styles.secondaryButtonHalf} onPress={() => setCheckModal(false)}>
-                  <Text style={styles.secondaryButtonText}>Avbryt</Text>
-                </Pressable>
-
-                <Pressable style={styles.primaryButtonHalf} onPress={registrerSjekk}>
-                  <Text style={styles.primaryButtonText}>Lagre</Text>
-                </Pressable>
-              </View>
-            </View>
+          <Text style={styles.label}>Batteri</Text>
+          <View style={styles.choiceRow}>
+            {["OK", "Lavt"].map((val) => (
+              <Pressable
+                key={val}
+                style={[styles.choice, battery === val && styles.choiceActive]}
+                onPress={() => setBattery(val)}
+              >
+                <Text style={[styles.choiceText, battery === val && styles.choiceTextActive]}>
+                  {val}
+                </Text>
+              </Pressable>
+            ))}
           </View>
-        </Modal>
 
-        <Modal visible={obsModal} transparent animationType="fade">
-          <View style={styles.modal}>
-            <View style={styles.modalCard}>
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <Text style={styles.cardTitle}>Registrer observasjon</Text>
-
-                <Text style={styles.label}>Dyr</Text>
-                <View style={styles.chipRow}>
-                  {OBS_DYR_LISTE.map((val) => (
-                    <Pressable
-                      key={val}
-                      style={[styles.chip, obsDyr === val && styles.chipActive]}
-                      onPress={() => setObsDyr(val)}
-                    >
-                      <Text style={[styles.chipText, obsDyr === val && styles.chipTextActive]}>
-                        {val}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Antall</Text>
-                <TextInput
-                  value={obsAntall}
-                  onChangeText={setObsAntall}
-                  keyboardType="number-pad"
-                  placeholder="1"
-                  placeholderTextColor="#5C7568"
-                  style={styles.input}
-                />
-
-                <Text style={styles.label}>Kjønn</Text>
-                <View style={styles.chipRow}>
-                  {OBS_KJØNN.map((val) => (
-                    <Pressable
-                      key={val}
-                      style={[styles.chip, obsKjønn === val && styles.chipActive]}
-                      onPress={() => setObsKjønn(val)}
-                    >
-                      <Text style={[styles.chipText, obsKjønn === val && styles.chipTextActive]}>
-                        {val}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Alder</Text>
-                <View style={styles.chipRow}>
-                  {OBS_ALDER.map((val) => (
-                    <Pressable
-                      key={val}
-                      style={[styles.chip, obsAlder === val && styles.chipActive]}
-                      onPress={() => setObsAlder(val)}
-                    >
-                      <Text style={[styles.chipText, obsAlder === val && styles.chipTextActive]}>
-                        {val}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Kommentar</Text>
-                <TextInput
-                  placeholder="Valgfritt"
-                  placeholderTextColor="#999"
-                  style={styles.input}
-                  value={obsKommentar}
-                  onChangeText={setObsKommentar}
-                />
-
-                <View style={styles.buttonRow}>
-                  <Pressable style={styles.secondaryButtonHalf} onPress={() => setObsModal(false)}>
-                    <Text style={styles.secondaryButtonText}>Avbryt</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={styles.primaryButtonHalf}
-                    onPress={registrerObservasjon}
-                    disabled={obsLagrer}
-                  >
-                    <Text style={styles.primaryButtonText}>
-                      {obsLagrer ? "Lagrer..." : "Lagre"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </ScrollView>
-            </View>
+          <Text style={styles.label}>Minnekort</Text>
+          <View style={styles.choiceRow}>
+            {["OK", "Byttet"].map((val) => (
+              <Pressable
+                key={val}
+                style={[styles.choice, memory === val && styles.choiceActive]}
+                onPress={() => setMemory(val)}
+              >
+                <Text style={[styles.choiceText, memory === val && styles.choiceTextActive]}>
+                  {val}
+                </Text>
+              </Pressable>
+            ))}
           </View>
-        </Modal>
+
+          <Text style={styles.label}>Åte</Text>
+          <View style={styles.choiceRow}>
+            {["Ja", "Nei"].map((val) => (
+              <Pressable
+                key={val}
+                style={[styles.choice, bait === val && styles.choiceActive]}
+                onPress={() => setBait(val)}
+              >
+                <Text style={[styles.choiceText, bait === val && styles.choiceTextActive]}>
+                  {val}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <TextInput
+            placeholder="Notat fra sjekk"
+            placeholderTextColor={uiColor.textMuted}
+            style={styles.input}
+            value={checkNote}
+            onChangeText={setCheckNote}
+          />
+
+          <View style={styles.buttonRow}>
+            <Pressable style={styles.secondaryButtonHalf} onPress={() => setCheckModal(false)}>
+              <Text style={styles.secondaryButtonText}>Avbryt</Text>
+            </Pressable>
+
+            <Pressable style={styles.primaryButtonHalf} onPress={registrerSjekk}>
+              <Text style={styles.primaryButtonText}>Lagre</Text>
+            </Pressable>
+          </View>
+        </ModalSheet>
+
+        <ModalSheet visible={obsModal} onClose={() => setObsModal(false)}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={styles.modalTitle}>Registrer observasjon</Text>
+
+            <Text style={styles.label}>Dyr</Text>
+            <View style={styles.chipRow}>
+              {OBS_DYR_LISTE.map((val) => (
+                <Pressable
+                  key={val}
+                  style={[styles.chip, obsDyr === val && styles.chipActive]}
+                  onPress={() => setObsDyr(val)}
+                >
+                  <Text style={[styles.chipText, obsDyr === val && styles.chipTextActive]}>
+                    {val}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Antall</Text>
+            <TextInput
+              value={obsAntall}
+              onChangeText={setObsAntall}
+              keyboardType="number-pad"
+              placeholder="1"
+              placeholderTextColor={uiColor.textMuted}
+              style={styles.input}
+            />
+
+            <Text style={styles.label}>Kjønn</Text>
+            <View style={styles.chipRow}>
+              {OBS_KJØNN.map((val) => (
+                <Pressable
+                  key={val}
+                  style={[styles.chip, obsKjønn === val && styles.chipActive]}
+                  onPress={() => setObsKjønn(val)}
+                >
+                  <Text style={[styles.chipText, obsKjønn === val && styles.chipTextActive]}>
+                    {val}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Alder</Text>
+            <View style={styles.chipRow}>
+              {OBS_ALDER.map((val) => (
+                <Pressable
+                  key={val}
+                  style={[styles.chip, obsAlder === val && styles.chipActive]}
+                  onPress={() => setObsAlder(val)}
+                >
+                  <Text style={[styles.chipText, obsAlder === val && styles.chipTextActive]}>
+                    {val}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Kommentar</Text>
+            <TextInput
+              placeholder="Valgfritt"
+              placeholderTextColor={uiColor.textMuted}
+              style={styles.input}
+              value={obsKommentar}
+              onChangeText={setObsKommentar}
+            />
+
+            <View style={styles.buttonRow}>
+              <Pressable style={styles.secondaryButtonHalf} onPress={() => setObsModal(false)}>
+                <Text style={styles.secondaryButtonText}>Avbryt</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.primaryButtonHalf}
+                onPress={registrerObservasjon}
+                disabled={obsLagrer}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {obsLagrer ? "Lagrer..." : "Lagre"}
+                </Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </ModalSheet>
 
         <BottomDock />
       </View>
@@ -1277,46 +1261,40 @@ export default function KameraDetaljScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#07100d" },
+  safe: { flex: 1, backgroundColor: uiColor.background },
   screen: { flex: 1 },
-  container: { padding: 16, paddingBottom: 160 },
+  container: { padding: uiSpacing.lg, paddingBottom: 160 },
 
-  headerTop: { marginTop: 6, marginBottom: 8 },
+  headerTop: { marginTop: 6, marginBottom: uiSpacing.sm },
   backChip: {
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#101816",
-    borderRadius: 999,
+    backgroundColor: uiColor.surface,
+    borderRadius: uiRadius.pill,
     borderWidth: 1,
-    borderColor: "#1e2c25",
-    paddingHorizontal: 12,
+    borderColor: uiColor.border,
+    paddingHorizontal: uiSpacing.md,
     paddingVertical: 9,
   },
-  backChipText: { color: "#D7E6DC", fontSize: 13, fontWeight: "800" },
+  backChipText: { color: uiColor.textSecondary, fontSize: 13, fontWeight: "800" },
 
-  header: { marginBottom: 16 },
+  header: { marginBottom: uiSpacing.lg },
   eyebrow: {
-    color: "#A9F2BF",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1.3,
-    marginBottom: 8,
+    ...uiType.eyebrow,
+    color: uiColor.primary,
+    marginBottom: uiSpacing.sm,
   },
-  title: { color: "#FFFFFF", fontSize: 30, fontWeight: "800", marginTop: 2 },
-  subtitle: { color: "#8EA0AA", fontSize: 14, marginTop: 6, marginBottom: 4 },
+  title: { ...uiType.pageTitle, color: uiColor.textPrimary, fontSize: 30, marginTop: 2 },
+  subtitle: { color: uiColor.textSecondary, fontSize: 14, marginTop: 6, marginBottom: 4 },
 
   heroCard: {
     position: "relative",
     overflow: "hidden",
-    backgroundColor: "#0d1b16",
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "rgba(110,231,183,0.15)",
-    padding: 18,
-    marginBottom: 14,
+    borderRadius: uiRadius.xl,
+    padding: uiSpacing.lg + 2,
+    marginBottom: uiSpacing.md + 2,
   },
   heroGlow: {
     position: "absolute",
@@ -1324,208 +1302,189 @@ const styles = StyleSheet.create({
     top: -20,
     width: 120,
     height: 120,
-    borderRadius: 999,
-    backgroundColor: "rgba(44,195,107,0.08)",
+    borderRadius: uiRadius.pill,
+    backgroundColor: uiColor.primary + "14",
   },
   heroTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: 12,
+    gap: uiSpacing.md,
   },
   heroLeft: { flex: 1 },
   heroLabel: {
-    color: "#A9F2BF",
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
-    marginBottom: 8,
+    ...uiType.eyebrow,
+    color: uiColor.primary,
+    marginBottom: uiSpacing.sm,
   },
-  heroTitle: { color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
-  heroText: { color: "#C8D8D0", fontSize: 14, lineHeight: 21, marginTop: 8 },
-  heroBadgeCol: { alignItems: "flex-end", gap: 6 },
-  heroBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  heroBadgeText: { fontSize: 12, fontWeight: "800" },
-  heroStatsRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  heroTitle: { color: uiColor.textPrimary, fontSize: 24, fontWeight: "800" },
+  heroText: { color: uiColor.textSecondary, fontSize: 14, lineHeight: 21, marginTop: uiSpacing.sm },
+  heroBadgeCol: { alignItems: "flex-end", gap: uiSpacing.xs + 2 },
+  heroStatsRow: { flexDirection: "row", gap: uiSpacing.sm + 2, marginTop: uiSpacing.lg },
   heroStatCard: {
     flex: 1,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: 16,
+    backgroundColor: uiColor.background,
+    borderRadius: uiRadius.lg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.05)",
-    padding: 12,
+    borderColor: uiColor.border,
+    padding: uiSpacing.md,
   },
-  heroStatValue: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
+  heroStatValue: { ...uiType.numericScore, color: uiColor.textPrimary, fontSize: 18 },
   heroStatLabel: {
-    color: "#8EA0AA",
+    color: uiColor.textSecondary,
     fontSize: 11,
-    marginTop: 4,
+    marginTop: uiSpacing.xs,
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
 
-  konfidensBadge: {
-    backgroundColor: "rgba(148,163,184,0.14)",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  konfidensBadgeText: { color: "#C8D8D0", fontSize: 10, fontWeight: "800" },
-  konfidensHint: { color: "#8EA0AA", fontSize: 12, marginTop: 8, lineHeight: 17 },
+  konfidensHint: { color: uiColor.textSecondary, fontSize: 12, marginTop: uiSpacing.sm, lineHeight: 17 },
 
-  levelHighBg: { backgroundColor: "rgba(239,68,68,0.14)" },
-  levelHighText: { color: "#FCA5A5" },
-  levelMediumBg: { backgroundColor: "rgba(245,158,11,0.14)" },
-  levelMediumText: { color: "#FDE68A" },
-  levelLowBg: { backgroundColor: "rgba(34,197,94,0.14)" },
-  levelLowText: { color: "#A9F2BF" },
-
-  topActionsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
+  topActionsRow: { flexDirection: "row", gap: uiSpacing.sm + 2, marginBottom: uiSpacing.md + 2 },
 
   card: {
-    backgroundColor: "#0B1610",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#0B1610",
-    padding: 16,
-    marginBottom: 14,
+    padding: uiSpacing.lg,
+    marginBottom: uiSpacing.md + 2,
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: uiSpacing.sm,
   },
-  cardHeaderSimple: { marginBottom: 10 },
-  cardTitle: { color: "#FFFFFF", fontSize: 17, fontWeight: "800" },
-  cardCaption: { color: "#7c8b95", fontSize: 12, marginTop: 4 },
+  cardHeaderSimple: { marginBottom: uiSpacing.sm + 2 },
+  cardTitle: { ...uiType.sectionTitle, color: uiColor.textPrimary, fontSize: 17 },
+  cardCaption: { color: uiColor.textSecondary, fontSize: 12, marginTop: uiSpacing.xs },
 
   editButton: {
-    backgroundColor: "#0B1B26",
+    backgroundColor: uiColor.info + alpha.soft,
     borderWidth: 1,
-    borderColor: "#154759",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderColor: uiColor.info + alpha.medium,
+    borderRadius: uiRadius.pill,
+    paddingHorizontal: uiSpacing.md,
+    paddingVertical: uiSpacing.sm,
   },
-  editButtonText: { color: "#BFE9FA", fontSize: 12, fontWeight: "800" },
+  editButtonText: { color: uiColor.info, fontSize: 12, fontWeight: "800" },
 
   label: {
-    color: "#8EA0AA",
+    color: uiColor.textSecondary,
     fontSize: 12,
     textTransform: "uppercase",
-    marginTop: 12,
-    marginBottom: 4,
+    marginTop: uiSpacing.md,
+    marginBottom: uiSpacing.xs,
   },
-  value: { color: "#FFFFFF", fontSize: 15, lineHeight: 22 },
+  value: { color: uiColor.textPrimary, fontSize: 15, lineHeight: 22 },
 
   input: {
-    backgroundColor: "#060E08",
+    backgroundColor: uiColor.background,
     borderWidth: 1,
-    borderColor: "#0B1610",
-    color: "#FFFFFF",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderColor: uiColor.border,
+    color: uiColor.textPrimary,
+    borderRadius: uiRadius.md,
+    paddingHorizontal: uiSpacing.lg - 2,
+    paddingVertical: uiSpacing.md,
     fontSize: 15,
   },
   textArea: { minHeight: 100, textAlignVertical: "top" },
 
-  retningVelgerWrap: { alignItems: "center", marginTop: 10, marginBottom: 4 },
+  retningVelgerWrap: { alignItems: "center", marginTop: uiSpacing.sm + 2, marginBottom: uiSpacing.xs },
 
-  buttonRow: { flexDirection: "row", gap: 10, marginTop: 16 },
-  choiceRow: { flexDirection: "row", gap: 10, marginTop: 8 },
+  buttonRow: { flexDirection: "row", gap: uiSpacing.sm + 2, marginTop: uiSpacing.lg },
+  choiceRow: { flexDirection: "row", gap: uiSpacing.sm + 2, marginTop: uiSpacing.sm },
   choice: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: "#0B1610",
+    paddingVertical: uiSpacing.md,
+    borderRadius: uiRadius.sm + 2,
+    backgroundColor: uiColor.background,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#192420",
+    borderColor: uiColor.border,
   },
-  choiceActive: { backgroundColor: "#163222", borderColor: "#2CC36B" },
-  choiceText: { color: "#FFFFFF", fontWeight: "800" },
-  choiceTextActive: { color: "#A9F2BF" },
+  choiceActive: { backgroundColor: uiColor.surfaceHover, borderColor: uiColor.primary },
+  choiceText: { color: uiColor.textPrimary, fontWeight: "800" },
+  choiceTextActive: { color: uiColor.primarySoft },
 
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: uiSpacing.sm, marginTop: uiSpacing.sm },
   chip: {
-    paddingHorizontal: 14,
+    paddingHorizontal: uiSpacing.md + 2,
     paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: "#0B1610",
+    borderRadius: uiRadius.pill,
+    backgroundColor: uiColor.background,
     borderWidth: 1,
-    borderColor: "#192420",
+    borderColor: uiColor.border,
   },
-  chipActive: { backgroundColor: "#12351f", borderColor: "#2CC36B" },
-  chipText: { color: "#D7E6DC", fontSize: 12, fontWeight: "700" },
-  chipTextActive: { color: "#A9F2BF", fontWeight: "800" },
+  chipActive: { backgroundColor: uiColor.surfaceHover, borderColor: uiColor.primary },
+  chipText: { color: uiColor.textSecondary, fontSize: 12, fontWeight: "700" },
+  chipTextActive: { color: uiColor.primarySoft, fontWeight: "800" },
 
   primaryButton: {
-    backgroundColor: "#2CC36B",
-    borderRadius: 14,
-    paddingVertical: 14,
+    backgroundColor: uiColor.primary,
+    borderRadius: uiRadius.md,
+    paddingVertical: uiSpacing.md + 2,
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: uiSpacing.md + 2,
   },
   primaryButtonHalf: {
     flex: 1,
-    backgroundColor: "#2CC36B",
-    borderRadius: 14,
-    paddingVertical: 14,
+    backgroundColor: uiColor.primary,
+    borderRadius: uiRadius.md,
+    paddingVertical: uiSpacing.md + 2,
     alignItems: "center",
   },
-  primaryButtonText: { color: "#04110a", fontSize: 15, fontWeight: "800" },
+  primaryButtonText: { color: uiColor.primaryText, fontSize: 15, fontWeight: "800" },
   secondaryButtonHalf: {
     flex: 1,
-    backgroundColor: "#0B1610",
-    borderRadius: 14,
-    paddingVertical: 14,
+    backgroundColor: uiColor.surface,
+    borderRadius: uiRadius.md,
+    borderWidth: 1,
+    borderColor: uiColor.border,
+    paddingVertical: uiSpacing.md + 2,
     alignItems: "center",
   },
-  secondaryButtonText: { color: "#D7E6DC", fontSize: 15, fontWeight: "800" },
+  secondaryButtonText: { color: uiColor.textSecondary, fontSize: 15, fontWeight: "800" },
 
   deleteButton: {
-    marginTop: 18,
-    backgroundColor: "#3b0d0d",
-    borderRadius: 14,
-    paddingVertical: 14,
+    marginTop: uiSpacing.lg + 2,
+    backgroundColor: uiColor.danger + "1F",
+    borderWidth: 1,
+    borderColor: uiColor.danger + "38",
+    borderRadius: uiRadius.md,
+    paddingVertical: uiSpacing.md + 2,
     alignItems: "center",
   },
-  deleteButtonText: { color: "#FCA5A5", fontSize: 15, fontWeight: "800" },
+  deleteButtonText: { color: uiColor.danger, fontSize: 15, fontWeight: "800" },
 
-  statusGrid: { gap: 10 },
+  statusGrid: { gap: uiSpacing.sm + 2 },
   statusMiniCard: {
-    backgroundColor: "#060E08",
-    borderRadius: 14,
+    backgroundColor: uiColor.background,
+    borderRadius: uiRadius.md,
     borderWidth: 1,
-    borderColor: "#0B1610",
-    padding: 12,
-    marginTop: 10,
+    borderColor: uiColor.border,
+    padding: uiSpacing.md,
+    marginTop: uiSpacing.sm + 2,
   },
   statusMiniLabel: {
-    color: "#8EA0AA",
+    color: uiColor.textSecondary,
     fontSize: 12,
     marginBottom: 5,
     textTransform: "uppercase",
   },
-  statusMiniValue: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  statusMiniValue: { color: uiColor.textPrimary, fontSize: 14, fontWeight: "700" },
 
-  map: { width: "100%", height: 260, borderRadius: 16, marginTop: 12 },
-  mapInfo: { color: "#8EA0AA", fontSize: 12, marginTop: 10, lineHeight: 18 },
+  map: { width: "100%", height: 260, borderRadius: uiRadius.lg, marginTop: uiSpacing.md },
+  mapInfo: { color: uiColor.textSecondary, fontSize: 12, marginTop: uiSpacing.sm + 2, lineHeight: 18 },
 
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
+  statsRow: { flexDirection: "row", gap: uiSpacing.sm + 2, marginBottom: uiSpacing.md + 2 },
   statCard: {
     flex: 1,
-    backgroundColor: "#060E08",
-    borderRadius: 18,
+    backgroundColor: uiColor.background,
+    borderRadius: uiRadius.lg,
     borderWidth: 1,
-    borderColor: "#0B1610",
-    padding: 14,
+    borderColor: uiColor.border,
+    padding: uiSpacing.md + 2,
   },
-  statLabel: { color: "#8EA0AA", fontSize: 12, marginBottom: 6 },
-  statValue: { color: "#FFFFFF", fontSize: 20, fontWeight: "800" },
+  statLabel: { color: uiColor.textSecondary, fontSize: 12, marginBottom: uiSpacing.xs + 2 },
+  statValue: { ...uiType.numericScore, color: uiColor.textPrimary, fontSize: 20 },
 
   periodeRow: {
     flexDirection: "row",
@@ -1534,147 +1493,105 @@ const styles = StyleSheet.create({
   },
   periodeInfo: { flex: 1 },
 
-  periodGrid: { flexDirection: "row", gap: 8 },
+  periodGrid: { flexDirection: "row", gap: uiSpacing.sm },
   periodCell: {
     flex: 1,
-    backgroundColor: "#060E08",
-    borderRadius: 14,
+    backgroundColor: uiColor.background,
+    borderRadius: uiRadius.md,
     borderWidth: 1,
-    borderColor: "#0B1610",
-    padding: 10,
+    borderColor: uiColor.border,
+    padding: uiSpacing.sm + 2,
   },
   periodCellLabel: {
-    color: "#8EA0AA",
+    color: uiColor.textSecondary,
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 0.6,
-    marginBottom: 4,
+    marginBottom: uiSpacing.xs,
   },
-  periodCellValue: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
+  periodCellValue: { color: uiColor.textPrimary, fontSize: 12, fontWeight: "700" },
 
-  barRad: { marginBottom: 12 },
+  barRad: { marginBottom: uiSpacing.md },
   barLeft: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 6,
+    marginBottom: uiSpacing.xs + 2,
   },
-  barDyr: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  barMeta: { color: "#8EA0AA", fontSize: 12 },
+  barDyr: { color: uiColor.textPrimary, fontSize: 14, fontWeight: "700" },
+  barMeta: { color: uiColor.textSecondary, fontSize: 12 },
   barTrack: {
     height: 8,
-    backgroundColor: "#060E08",
+    backgroundColor: uiColor.background,
     borderRadius: 4,
     overflow: "hidden",
   },
-  barFyllSoft: { height: "100%", borderRadius: 4, backgroundColor: "#60A5FA" },
+  barFyllSoft: { height: "100%", borderRadius: 4, backgroundColor: uiColor.info },
 
   summaryBox: {
-    marginTop: 18,
-    backgroundColor: "rgba(34,197,94,0.06)",
+    marginTop: uiSpacing.xl - 2,
+    backgroundColor: uiColor.primary + "0F",
     borderWidth: 1,
-    borderColor: "rgba(34,197,94,0.16)",
-    borderRadius: 16,
-    padding: 14,
+    borderColor: uiColor.primary + "29",
+    borderRadius: uiRadius.lg,
+    padding: uiSpacing.md + 2,
   },
   summaryTitle: {
-    color: "#A9F2BF",
+    color: uiColor.primarySoft,
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom: 8,
+    marginBottom: uiSpacing.sm,
   },
-  summaryText: { color: "#D7E6DC", fontSize: 14, lineHeight: 21 },
+  summaryText: { color: uiColor.textSecondary, fontSize: 14, lineHeight: 21 },
 
-  highlightBox: { backgroundColor: "#060E08", borderRadius: 14, padding: 14 },
+  highlightBox: { backgroundColor: uiColor.background, borderRadius: uiRadius.md, padding: uiSpacing.md + 2 },
   highlightTitle: {
-    color: "#A9F2BF",
+    color: uiColor.primarySoft,
     fontSize: 13,
     fontWeight: "800",
     textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: uiSpacing.sm,
   },
-  highlightText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
-  highlightSmall: { color: "#8EA0AA", fontSize: 13, marginTop: 4 },
-  highlightComment: { color: "#C8D8D0", fontSize: 13, marginTop: 8 },
+  highlightText: { color: uiColor.textPrimary, fontSize: 16, fontWeight: "800" },
+  highlightSmall: { color: uiColor.textSecondary, fontSize: 13, marginTop: uiSpacing.xs },
+  highlightComment: { color: uiColor.textSecondary, fontSize: 13, marginTop: uiSpacing.sm },
 
   subSectionTitle: {
-    color: "#FFFFFF",
+    color: uiColor.textPrimary,
     fontSize: 15,
     fontWeight: "800",
-    marginBottom: 8,
+    marginBottom: uiSpacing.sm,
   },
   listRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 10,
+    paddingVertical: uiSpacing.sm + 2,
     borderBottomWidth: 1,
-    borderBottomColor: "#0B1610",
+    borderBottomColor: uiColor.border,
   },
-  listKey: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  listValue: { color: "#C8D8D0", fontSize: 14 },
+  listKey: { color: uiColor.textPrimary, fontSize: 14, fontWeight: "700" },
+  listValue: { color: uiColor.textSecondary, fontSize: 14 },
 
-  obsRow: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "flex-start",
-    backgroundColor: "#060E08",
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-  },
-  obsTitle: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  obsMeta: { color: "#8EA0AA", fontSize: 12, marginTop: 4 },
-  obsComment: { color: "#C8D8D0", fontSize: 12, marginTop: 6 },
-  obsActions: { alignItems: "flex-end", gap: 8 },
-  distanceBadge: {
-    backgroundColor: "#12351f",
-    borderWidth: 1,
-    borderColor: "#1f5134",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  distanceBadgeText: { color: "#A9F2BF", fontSize: 12, fontWeight: "800" },
-  deleteObsButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(239,68,68,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.22)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  obsListe: { marginTop: uiSpacing.xs },
+  obsTrailing: { flexDirection: "row", alignItems: "center", gap: uiSpacing.sm },
+  deleteObsButton: { padding: uiSpacing.xs },
 
   emptyWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 24,
+    padding: uiSpacing.xl + 4,
   },
-  emptyTitle: { color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
+  emptyTitle: { color: uiColor.textPrimary, fontSize: 24, fontWeight: "800" },
   emptyText: {
-    color: "#8EA0AA",
+    color: uiColor.textSecondary,
     fontSize: 14,
-    marginTop: 8,
+    marginTop: uiSpacing.sm,
     textAlign: "center",
   },
-  emptyInfo: { color: "#8EA0AA", fontSize: 14, marginTop: 8 },
+  emptyInfo: { color: uiColor.textSecondary, fontSize: 14, marginTop: uiSpacing.sm },
 
-  modal: {
-    flex: 1,
-    backgroundColor: "#000000aa",
-    justifyContent: "center",
-    padding: 20,
-  },
-  modalCard: {
-    backgroundColor: "#0B1610",
-    padding: 20,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#0B1610",
-    maxHeight: "88%",
-  },
+  modalTitle: { ...uiType.sectionTitle, color: uiColor.textPrimary, fontSize: 20, marginBottom: uiSpacing.sm },
 });
