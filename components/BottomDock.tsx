@@ -2,6 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link, usePathname } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { alpha, color, elevation, glass, radius, spacing, typography, zIndex } from "@/src/design/tokens";
+
 type TabProps = {
   href: "/" | "/kart" | "/logg" | "/jakt";
   icon: keyof typeof Ionicons.glyphMap;
@@ -18,7 +20,7 @@ function Tab({ href, icon, label, active }: TabProps) {
             <Ionicons
               name={icon}
               size={16}
-              color={active ? "#F4FFF7" : "#8FA39A"}
+              color={active ? color.textPrimary : color.textMuted}
             />
           </View>
 
@@ -54,10 +56,11 @@ export default function BottomDock() {
 const styles = StyleSheet.create({
   wrap: {
     position: "absolute",
-    left: 12,
-    right: 12,
-    bottom: 12,
+    left: spacing.md,
+    right: spacing.md,
+    bottom: spacing.md,
     alignItems: "center",
+    zIndex: zIndex.navigation,
   },
 
   aura: {
@@ -66,7 +69,7 @@ const styles = StyleSheet.create({
     width: "72%",
     height: 40,
     borderRadius: 999,
-    backgroundColor: "rgba(44,195,107,0.09)",
+    backgroundColor: color.primary + alpha.soft,
   },
 
   shadow: {
@@ -82,17 +85,13 @@ const styles = StyleSheet.create({
     width: "100%",
     flexDirection: "row",
     justifyContent: "space-between",
-    backgroundColor: "rgba(8,14,10,0.98)",
+    backgroundColor: glass.controlBgStrong,
     borderWidth: 1,
-    borderColor: "#1C2A22",
+    borderColor: glass.controlBorder,
     borderRadius: 34,
     paddingHorizontal: 6,
-    paddingVertical: 8,
-    shadowColor: "#000000",
-    shadowOpacity: 0.34,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 16 },
-    elevation: 18,
+    paddingVertical: spacing.sm,
+    ...elevation.floating,
   },
 
   tab: {
@@ -105,7 +104,7 @@ const styles = StyleSheet.create({
   inner: {
     minWidth: 56,
     minHeight: 52,
-    borderRadius: 22,
+    borderRadius: radius.xl,
     alignItems: "center",
     justifyContent: "center",
     gap: 5,
@@ -114,35 +113,34 @@ const styles = StyleSheet.create({
   },
 
   innerActive: {
-    backgroundColor: "#12211A",
+    backgroundColor: color.surfaceHover,
     borderWidth: 1,
-    borderColor: "#2A4738",
+    borderColor: color.borderStrong,
   },
 
   iconPlate: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "#111B15",
+    backgroundColor: color.surfaceElevated,
     borderWidth: 1,
-    borderColor: "#223129",
+    borderColor: color.border,
     alignItems: "center",
     justifyContent: "center",
   },
 
   iconPlateActive: {
-    backgroundColor: "#1C3B29",
-    borderColor: "#377856",
+    backgroundColor: color.primary + alpha.soft,
+    borderColor: color.primary,
   },
 
   label: {
-    color: "#8EA39A",
-    fontSize: 10,
-    fontWeight: "800",
+    ...typography.caption,
+    color: color.textMuted,
     letterSpacing: 0.1,
   },
 
   labelActive: {
-    color: "#F8FAFC",
+    color: color.textPrimary,
   },
 });
