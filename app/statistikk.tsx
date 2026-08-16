@@ -12,6 +12,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
+import Surface from "../components/ui/Surface";
+import Badge from "../components/ui/Badge";
+import ListRow from "../components/ui/ListRow";
 import { getUserPosition, syncUserLocation } from "../src/services/location";
 import { subscribeToNearbyObservations } from "../src/services/observations";
 import { getSettings } from "../src/services/settings";
@@ -20,6 +23,16 @@ import type { Observasjon } from "../src/types/observation";
 import { dyrEmoji, hentNivå, hentTidsvekt, hentTimerSiden } from "../src/lib/aktivitet";
 import { calcBearing, type LatLng } from "../src/lib/geo";
 import { måneFase } from "../src/lib/maane";
+import { værIkon, måneIkon } from "../src/design/weatherIcons";
+import {
+  color,
+  spacing,
+  radius,
+  typography,
+  alpha,
+  levelColor,
+  confidenceColor,
+} from "../src/design/tokens";
 
 // ─── Konstanter ───────────────────────────────────────────────────────────────
 
@@ -62,6 +75,23 @@ function aktivitetNå(dyr: string): number {
   return profil ? Math.round((profil[time] ?? 0.5) * 100) : 50;
 }
 
+// Prosent → samme nivånavn som motorens ActivityLevel, kun for fargeoppslag
+// via levelColor() (§: aldri egen fargelogikk for aktivitetsnivå).
+function aktivitetsNivåFraProsent(pst: number): "Svært høy" | "Høy" | "Moderat" | "Lav" {
+  if (pst >= 85) return "Svært høy";
+  if (pst >= 70) return "Høy";
+  if (pst >= 40) return "Moderat";
+  return "Lav";
+}
+
+// Prosent → samme nivånavn som motorens ConfidenceLevel, kun for fargeoppslag
+// via confidenceColor().
+function konfidensNivåFraProsent(pst: number): "høy" | "middels" | "lav" {
+  if (pst >= 70) return "høy";
+  if (pst >= 40) return "middels";
+  return "lav";
+}
+
 // Neste toppunkt (>= 80 % aktivitet)
 function nesteToppunkt(dyr: string): string {
   const nå     = new Date().getHours();
@@ -79,7 +109,7 @@ function nesteToppunkt(dyr: string): string {
 // Jaktsesong-status
 function sesongsStatus(dyr: string, dato: Date): { åpen: boolean; label: string; farge: string } {
   const sesonger = SESONGER[dyr];
-  if (!sesonger) return { åpen: false, label: "Ukjent", farge: "#4D6858" };
+  if (!sesonger) return { åpen: false, label: "Ukjent", farge: color.textMuted };
 
   const år   = dato.getFullYear();
   const now  = dato.getTime();
@@ -93,15 +123,15 @@ function sesongsStatus(dyr: string, dato: Date): { åpen: boolean; label: string
     if (now >= fra && now <= til) {
       const dager = Math.ceil((til - now) / 86400000);
       const tag   = s.merknad ? ` (${s.merknad})` : "";
-      return { åpen: true, label: `Åpen${tag} · ${dager}d igjen`, farge: "#2CC36B" };
+      return { åpen: true, label: `Åpen${tag} · ${dager}d igjen`, farge: color.success };
     }
     if (now < fra) {
       const dager = Math.ceil((fra - now) / 86400000);
       const tag   = s.merknad ? ` (${s.merknad})` : "";
-      return { åpen: false, label: `Åpner om ${dager}d${tag}`, farge: "#EAB308" };
+      return { åpen: false, label: `Åpner om ${dager}d${tag}`, farge: color.warning };
     }
   }
-  return { åpen: false, label: "Sesong avsluttet", farge: "#4D6858" };
+  return { åpen: false, label: "Sesong avsluttet", farge: color.textMuted };
 }
 
 // Prediker sannsynlig posisjonssone fra observasjoner, sett fra brukerens ståsted
@@ -283,6 +313,10 @@ export default function StatistikkScreen() {
   const maksDyr = Math.max(...dyrStatistikk.map((i) => i.antall), 1);
   const maksTid = Math.max(...Object.values(tidsmønster), 1);
 
+  const aktFarge   = levelColor(aktivitetsNivåFraProsent(aktNå));
+  const konfidensPst = prediksjon ? parseInt(prediksjon.konfidensStr, 10) : 0;
+  const konfidensFarge = confidenceColor(konfidensNivåFraProsent(konfidensPst));
+
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -300,64 +334,62 @@ export default function StatistikkScreen() {
           </View>
 
           {laster ? (
-            <View style={styles.loadCard}>
-              <ActivityIndicator size="large" color="#2CC36B" />
+            <Surface style={styles.loadCard}>
+              <ActivityIndicator size="large" color={color.primary} />
               <Text style={styles.loadTitle}>Laster data...</Text>
-            </View>
+            </Surface>
           ) : feiltekst ? (
             <View style={styles.errorCard}>
-              <Ionicons name="warning-outline" size={20} color="#F87171" />
+              <Ionicons name="warning-outline" size={20} color={color.danger} />
               <Text style={styles.errorText}>{feiltekst}</Text>
             </View>
           ) : (
             <>
-              {/* ── Vær + Månefase ── */}
-              <View style={styles.miljøRad}>
-                {/* Månefase */}
-                <View style={styles.miljøKort}>
-                  <Text style={styles.miljøEmoji}>{måne.emoji}</Text>
+              {/* ── Vær + Månefase + Vind — én overflate med interne kolonner
+                  i stedet for tre separate små kort (§3: mindre kort-søppel). ── */}
+              <Surface style={styles.miljøRad}>
+                <View style={styles.miljøKol}>
+                  <Ionicons name={måneIkon(måne)} size={20} color={color.textSecondary} />
                   <Text style={styles.miljøLabel}>Månefase</Text>
                   <Text style={styles.miljøVerdi}>{måne.navn}</Text>
                   <Text style={styles.miljøSub}>{måne.belysning}% belysning</Text>
                 </View>
 
-                {/* Vær */}
-                {vær ? (
-                  <View style={[styles.miljøKort, styles.miljøKortMid]}>
-                    <Text style={styles.miljøEmoji}>{vær.emoji}</Text>
-                    <Text style={styles.miljøLabel}>Vær nå</Text>
-                    <Text style={styles.miljøVerdi}>{vær.temperatur}°C</Text>
-                    <Text style={styles.miljøSub}>{vær.beskrivelse}</Text>
-                  </View>
-                ) : (
-                  <View style={[styles.miljøKort, styles.miljøKortMid]}>
-                    <Text style={styles.miljøEmoji}>🌡</Text>
-                    <Text style={styles.miljøLabel}>Vær</Text>
-                    <Text style={styles.miljøSub}>Henter...</Text>
-                  </View>
-                )}
+                <View style={[styles.miljøKol, styles.miljøKolDelt]}>
+                  {vær ? (
+                    <>
+                      <Ionicons name={værIkon(vær.værkode)} size={20} color={color.textSecondary} />
+                      <Text style={styles.miljøLabel}>Vær nå</Text>
+                      <Text style={styles.miljøVerdi}>{vær.temperatur}°C</Text>
+                      <Text style={styles.miljøSub}>{vær.beskrivelse}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="thermometer-outline" size={20} color={color.textFaint} />
+                      <Text style={styles.miljøLabel}>Vær</Text>
+                      <Text style={styles.miljøSub}>Henter...</Text>
+                    </>
+                  )}
+                </View>
 
-                {/* Vind */}
-                {vær ? (
-                  <View style={styles.miljøKort}>
-                    <Text style={styles.miljøEmoji}>🌬</Text>
-                    <Text style={styles.miljøLabel}>Vind</Text>
-                    <Text style={styles.miljøVerdi}>{vær.vindLabel}</Text>
-                    <Text style={styles.miljøSub}>{vær.vindHastighet} m/s</Text>
-                  </View>
-                ) : (
-                  <View style={styles.miljøKort}>
-                    <Text style={styles.miljøEmoji}>🌬</Text>
-                    <Text style={styles.miljøLabel}>Vind</Text>
+                <View style={[styles.miljøKol, styles.miljøKolDelt]}>
+                  <Ionicons name="navigate-outline" size={20} color={color.textSecondary} />
+                  <Text style={styles.miljøLabel}>Vind</Text>
+                  {vær ? (
+                    <>
+                      <Text style={styles.miljøVerdi}>{vær.vindLabel}</Text>
+                      <Text style={styles.miljøSub}>{vær.vindHastighet} m/s</Text>
+                    </>
+                  ) : (
                     <Text style={styles.miljøSub}>—</Text>
-                  </View>
-                )}
-              </View>
+                  )}
+                </View>
+              </Surface>
 
               {/* Jaktråd basert på vind */}
               {vær && (
                 <View style={styles.vindRad}>
-                  <Ionicons name="navigate-outline" size={15} color="#2CC36B" />
+                  <Ionicons name="navigate-outline" size={15} color={color.primary} />
                   <Text style={styles.vindRadText}>{jaktVindRad(vær.vindRetning)}</Text>
                 </View>
               )}
@@ -383,22 +415,16 @@ export default function StatistikkScreen() {
                 </ScrollView>
 
                 {/* Prediksjonskort */}
-                <View style={styles.predKort}>
+                <Surface variant="elevated" style={styles.predKort}>
                   {/* Aktivitetsmåler */}
                   <View style={styles.predAktRow}>
                     <Text style={styles.predAktLabel}>Aktivitetsnivå nå</Text>
-                    <Text style={[
-                      styles.predAktVerdi,
-                      { color: aktNå >= 70 ? "#2CC36B" : aktNå >= 40 ? "#EAB308" : "#6B8A76" }
-                    ]}>
+                    <Text style={[styles.predAktVerdi, { color: aktFarge }]}>
                       {aktNå}%
                     </Text>
                   </View>
                   <View style={styles.predMåler}>
-                    <View style={[styles.predMålerFyll, {
-                      width: `${aktNå}%` as DimensionValue,
-                      backgroundColor: aktNå >= 70 ? "#2CC36B" : aktNå >= 40 ? "#EAB308" : "#4D6858",
-                    }]} />
+                    <View style={[styles.predMålerFyll, { width: `${aktNå}%` as DimensionValue, backgroundColor: aktFarge }]} />
                   </View>
 
                   <View style={styles.predGrid}>
@@ -406,7 +432,7 @@ export default function StatistikkScreen() {
                       <Text style={styles.predCelleLabel}>Neste toppunkt</Text>
                       <Text style={styles.predCelleVerdi}>{neste}</Text>
                     </View>
-                    <View style={[styles.predCelle, styles.predCelleMid]}>
+                    <View style={[styles.predCelle, styles.predCelleDelt]}>
                       <Text style={styles.predCelleLabel}>Sesong</Text>
                       <Text style={[styles.predCelleVerdi, { color: sesong.farge }]}>
                         {sesong.åpen ? "Åpen" : "Stengt"}
@@ -417,18 +443,21 @@ export default function StatistikkScreen() {
 
                   {prediksjon ? (
                     <View style={styles.predSannsynlig}>
-                      <Ionicons name="location" size={14} color="#2CC36B" />
+                      <Ionicons name="location" size={14} color={color.primary} />
                       <Text style={styles.predSannsynligTekst}>
-                        Sannsynlig sone: <Text style={{ color: "#FFFFFF", fontWeight: "800" }}>
+                        Sannsynlig sone: <Text style={{ color: color.textPrimary, fontWeight: "800" }}>
                           {prediksjon.retningLabel}
                         </Text>
-                        {" "}· {prediksjon.antallObs} obs · konfidens {prediksjon.konfidensStr}
+                        {" "}· {prediksjon.antallObs} obs · konfidens{" "}
+                        <Text style={{ color: konfidensFarge, fontWeight: "800" }}>
+                          {prediksjon.konfidensStr}
+                        </Text>
                       </Text>
                     </View>
                   ) : (
                     <View style={styles.predSannsynlig}>
-                      <Ionicons name="information-circle-outline" size={14} color="#3D5446" />
-                      <Text style={[styles.predSannsynligTekst, { color: "#3D5446" }]}>
+                      <Ionicons name="information-circle-outline" size={14} color={color.textFaint} />
+                      <Text style={[styles.predSannsynligTekst, { color: color.textFaint }]}>
                         Ingen observasjoner av {valgtDyr} siste 48t
                       </Text>
                     </View>
@@ -458,26 +487,25 @@ export default function StatistikkScreen() {
                     <Text style={styles.aktivGrafLabel}>18</Text>
                     <Text style={styles.aktivGrafLabel}>24</Text>
                   </View>
-                </View>
+                </Surface>
               </View>
 
               {/* ── Jaktsesong-oversikt ── */}
-              <View style={styles.sesongerKort}>
-                <Text style={styles.sectionTitle}>Jaktsesonger</Text>
-                {dyrListe.map((dyr) => {
+              <Surface style={styles.sesongerKort}>
+                <Text style={styles.kortTittel}>Jaktsesonger</Text>
+                {dyrListe.map((dyr, i) => {
                   const s = sesongsStatus(dyr, new Date());
                   return (
-                    <View key={dyr} style={styles.sesongsRad}>
-                      <Text style={styles.sesongsEmoji}>{dyrEmoji(dyr)}</Text>
-                      <Text style={styles.sesongsNavn}>{dyr}</Text>
-                      <View style={[styles.sesongsTag, { backgroundColor: s.farge + "20" }]}>
-                        <View style={[styles.sesongsTagDot, { backgroundColor: s.farge }]} />
-                        <Text style={[styles.sesongsTagTekst, { color: s.farge }]}>{s.label}</Text>
-                      </View>
-                    </View>
+                    <ListRow
+                      key={dyr}
+                      emoji={dyrEmoji(dyr)}
+                      title={dyr}
+                      divider={i < dyrListe.length - 1}
+                      trailing={<Badge label={s.label} color={s.farge} size="sm" />}
+                    />
                   );
                 })}
-              </View>
+              </Surface>
 
               {/* ── Periode-velger ── */}
               <View style={styles.segmentWrap}>
@@ -499,20 +527,25 @@ export default function StatistikkScreen() {
                   { label: "I periode", verdi: String(filtrert.length) },
                   { label: "Trend", verdi: trend },
                 ].map((s) => (
-                  <View key={s.label} style={styles.statKort}>
+                  <Surface key={s.label} style={styles.statKort}>
                     <Text style={styles.statLabel}>{s.label}</Text>
                     <Text style={[
                       styles.statVerdi,
                       s.verdi === "Økende" ? styles.trendOpp :
                       s.verdi === "Synkende" ? styles.trendNed : undefined,
                     ]}>{s.verdi}</Text>
-                  </View>
+                  </Surface>
                 ))}
               </View>
 
-              {/* ── Dyrefordeling ── */}
-              <View style={styles.kortCard}>
-                <Text style={styles.kortTittel}>Dyrefordeling</Text>
+              {/* ── Fordeling — art / tidspunkt / type samlet i én overflate
+                  med interne skillelinjer i stedet for tre separate kort
+                  (§3: mindre kort-søppel — dette er tre snitt av samme
+                  observasjonssett, ikke tre urelaterte tema). ── */}
+              <Surface style={styles.kortCard}>
+                <Text style={styles.kortTittel}>Fordeling</Text>
+
+                <Text style={styles.underTittel}>Etter art</Text>
                 {dyrStatistikk.map((item) => (
                   <View key={item.dyr} style={styles.barRad}>
                     <View style={styles.barLeft}>
@@ -524,11 +557,10 @@ export default function StatistikkScreen() {
                     </View>
                   </View>
                 ))}
-              </View>
 
-              {/* ── Tidsmønster ── */}
-              <View style={styles.kortCard}>
-                <Text style={styles.kortTittel}>Tidsmønster</Text>
+                <View style={styles.seksjonDeler} />
+
+                <Text style={styles.underTittel}>Etter tidspunkt</Text>
                 {([["morgen","Morgen (05–10)"],["dag","Dag (10–17)"],["kveld","Kveld (17–23)"],["natt","Natt (23–05)"]] as const).map(([key, label]) => (
                   <View key={key} style={styles.barRad}>
                     <View style={styles.barLeft}>
@@ -540,10 +572,20 @@ export default function StatistikkScreen() {
                     </View>
                   </View>
                 ))}
-              </View>
+
+                <View style={styles.seksjonDeler} />
+
+                <Text style={styles.underTittel}>Etter type</Text>
+                {typeStatistikk.map((item, i) => (
+                  <View key={item.type} style={[styles.typeRad, i === typeStatistikk.length - 1 && styles.typeRadSiste]}>
+                    <Text style={styles.typeTekst}>{item.type}</Text>
+                    <Text style={styles.typeAntall}>{item.antall}</Text>
+                  </View>
+                ))}
+              </Surface>
 
               {/* ── Hotspots ── */}
-              <View style={styles.kortCard}>
+              <Surface style={styles.kortCard}>
                 <Text style={styles.kortTittel}>Sterkeste hotspots</Text>
                 {hotspots.length === 0 ? (
                   <Text style={styles.tomTekst}>Ingen hotspots ennå.</Text>
@@ -558,37 +600,26 @@ export default function StatistikkScreen() {
                     </View>
                   </View>
                 ))}
-              </View>
-
-              {/* ── Observasjonstyper ── */}
-              <View style={styles.kortCard}>
-                <Text style={styles.kortTittel}>Observasjonstyper</Text>
-                {typeStatistikk.map((item) => (
-                  <View key={item.type} style={styles.typeRad}>
-                    <Text style={styles.typeTekst}>{item.type}</Text>
-                    <Text style={styles.typeAntall}>{item.antall}</Text>
-                  </View>
-                ))}
-              </View>
+              </Surface>
 
               {/* ── Lenker ── */}
               <View style={styles.lenkRad}>
                 <Link href="/kart" asChild>
                   <Pressable style={styles.lenkKnapp}>
-                    <Ionicons name="map-outline" size={15} color="#A9F2BF" />
+                    <Ionicons name="map-outline" size={15} color={color.primarySoft} />
                     <Text style={styles.lenkTekst}>Kart</Text>
                   </Pressable>
                 </Link>
                 <Link href="/logg" asChild>
                   <Pressable style={styles.lenkKnapp}>
-                    <Ionicons name="add-circle-outline" size={15} color="#A9F2BF" />
+                    <Ionicons name="add-circle-outline" size={15} color={color.primarySoft} />
                     <Text style={styles.lenkTekst}>Logg obs</Text>
                   </Pressable>
                 </Link>
                 <Link href="/jakt" asChild>
-                  <Pressable style={[styles.lenkKnapp, styles.lenkKnappAlt]}>
-                    <Ionicons name="trophy-outline" size={15} color="#FDE68A" />
-                    <Text style={[styles.lenkTekst, { color: "#FDE68A" }]}>Jakt</Text>
+                  <Pressable style={styles.lenkKnappJakt}>
+                    <Ionicons name="trophy-outline" size={15} color={color.warning} />
+                    <Text style={styles.lenkTekstJakt}>Jakt</Text>
                   </Pressable>
                 </Link>
               </View>
@@ -606,172 +637,162 @@ export default function StatistikkScreen() {
 // ─── Stiler ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: "#060E08" },
+  safe:   { flex: 1, backgroundColor: color.background },
   screen: { flex: 1 },
-  container: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 160 },
+  container: { paddingHorizontal: spacing.xl - 2, paddingTop: spacing.sm, paddingBottom: 160 },
 
-  header:   { paddingVertical: 20 },
-  eyebrow:  { color: "#2CC36B", fontSize: 11, fontWeight: "800", letterSpacing: 2.5, textTransform: "uppercase", marginBottom: 10 },
-  title:    { color: "#FFFFFF", fontSize: 34, fontWeight: "900", letterSpacing: -0.5 },
-  subtitle: { color: "#4D6858", fontSize: 14, marginTop: 6 },
+  header:   { paddingVertical: spacing.xl },
+  eyebrow:  { ...typography.eyebrow, color: color.primary, letterSpacing: 2.5, marginBottom: spacing.sm + 2 },
+  title:    { fontSize: 34, fontWeight: "900", letterSpacing: -0.5, color: color.textPrimary },
+  subtitle: { color: color.textMuted, fontSize: 14, marginTop: spacing.xs + 2 },
 
-  loadCard: { backgroundColor: "#0B1610", borderRadius: 22, borderWidth: 1, borderColor: "#192420", padding: 32, alignItems: "center" },
-  loadTitle: { color: "#FFFFFF", fontSize: 16, fontWeight: "800", marginTop: 14 },
-  errorCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#160D0D", borderWidth: 1, borderColor: "#3B1A1A", borderRadius: 18, padding: 18 },
-  errorText: { color: "#FCA5A5", fontSize: 14, flex: 1 },
-
-  // Vær + Månefase
-  miljøRad: { flexDirection: "row", gap: 8, marginBottom: 10 },
-  miljøKort: {
-    flex: 1, backgroundColor: "#0B1610", borderRadius: 18,
-    borderWidth: 1, borderColor: "#192420",
-    padding: 14, alignItems: "center",
+  loadCard: { padding: spacing.xxl + 4, alignItems: "center" },
+  loadTitle: { color: color.textPrimary, fontSize: 16, fontWeight: "800", marginTop: spacing.md + 2 },
+  errorCard: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm + 2,
+    backgroundColor: color.danger + alpha.soft,
+    borderWidth: 1, borderColor: color.danger + alpha.medium,
+    borderRadius: radius.lg, padding: spacing.lg + 2,
   },
-  miljøKortMid: { borderColor: "#1C2A20" },
-  miljøEmoji: { fontSize: 22, marginBottom: 6 },
-  miljøLabel: { color: "#3D5446", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 },
-  miljøVerdi: { color: "#FFFFFF", fontSize: 14, fontWeight: "900", textAlign: "center" },
-  miljøSub:   { color: "#3D5446", fontSize: 11, marginTop: 2, textAlign: "center" },
+  errorText: { color: color.danger, fontSize: 14, flex: 1 },
+
+  // Vær + Månefase + Vind — samlet i én Surface (§3)
+  miljøRad: { flexDirection: "row", marginBottom: spacing.md + 2, padding: spacing.md + 2 },
+  miljøKol: { flex: 1, alignItems: "center", paddingHorizontal: spacing.xs },
+  miljøKolDelt: { borderLeftWidth: 1, borderLeftColor: color.border },
+  miljøLabel: { color: color.textFaint, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginTop: spacing.sm, marginBottom: spacing.xs },
+  miljøVerdi: { color: color.textPrimary, fontSize: 14, fontWeight: "900", textAlign: "center" },
+  miljøSub:   { color: color.textFaint, fontSize: 11, marginTop: 2, textAlign: "center" },
 
   vindRad: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "rgba(44,195,107,0.06)",
-    borderRadius: 12, borderWidth: 1, borderColor: "rgba(44,195,107,0.12)",
-    paddingHorizontal: 14, paddingVertical: 11, marginBottom: 20,
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: color.primary + alpha.soft,
+    borderRadius: radius.md - 2, borderWidth: 1, borderColor: color.primary + alpha.medium,
+    paddingHorizontal: spacing.md + 2, paddingVertical: spacing.sm + 3, marginBottom: spacing.xl,
   },
-  vindRadText: { color: "#7AB890", fontSize: 13, fontWeight: "600", flex: 1 },
+  vindRadText: { color: color.primarySoft, fontSize: 13, fontWeight: "600", flex: 1 },
 
   // Prediksjon
-  predSection: { marginBottom: 20 },
-  sectionTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginBottom: 4 },
-  sectionSub:   { color: "#3D5446", fontSize: 13, marginBottom: 14 },
-  dyrFaneRad:   { gap: 8, paddingRight: 4, marginBottom: 14 },
+  predSection: { marginBottom: spacing.xl },
+  sectionTitle: { ...typography.sectionTitle, color: color.textPrimary, fontSize: 18, marginBottom: spacing.xs },
+  sectionSub:   { color: color.textFaint, fontSize: 13, marginBottom: spacing.md + 2 },
+  dyrFaneRad:   { gap: spacing.sm, paddingRight: spacing.xs, marginBottom: spacing.md + 2 },
   dyrFane: {
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderRadius: 999, backgroundColor: "#0B1610",
-    borderWidth: 1, borderColor: "#192420",
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2,
+    borderRadius: radius.pill, backgroundColor: color.surface,
+    borderWidth: 1, borderColor: color.border,
   },
-  dyrFaneActive:       { backgroundColor: "#122C1C", borderColor: "#2CC36B" },
-  dyrFaneTekst:        { color: "#6B8A76", fontSize: 13, fontWeight: "700" },
-  dyrFaneTekstActive:  { color: "#A9F2BF", fontWeight: "800" },
+  dyrFaneActive:       { backgroundColor: color.surfaceHover, borderColor: color.primary },
+  dyrFaneTekst:        { color: color.textMuted, fontSize: 13, fontWeight: "700" },
+  dyrFaneTekstActive:  { color: color.primarySoft, fontWeight: "800" },
 
-  predKort: {
-    backgroundColor: "#0B1A11", borderRadius: 22,
-    borderWidth: 1, borderColor: "#1B3020",
-    padding: 18,
-  },
-  predAktRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-  predAktLabel: { color: "#4D6858", fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
+  predKort: { padding: spacing.lg + 2 },
+  predAktRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  predAktLabel: { color: color.textMuted, fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
   predAktVerdi: { fontSize: 22, fontWeight: "900" },
-  predMåler: { height: 8, backgroundColor: "#0E1A10", borderRadius: 4, overflow: "hidden", marginBottom: 16 },
+  predMåler: { height: 8, backgroundColor: color.background, borderRadius: 4, overflow: "hidden", marginBottom: spacing.lg },
   predMålerFyll: { height: "100%", borderRadius: 4 },
 
-  predGrid: { flexDirection: "row", gap: 10, marginBottom: 14 },
-  predCelle: { flex: 1, backgroundColor: "#0E1510", borderRadius: 14, padding: 12, borderWidth: 1, borderColor: "#1A2B1A" },
-  predCelleMid: { borderColor: "#1A2B20" },
-  predCelleLabel: { color: "#3D5446", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 },
-  predCelleVerdi: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
-  predCelleSub:   { color: "#2E4236", fontSize: 11, marginTop: 3 },
+  // To underceller delt av én skillelinje i stedet for to egne bordered kort
+  predGrid: { flexDirection: "row", marginBottom: spacing.md + 2, backgroundColor: color.background, borderRadius: radius.md, borderWidth: 1, borderColor: color.border },
+  predCelle: { flex: 1, padding: spacing.md },
+  predCelleDelt: { borderLeftWidth: 1, borderLeftColor: color.border },
+  predCelleLabel: { color: color.textFaint, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: spacing.xs + 2 },
+  predCelleVerdi: { color: color.textPrimary, fontSize: 13, fontWeight: "800" },
+  predCelleSub:   { color: color.textFaint, fontSize: 11, marginTop: 3 },
 
   predSannsynlig: {
-    flexDirection: "row", alignItems: "flex-start", gap: 7,
-    backgroundColor: "rgba(44,195,107,0.06)",
-    borderRadius: 12, padding: 12, marginBottom: 16,
-    borderWidth: 1, borderColor: "rgba(44,195,107,0.12)",
+    flexDirection: "row", alignItems: "flex-start", gap: spacing.sm - 1,
+    backgroundColor: color.primary + alpha.soft,
+    borderRadius: radius.md - 2, padding: spacing.md,
+    marginBottom: spacing.lg, borderWidth: 1, borderColor: color.primary + alpha.medium,
   },
-  predSannsynligTekst: { color: "#7AB890", fontSize: 13, lineHeight: 20, flex: 1 },
+  predSannsynligTekst: { color: color.primarySoft, fontSize: 13, lineHeight: 20, flex: 1 },
 
   // 24t aktivitetsgraf
   aktivGraf: {
     flexDirection: "row", alignItems: "flex-end",
-    height: 44, gap: 2, marginBottom: 4,
+    height: 44, gap: 2, marginBottom: spacing.xs,
   },
   aktivSøyleWrap: { flex: 1, alignItems: "center", justifyContent: "flex-end", height: 44 },
-  aktivSøyle: { width: "80%", backgroundColor: "#1E3A22", borderRadius: 2, minHeight: 2 },
-  aktivSøyleNå: { backgroundColor: "#2CC36B" },
+  aktivSøyle: { width: "80%", backgroundColor: color.borderStrong, borderRadius: 2, minHeight: 2 },
+  aktivSøyleNå: { backgroundColor: color.primary },
   aktivGrafLabels: { flexDirection: "row", justifyContent: "space-between" },
-  aktivGrafLabel:  { color: "#2E4236", fontSize: 10 },
+  aktivGrafLabel:  { color: color.textFaint, fontSize: 10 },
 
   // Jaktsesong
-  sesongerKort: {
-    backgroundColor: "#0B1610", borderRadius: 22,
-    borderWidth: 1, borderColor: "#192420",
-    padding: 18, marginBottom: 16,
-  },
-  sesongsRad: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: "#111C14",
-  },
-  sesongsEmoji: { fontSize: 20 },
-  sesongsNavn:  { color: "#FFFFFF", fontSize: 14, fontWeight: "700", flex: 1 },
-  sesongsTag: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5,
-  },
-  sesongsTagDot:  { width: 6, height: 6, borderRadius: 3 },
-  sesongsTagTekst: { fontSize: 11, fontWeight: "800" },
+  sesongerKort: { padding: spacing.lg + 2, marginBottom: spacing.lg },
 
   // Segment / Periode
   segmentWrap: {
-    flexDirection: "row", backgroundColor: "#0A1410",
-    borderRadius: 16, borderWidth: 1, borderColor: "#192420",
-    padding: 4, marginBottom: 14,
+    flexDirection: "row", backgroundColor: color.surface,
+    borderRadius: radius.md + 2, borderWidth: 1, borderColor: color.border,
+    padding: spacing.xs, marginBottom: spacing.md + 2,
   },
-  segBtn:         { flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: "center" },
-  segBtnActive:   { backgroundColor: "#122C1C" },
-  segTekst:       { color: "#4D6858", fontSize: 14, fontWeight: "700" },
-  segTekstActive: { color: "#A9F2BF", fontWeight: "800" },
+  segBtn:         { flex: 1, paddingVertical: spacing.sm + 3, borderRadius: radius.md - 2, alignItems: "center" },
+  segBtnActive:   { backgroundColor: color.surfaceHover, borderWidth: 1, borderColor: color.primary },
+  segTekst:       { color: color.textMuted, fontSize: 14, fontWeight: "700" },
+  segTekstActive: { color: color.primarySoft, fontWeight: "800" },
 
   // Stats
-  statsRad: { flexDirection: "row", gap: 8, marginBottom: 14 },
-  statKort: {
-    flex: 1, backgroundColor: "#0B1610", borderWidth: 1, borderColor: "#192420",
-    borderRadius: 18, padding: 14, alignItems: "center",
-  },
-  statLabel:  { color: "#3D5446", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 },
-  statVerdi:  { color: "#FFFFFF", fontSize: 20, fontWeight: "900", textAlign: "center" },
-  trendOpp:   { color: "#4ADE80" },
-  trendNed:   { color: "#F87171" },
+  statsRad: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md + 2 },
+  statKort: { flex: 1, padding: spacing.md + 2, alignItems: "center" },
+  statLabel:  { color: color.textFaint, fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: spacing.sm },
+  statVerdi:  { color: color.textPrimary, fontSize: 20, fontWeight: "900", textAlign: "center" },
+  trendOpp:   { color: color.success },
+  trendNed:   { color: color.danger },
 
   // Kort-kort
-  kortCard: {
-    backgroundColor: "#0B1610", borderWidth: 1, borderColor: "#192420",
-    borderRadius: 22, padding: 18, marginBottom: 12,
+  kortCard: { padding: spacing.lg + 2, marginBottom: spacing.md },
+  kortTittel: { color: color.textPrimary, fontSize: 16, fontWeight: "900", marginBottom: spacing.md + 2 },
+  underTittel: {
+    color: color.textFaint, fontSize: 11, fontWeight: "800", textTransform: "uppercase",
+    letterSpacing: 0.8, marginBottom: spacing.md,
   },
-  kortTittel: { color: "#FFFFFF", fontSize: 16, fontWeight: "900", marginBottom: 16 },
-  barRad: { marginBottom: 14 },
-  barLeft: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
-  barDyr:  { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  barMeta: { color: "#3D5446", fontSize: 12 },
-  barTrack: { height: 8, backgroundColor: "#0E1A10", borderRadius: 4, overflow: "hidden" },
-  barFyll:  { height: "100%", borderRadius: 4, backgroundColor: "#2CC36B" },
-  barFyllSoft: { height: "100%", borderRadius: 4, backgroundColor: "#60A5FA" },
+  seksjonDeler: { height: 1, backgroundColor: color.border, marginVertical: spacing.md + 2 },
+  barRad: { marginBottom: spacing.md + 2 },
+  barLeft: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs + 2 },
+  barDyr:  { color: color.textPrimary, fontSize: 14, fontWeight: "700" },
+  barMeta: { color: color.textFaint, fontSize: 12 },
+  barTrack: { height: 8, backgroundColor: color.background, borderRadius: 4, overflow: "hidden" },
+  barFyll:  { height: "100%", borderRadius: 4, backgroundColor: color.primary },
+  barFyllSoft: { height: "100%", borderRadius: 4, backgroundColor: color.info },
 
-  hotspotRad: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
+  hotspotRad: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md },
   hotspotRang: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: "#122C1C", borderWidth: 1, borderColor: "#1E4230",
+    backgroundColor: color.primary + alpha.soft, borderWidth: 1, borderColor: color.primary + alpha.medium,
     alignItems: "center", justifyContent: "center",
   },
-  hotspotRangTekst: { color: "#A9F2BF", fontSize: 12, fontWeight: "900" },
-  hotspotLabel:     { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
-  hotspotMeta:      { color: "#3D5446", fontSize: 12, marginTop: 3 },
+  hotspotRangTekst: { color: color.primarySoft, fontSize: 12, fontWeight: "900" },
+  hotspotLabel:     { color: color.textPrimary, fontSize: 13, fontWeight: "700" },
+  hotspotMeta:      { color: color.textFaint, fontSize: 12, marginTop: 3 },
 
   typeRad: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: "#111C14",
+    paddingVertical: spacing.sm + 3, borderBottomWidth: 1, borderBottomColor: color.border,
   },
-  typeTekst:   { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  typeAntall:  { color: "#4D6858", fontSize: 14, fontWeight: "700" },
-  tomTekst:    { color: "#3D5446", fontSize: 13 },
+  typeRadSiste: { borderBottomWidth: 0 },
+  typeTekst:   { color: color.textPrimary, fontSize: 14, fontWeight: "700" },
+  typeAntall:  { color: color.textMuted, fontSize: 14, fontWeight: "700" },
+  tomTekst:    { color: color.textFaint, fontSize: 13 },
 
-  lenkRad:  { flexDirection: "row", gap: 8 },
+  lenkRad:  { flexDirection: "row", gap: spacing.sm },
   lenkKnapp: {
-    flex: 1, backgroundColor: "#0B1610", borderWidth: 1, borderColor: "#192420",
-    borderRadius: 16, paddingVertical: 14,
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
+    flex: 1, backgroundColor: color.surface, borderWidth: 1, borderColor: color.border,
+    borderRadius: radius.md, paddingVertical: spacing.md + 2,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm - 1,
   },
-  lenkKnappAlt: { borderColor: "#2A2010", backgroundColor: "#100F09" },
-  lenkTekst:    { color: "#A9F2BF", fontSize: 13, fontWeight: "800" },
+  lenkKnappAlt: { borderColor: color.warning + alpha.medium, backgroundColor: color.warning + alpha.soft },
+  lenkTekst:    { color: color.primarySoft, fontSize: 13, fontWeight: "800" },
+  // Egne, allerede sammenslåtte stiler (ikke array-stil) for lenken som går
+  // til Link asChild — en array-verdi på style-propen til Link sitt direkte
+  // barn utløste en react-native-web-krasj ("Failed to set an indexed
+  // property [0] on 'CSSStyleDeclaration'") ved første mount på web.
+  lenkKnappJakt: {
+    flex: 1, backgroundColor: color.warning + alpha.soft, borderWidth: 1, borderColor: color.warning + alpha.medium,
+    borderRadius: radius.md, paddingVertical: spacing.md + 2,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm - 1,
+  },
+  lenkTekstJakt: { color: color.warning, fontSize: 13, fontWeight: "800" },
 });
