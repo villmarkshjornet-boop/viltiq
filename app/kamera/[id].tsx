@@ -1263,7 +1263,7 @@ export default function KameraDetaljScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: uiColor.background },
   screen: { flex: 1 },
-  container: { padding: uiSpacing.lg, paddingBottom: 160 },
+  container: { padding: uiSpacing.lg, paddingBottom: 160, width: "100%", maxWidth: 640, alignSelf: "center" },
 
   headerTop: { marginTop: 6, marginBottom: uiSpacing.sm },
   backChip: {

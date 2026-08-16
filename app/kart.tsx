@@ -2094,10 +2094,10 @@ const styles = StyleSheet.create({
 
   navBar: {
     position: "absolute", top: 0, left: 0, right: 0,
-    backgroundColor: "rgba(12,20,16,0.96)",
+    backgroundColor: uiGlass.controlBgStrong,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 14, paddingVertical: 11,
-    borderBottomWidth: 1, borderBottomColor: uiColor.border,
+    borderBottomWidth: 1, borderBottomColor: uiGlass.controlBorder,
     zIndex: uiZ.navigation,
     minHeight: 52,
   },
@@ -2105,13 +2105,14 @@ const styles = StyleSheet.create({
   backText: { color: uiColor.textPrimary, fontSize: 16, fontWeight: "700" },
   navTitle: { color: uiColor.textPrimary, fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center" },
   mapToggle: {
-    flexDirection: "row", backgroundColor: "#111B15",
-    borderRadius: 12, padding: 3,
+    flexDirection: "row", backgroundColor: uiColor.surface,
+    borderRadius: uiRadius.md, padding: 3,
+    borderWidth: 1, borderColor: uiColor.border,
   },
   toggleItem:       { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 9 },
-  toggleItemActive: { backgroundColor: "#FFFFFF" },
-  toggleText:       { color: "#8EA0AA", fontSize: 13, fontWeight: "700" },
-  toggleTextActive: { color: "#060E08", fontWeight: "900" },
+  toggleItemActive: { backgroundColor: uiColor.primary },
+  toggleText:       { color: uiColor.textMuted, fontSize: 13, fontWeight: "700" },
+  toggleTextActive: { color: uiColor.primaryText, fontWeight: "900" },
 
   // Artsfilter — alltid synlig rad rett under navBar (§22). Høyre kant
   // stopper FØR kontrollkolonnen (right: 128 = kolonnens bredde + luft) slik

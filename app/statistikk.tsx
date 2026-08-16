@@ -639,7 +639,7 @@ export default function StatistikkScreen() {
 const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: color.background },
   screen: { flex: 1 },
-  container: { paddingHorizontal: spacing.xl - 2, paddingTop: spacing.sm, paddingBottom: 160 },
+  container: { paddingHorizontal: spacing.xl - 2, paddingTop: spacing.sm, paddingBottom: 160, width: "100%", maxWidth: 640, alignSelf: "center" },
 
   header:   { paddingVertical: spacing.xl },
   eyebrow:  { ...typography.eyebrow, color: color.primary, letterSpacing: 2.5, marginBottom: spacing.sm + 2 },

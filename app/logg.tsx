@@ -512,6 +512,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: uiSpacing.xl,
     paddingTop: uiSpacing.sm,
     paddingBottom: 160,
+    width: "100%",
+    maxWidth: 640,
+    alignSelf: "center",
   },
 
   // Header

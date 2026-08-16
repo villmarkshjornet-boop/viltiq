@@ -269,7 +269,7 @@ function tolkFeil(code?: string, message?: string): string {
 
 const s = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: uiColor.background },
-  scroll: { paddingHorizontal: uiSpacing.xl, paddingTop: uiSpacing.xxl, paddingBottom: 60 },
+  scroll: { paddingHorizontal: uiSpacing.xl, paddingTop: uiSpacing.xxl, paddingBottom: 60, width: "100%", maxWidth: 640, alignSelf: "center", flexGrow: 1, justifyContent: "center" },
 
   logoGlowWrap: { alignSelf: "flex-start", marginBottom: uiSpacing.xxxl + 12, borderRadius: uiRadius.xl, padding: uiSpacing.sm },
   logoWrap: { flexDirection: "row", alignItems: "center", gap: 10 },

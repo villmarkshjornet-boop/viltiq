@@ -325,6 +325,7 @@ export default function JaktScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.screen}>
+      <View style={s.topContentWrap}>
 
         {/* ── Header ── */}
         <View style={s.header}>
@@ -450,6 +451,7 @@ export default function JaktScreen() {
             </Text>
           )}
         </Surface>
+      </View>
 
         {/* ── Liste ── */}
         <ScrollView
@@ -711,7 +713,8 @@ const s = StyleSheet.create({
   sumVerdi:  { color: uiColor.textPrimary, fontSize: 20, fontWeight: "900" },
   sumLabel:  { color: uiColor.textFaint, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8, marginTop: 4 },
 
-  liste: { paddingHorizontal: uiSpacing.xl, paddingBottom: 140, gap: 10 },
+  liste: { paddingHorizontal: uiSpacing.xl, paddingBottom: 140, gap: 10, width: "100%", maxWidth: 640, alignSelf: "center" },
+  topContentWrap: { width: "100%", maxWidth: 640, alignSelf: "center" },
 
   tomtKort:    { alignItems: "center", paddingVertical: 60 },
   tomtEmoji:   { fontSize: 48, marginBottom: uiSpacing.lg },

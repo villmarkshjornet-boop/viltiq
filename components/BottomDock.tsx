@@ -40,14 +40,16 @@ export default function BottomDock() {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.aura} />
-      <View style={styles.shadow} />
+      <View style={styles.dockWrap}>
+        <View style={styles.aura} />
+        <View style={styles.shadow} />
 
-      <View style={styles.dock}>
-        <Tab href="/" icon="home" label="Hjem" active={isActive("/")} />
-        <Tab href="/kart" icon="map" label="Kart" active={isActive("/kart")} />
-        <Tab href="/logg" icon="add-circle-outline" label="Logg" active={isActive("/logg")} />
-        <Tab href="/jakt" icon="trophy-outline" label="Jakt" active={isActive("/jakt")} />
+        <View style={styles.dock}>
+          <Tab href="/" icon="home" label="Hjem" active={isActive("/")} />
+          <Tab href="/kart" icon="map" label="Kart" active={isActive("/kart")} />
+          <Tab href="/logg" icon="add-circle-outline" label="Logg" active={isActive("/logg")} />
+          <Tab href="/jakt" icon="trophy-outline" label="Jakt" active={isActive("/jakt")} />
+        </View>
       </View>
     </View>
   );
@@ -61,6 +63,15 @@ const styles = StyleSheet.create({
     bottom: spacing.md,
     alignItems: "center",
     zIndex: zIndex.navigation,
+  },
+
+  // Redesign-oppdraget §36: på brede skjermer skal ikke dokken strekke seg
+  // til full bredde med enorme mellomrom mellom de 4 fanene — samme
+  // kompakte, pill-formede dokk som på mobil, bare sentrert.
+  dockWrap: {
+    width: "100%",
+    maxWidth: 420,
+    alignItems: "center",
   },
 
   aura: {

@@ -338,7 +338,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: uiColor.background },
   screen: { flex: 1 },
-  scroll: { paddingTop: 16, paddingHorizontal: 18, paddingBottom: 160 },
+  scroll: { paddingTop: 16, paddingHorizontal: 18, paddingBottom: 160, width: "100%", maxWidth: 640, alignSelf: "center" },
 
   // Topp
   topRow: {
