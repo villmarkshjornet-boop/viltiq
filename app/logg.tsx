@@ -3,7 +3,6 @@ import * as Location from "expo-location";
 import { Link } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,8 +12,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BottomDock from "../components/BottomDock";
+import ListRow from "../components/ui/ListRow";
+import ModalSheet from "../components/ui/ModalSheet";
 import Surface from "../components/ui/Surface";
-import { color as uiColor } from "../src/design/tokens";
+import {
+  alpha,
+  color as uiColor,
+  radius as uiRadius,
+  spacing as uiSpacing,
+  typography as uiType,
+} from "../src/design/tokens";
 import {
   deleteObservation,
   saveObservation,
@@ -195,7 +202,7 @@ export default function LoggScreen() {
                 const a = valgtDyr === dyr;
                 return (
                   <Pressable key={dyr} onPress={() => setValgtDyr(dyr)}
-                    style={[styles.chip, a && styles.chipActive]}>
+                    style={[styles.chip, styles.chipHalf, a && styles.chipActive]}>
                     <Text style={[styles.chipText, a && styles.chipTextActive]}>
                       {dyrEmoji(dyr)}{"  "}{dyr}
                     </Text>
@@ -213,8 +220,8 @@ export default function LoggScreen() {
                 const a = valgtType === type;
                 return (
                   <Pressable key={type} onPress={() => setValgtType(type)}
-                    style={[styles.chipAlt, a && styles.chipAltActive]}>
-                    <Text style={[styles.chipText, a && styles.chipAltTextActive]}>
+                    style={[styles.chip, styles.chipThird, a && styles.chipActive]}>
+                    <Text style={[styles.chipText, a && styles.chipTextActive]}>
                       {type}
                     </Text>
                   </Pressable>
@@ -240,7 +247,7 @@ export default function LoggScreen() {
 
           {/* ── GPS-info ── */}
           <View style={styles.infoStrip}>
-            <Ionicons name="shield-checkmark-outline" size={15} color={uiColor.primary} />
+            <Ionicons name="shield-checkmark-outline" size={15} color={uiColor.textMuted} />
             <Text style={styles.infoStripText}>GPS anonymiseres automatisk ±200m</Text>
           </View>
 
@@ -331,70 +338,76 @@ export default function LoggScreen() {
                 </Text>
               )}
 
-              <View style={styles.historikkListe}>
               {visteObs.length === 0 ? (
-                <Text style={styles.historikkTom}>
-                  {fane === "aktive" ? "Ingen aktive registreringer nå." : "Ingen eldre registreringer ennå."}
-                </Text>
+                <Surface style={styles.historikkTomKort}>
+                  <Text style={styles.historikkTom}>
+                    {fane === "aktive" ? "Ingen aktive registreringer nå." : "Ingen eldre registreringer ennå."}
+                  </Text>
+                </Surface>
               ) : (
-                visteObs.map((obs) => {
-                  const erSiste = obs.id === sisteId;
-                  const msDiff  = Date.now() - new Date(obs.tid).getTime();
-                  const minDiff = Math.round(msDiff / 60000);
-                  const tidTxt  = minDiff < 60
-                    ? `${minDiff} min siden`
-                    : minDiff < 1440
-                    ? `${Math.round(minDiff / 60)}t siden`
-                    : new Date(obs.tid).toLocaleDateString("nb-NO", { day: "numeric", month: "short" });
+                <Surface style={styles.historikkListe}>
+                  {visteObs.map((obs, i) => {
+                    const erSiste = obs.id === sisteId;
+                    const msDiff  = Date.now() - new Date(obs.tid).getTime();
+                    const minDiff = Math.round(msDiff / 60000);
+                    const tidTxt  = minDiff < 60
+                      ? `${minDiff} min siden`
+                      : minDiff < 1440
+                      ? `${Math.round(minDiff / 60)}t siden`
+                      : new Date(obs.tid).toLocaleDateString("nb-NO", { day: "numeric", month: "short" });
 
-                  return (
-                    <View key={obs.id} style={[styles.historikkRad, erSiste && styles.historikkRadSiste]}>
-                      <Text style={styles.historikkEmoji}>{dyrEmoji(obs.dyr)}</Text>
-                      <View style={styles.historikkBody}>
-                        <Text style={styles.historikkDyr}>
-                          {obs.dyr}
-                          <Text style={styles.historikkType}> · {obs.type}</Text>
-                        </Text>
-                        <Text style={styles.historikkTid}>{tidTxt}</Text>
-                      </View>
-                      {obs.retning != null && (
-                        <Ionicons
-                          name="navigate"
-                          size={13}
-                          color={uiColor.primary}
-                          style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
-                        />
-                      )}
-                      <Pressable
-                        onPress={() =>
-                          visAlert(
-                            "Slett observasjon",
-                            `Slett ${obs.dyr} · ${obs.type}?`,
-                            [
-                              { text: "Avbryt", style: "cancel" },
-                              {
-                                text: "Slett",
-                                style: "destructive",
-                                onPress: async () => {
-                                  try {
-                                    await deleteObservation(obs.id);
-                                  } catch (e: any) {
-                                    visAlert("Feil", e?.message || "Klarte ikke slette observasjonen.");
-                                  }
-                                },
-                              },
-                            ]
-                          )
+                    return (
+                      <ListRow
+                        key={obs.id}
+                        emoji={dyrEmoji(obs.dyr)}
+                        title={obs.dyr}
+                        subtitle={obs.type}
+                        meta={tidTxt}
+                        highlighted={erSiste}
+                        divider={i < visteObs.length - 1}
+                        trailing={
+                          <View style={styles.radTrailing}>
+                            {obs.retning != null && (
+                              <Ionicons
+                                name="navigate"
+                                size={13}
+                                color={uiColor.primary}
+                                style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
+                              />
+                            )}
+                            <Pressable
+                              hitSlop={4}
+                              onPress={() =>
+                                visAlert(
+                                  "Slett observasjon",
+                                  `Slett ${obs.dyr} · ${obs.type}?`,
+                                  [
+                                    { text: "Avbryt", style: "cancel" },
+                                    {
+                                      text: "Slett",
+                                      style: "destructive",
+                                      onPress: async () => {
+                                        try {
+                                          await deleteObservation(obs.id);
+                                        } catch (e: any) {
+                                          visAlert("Feil", e?.message || "Klarte ikke slette observasjonen.");
+                                        }
+                                      },
+                                    },
+                                  ]
+                                )
+                              }
+                              style={styles.historikkSlett}
+                            >
+                              <Ionicons name="trash-outline" size={14} color={uiColor.textMuted} />
+                            </Pressable>
+                          </View>
                         }
-                        style={styles.historikkSlett}
-                      >
-                        <Ionicons name="trash-outline" size={14} color={uiColor.textMuted} />
-                      </Pressable>
-                    </View>
-                  );
-                })
+                      />
+                    );
+                  })}
+                </Surface>
               )}
-              </View>
             </>
           )}
 
@@ -419,86 +432,73 @@ export default function LoggScreen() {
       </View>
 
       {/* ── Retnings­modal ── */}
-      <Modal
-        visible={visModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => bekreftLagring(null)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => bekreftLagring(null)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+      <ModalSheet visible={visModal} onClose={() => bekreftLagring(null)}>
+        <Text style={styles.modalTitle}>Hvilken retning gikk dyret?</Text>
+        <Text style={styles.modalSub}>
+          Valgfritt — hjelper med å beregne sannsynlig posisjon i kart
+        </Text>
 
-            <View style={styles.modalHandle} />
+        {/* Kompassrose */}
+        <View style={styles.compass}>
+          {kompassGrid.map((rad, ri) => (
+            <View key={ri} style={styles.compassRow}>
+              {rad.map((dir, di) =>
+                dir === null ? (
+                  <View key={di} style={styles.compassCenter}>
+                    <Ionicons
+                      name="compass-outline" size={26}
+                      color={pendingRetning != null ? uiColor.primary : uiColor.border}
+                    />
+                  </View>
+                ) : (
+                  <Pressable
+                    key={di}
+                    onPress={() =>
+                      setPendingRetning((p) => (p === dir.grader ? null : dir.grader))
+                    }
+                    style={[
+                      styles.compassBtn,
+                      pendingRetning === dir.grader && styles.compassBtnActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.compassBtnText,
+                        pendingRetning === dir.grader && styles.compassBtnTextActive,
+                      ]}
+                    >
+                      {dir.label}
+                    </Text>
+                  </Pressable>
+                )
+              )}
+            </View>
+          ))}
+        </View>
 
-            <Text style={styles.modalTitle}>Hvilken retning gikk dyret?</Text>
-            <Text style={styles.modalSub}>
-              Valgfritt — hjelper med å beregne sannsynlig posisjon i kart
+        {pendingRetning != null && (
+          <View style={styles.retningValgt}>
+            <Ionicons name="navigate" size={13} color={uiColor.primary} />
+            <Text style={styles.retningValgtText}>
+              {retningListe.find((r) => r.grader === pendingRetning)?.label}{" "}
+              ({pendingRetning}°) valgt
             </Text>
+            <Pressable onPress={() => setPendingRetning(null)}>
+              <Ionicons name="close-circle" size={17} color={uiColor.textFaint} />
+            </Pressable>
+          </View>
+        )}
 
-            {/* Kompassrose */}
-            <View style={styles.compass}>
-              {kompassGrid.map((rad, ri) => (
-                <View key={ri} style={styles.compassRow}>
-                  {rad.map((dir, di) =>
-                    dir === null ? (
-                      <View key={di} style={styles.compassCenter}>
-                        <Ionicons
-                          name="compass-outline" size={26}
-                          color={pendingRetning != null ? uiColor.primary : "#2A3D30"}
-                        />
-                      </View>
-                    ) : (
-                      <Pressable
-                        key={di}
-                        onPress={() =>
-                          setPendingRetning((p) => (p === dir.grader ? null : dir.grader))
-                        }
-                        style={[
-                          styles.compassBtn,
-                          pendingRetning === dir.grader && styles.compassBtnActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.compassBtnText,
-                            pendingRetning === dir.grader && styles.compassBtnTextActive,
-                          ]}
-                        >
-                          {dir.label}
-                        </Text>
-                      </Pressable>
-                    )
-                  )}
-                </View>
-              ))}
-            </View>
-
-            {pendingRetning != null && (
-              <View style={styles.retningValgt}>
-                <Ionicons name="navigate" size={13} color={uiColor.primary} />
-                <Text style={styles.retningValgtText}>
-                  {retningListe.find((r) => r.grader === pendingRetning)?.label}{" "}
-                  ({pendingRetning}°) valgt
-                </Text>
-                <Pressable onPress={() => setPendingRetning(null)}>
-                  <Ionicons name="close-circle" size={17} color={uiColor.textFaint} />
-                </Pressable>
-              </View>
-            )}
-
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => bekreftLagring(null)} style={styles.skipBtn}>
-                <Text style={styles.skipBtnText}>Hopp over</Text>
-              </Pressable>
-              <Pressable onPress={() => bekreftLagring(pendingRetning)} style={styles.confirmBtn}>
-                <Ionicons name="checkmark" size={18} color={uiColor.primaryText} />
-                <Text style={styles.confirmBtnText}>Lagre</Text>
-              </Pressable>
-            </View>
-
+        <View style={styles.modalActions}>
+          <Pressable onPress={() => bekreftLagring(null)} style={styles.skipBtn}>
+            <Text style={styles.skipBtnText}>Hopp over</Text>
           </Pressable>
-        </Pressable>
-      </Modal>
+          <Pressable onPress={() => bekreftLagring(pendingRetning)} style={styles.confirmBtn}>
+            <Ionicons name="checkmark" size={18} color={uiColor.primaryText} />
+            <Text style={styles.confirmBtnText}>Lagre</Text>
+          </Pressable>
+        </View>
+      </ModalSheet>
     </SafeAreaView>
   );
 }
@@ -509,110 +509,98 @@ const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: uiColor.background },
   screen: { flex: 1 },
   container: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: uiSpacing.xl,
+    paddingTop: uiSpacing.sm,
     paddingBottom: 160,
   },
 
   // Header
-  header:   { paddingVertical: 22 },
-  eyebrow: {
-    color: uiColor.primary, fontSize: 11, fontWeight: "800",
-    letterSpacing: 2.5, textTransform: "uppercase", marginBottom: 10,
-  },
-  title:    { color: uiColor.textPrimary, fontSize: 34, fontWeight: "900", letterSpacing: -0.5 },
-  subtitle: { color: uiColor.textMuted, fontSize: 14, marginTop: 6 },
+  header:   { paddingVertical: uiSpacing.xxl - 6 },
+  eyebrow:  { ...uiType.eyebrow, color: uiColor.primary, marginBottom: uiSpacing.sm + 2 },
+  title:    { ...uiType.display, color: uiColor.textPrimary },
+  subtitle: { ...uiType.body, color: uiColor.textMuted, marginTop: 6 },
 
   // Oppsummering
   summaryCard: {
-    padding: 16, marginBottom: 28,
+    padding: uiSpacing.lg, marginBottom: uiSpacing.xxl,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
-  summaryLeft:  { flexDirection: "row", alignItems: "center", gap: 14 },
+  summaryLeft:  { flexDirection: "row", alignItems: "center", gap: uiSpacing.md + 2 },
   summaryEmoji: { fontSize: 38 },
-  summaryTitle: { color: uiColor.textPrimary, fontSize: 18, fontWeight: "800" },
-  summaryMeta:  { color: uiColor.textMuted, fontSize: 13, marginTop: 3 },
+  summaryTitle: { ...uiType.sectionTitle, color: uiColor.textPrimary },
+  summaryMeta:  { ...uiType.metadata, color: uiColor.textMuted, marginTop: 3 },
   readyBadge: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "rgba(44,195,107,0.10)",
-    borderRadius: 999, borderWidth: 1, borderColor: "rgba(44,195,107,0.22)",
-    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: uiColor.primary + alpha.soft,
+    borderRadius: uiRadius.pill, borderWidth: 1, borderColor: uiColor.primary + alpha.medium,
+    paddingHorizontal: uiSpacing.md + 2, paddingVertical: uiSpacing.sm,
   },
   readyDot: {
     width: 6, height: 6, borderRadius: 3, backgroundColor: uiColor.primary,
   },
-  readyText: { color: uiColor.primary, fontSize: 12, fontWeight: "900", letterSpacing: 0.5 },
+  readyText: { ...uiType.caption, color: uiColor.primary },
 
   // Sections
-  section:      { marginBottom: 24 },
-  sectionLabel: {
-    color: uiColor.textFaint, fontSize: 11, fontWeight: "800",
-    textTransform: "uppercase", letterSpacing: 1.8, marginBottom: 12,
-  },
+  section:      { marginBottom: uiSpacing.xxl - 4 },
+  sectionLabel: { ...uiType.eyebrow, color: uiColor.textFaint, marginBottom: uiSpacing.md },
 
-  // Chips — dyr
-  chipGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  // Chips — én visuell språk for både Dyr og Type (Redesign-oppdraget §5:
+  // to helt ulike aktiv-farger — grønn og gull — for samme UI-mønster var
+  // inkonsekvent og brøt regelen om at grønn er forbeholdt merkevare/handling).
+  chipGrid: { flexDirection: "row", flexWrap: "wrap", gap: uiSpacing.sm + 2 },
   chip: {
-    flex: 1, minWidth: "45%",
-    backgroundColor: "#0A1510", borderWidth: 1, borderColor: "#192420",
-    borderRadius: 14, paddingVertical: 16, paddingHorizontal: 12,
+    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
+    borderRadius: uiRadius.md, paddingVertical: uiSpacing.lg, paddingHorizontal: uiSpacing.md,
     alignItems: "center",
   },
-  chipActive:     { backgroundColor: "#112A1A", borderColor: uiColor.primary },
-  chipText:       { color: "#7A9A88", fontSize: 14, fontWeight: "700" },
-  chipTextActive: { color: uiColor.primarySoft, fontWeight: "800" },
-
-  // Chips — type
-  chipAlt: {
-    flex: 1, minWidth: "28%",
-    backgroundColor: "#0E0F0C", borderWidth: 1, borderColor: "#222018",
-    borderRadius: 14, paddingVertical: 16, alignItems: "center",
-  },
-  chipAltActive:     { backgroundColor: "#1E1A07", borderColor: "#7A5C10" },
-  chipAltTextActive: { color: "#FDE68A", fontWeight: "800" },
+  chipHalf:  { flex: 1, minWidth: "45%" },
+  chipThird: { flex: 1, minWidth: "28%" },
+  chipActive:     { backgroundColor: uiColor.surfaceHover, borderColor: uiColor.primary },
+  chipText:       { ...uiType.bodyStrong, color: uiColor.textSecondary },
+  chipTextActive: { color: uiColor.primarySoft },
 
   // Input
   input: {
-    backgroundColor: "#090F0C",
-    borderColor: "#172218", borderWidth: 1,
-    borderRadius: 16, minHeight: 110,
-    padding: 16, color: uiColor.textPrimary,
+    backgroundColor: uiColor.surface,
+    borderColor: uiColor.border, borderWidth: 1,
+    borderRadius: uiRadius.lg, minHeight: 110,
+    padding: uiSpacing.lg, color: uiColor.textPrimary,
     textAlignVertical: "top", fontSize: 15, lineHeight: 24,
   },
-  charCount: { color: "#2E4236", fontSize: 12, marginTop: 8, textAlign: "right" },
+  charCount: { ...uiType.caption, color: uiColor.textFaint, marginTop: uiSpacing.sm, textAlign: "right" },
 
   // GPS-strip
   infoStrip: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "rgba(44,195,107,0.05)",
-    borderRadius: 12, borderWidth: 1, borderColor: "rgba(44,195,107,0.10)",
-    paddingHorizontal: 14, paddingVertical: 11, marginBottom: 20,
+    flexDirection: "row", alignItems: "center", gap: uiSpacing.sm,
+    backgroundColor: uiColor.surface,
+    borderRadius: uiRadius.md, borderWidth: 1, borderColor: uiColor.border,
+    paddingHorizontal: uiSpacing.md + 2, paddingVertical: uiSpacing.sm + 3, marginBottom: uiSpacing.xl,
   },
-  infoStripText: { color: "#4D7A60", fontSize: 13, fontWeight: "600" },
+  infoStripText: { ...uiType.caption, color: uiColor.textMuted },
 
   // Status
-  statusBox:         { borderRadius: 16, padding: 14, marginBottom: 16, borderWidth: 1 },
-  statusText:        { fontSize: 14, fontWeight: "600", lineHeight: 20 },
-  statusSuccess:     { backgroundColor: "rgba(34,197,94,0.08)",   borderColor: "rgba(34,197,94,0.16)"   },
-  statusSuccessText: { color: "#86EFAC" },
-  statusError:       { backgroundColor: "rgba(239,68,68,0.08)",   borderColor: "rgba(239,68,68,0.16)"   },
-  statusErrorText:   { color: "#FCA5A5" },
-  statusInfo:        { backgroundColor: "rgba(148,163,184,0.07)", borderColor: "rgba(148,163,184,0.14)" },
-  statusInfoText:    { color: "#CBD5E1" },
+  statusBox:         { borderRadius: uiRadius.md, padding: uiSpacing.md + 2, marginBottom: uiSpacing.lg, borderWidth: 1 },
+  statusText:        { ...uiType.body },
+  statusSuccess:     { backgroundColor: uiColor.success + alpha.soft, borderColor: uiColor.success + alpha.medium },
+  statusSuccessText: { color: uiColor.success },
+  statusError:       { backgroundColor: uiColor.danger + alpha.soft, borderColor: uiColor.danger + alpha.medium },
+  statusErrorText:   { color: uiColor.danger },
+  statusInfo:        { backgroundColor: uiColor.textSecondary + alpha.soft, borderColor: uiColor.textSecondary + alpha.medium },
+  statusInfoText:    { color: uiColor.textSecondary },
 
   angreRow: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    marginTop: 10, paddingTop: 10,
-    borderTopWidth: 1, borderTopColor: "rgba(239,68,68,0.12)",
+    marginTop: uiSpacing.sm + 2, paddingTop: uiSpacing.sm + 2,
+    borderTopWidth: 1, borderTopColor: uiColor.danger + alpha.soft,
   },
   angreText: { color: uiColor.danger, fontSize: 13, fontWeight: "700" },
 
   // Lagre-knapp
   saveBtn: {
     backgroundColor: uiColor.primary,
-    borderRadius: 18, paddingVertical: 18,
+    borderRadius: uiRadius.xl - 4, paddingVertical: uiSpacing.lg + 2,
     flexDirection: "row", alignItems: "center",
-    justifyContent: "center", gap: 10, marginBottom: 14,
+    justifyContent: "center", gap: uiSpacing.sm + 2, marginBottom: uiSpacing.md + 2,
   },
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { color: uiColor.primaryText, fontSize: 16, fontWeight: "900", letterSpacing: 0.2 },
@@ -620,121 +608,100 @@ const styles = StyleSheet.create({
   // Historikk
   historikkHeader: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingVertical: 14, marginBottom: 4,
-    borderTopWidth: 1, borderTopColor: "#111C14",
+    paddingVertical: uiSpacing.md + 2, marginBottom: uiSpacing.xs,
+    borderTopWidth: 1, borderTopColor: uiColor.border,
   },
-  historikkHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  historikkHeaderTxt:  { color: uiColor.textPrimary, fontSize: 15, fontWeight: "800" },
+  historikkHeaderLeft: { flexDirection: "row", alignItems: "center", gap: uiSpacing.sm + 2 },
+  historikkHeaderTxt:  { ...uiType.bodyStrong, color: uiColor.textPrimary, fontSize: 15 },
   historikkBadge: {
-    backgroundColor: "rgba(44,195,107,0.12)",
-    borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2,
-    borderWidth: 1, borderColor: "rgba(44,195,107,0.2)",
+    backgroundColor: uiColor.primary + alpha.soft,
+    borderRadius: uiRadius.pill, paddingHorizontal: uiSpacing.sm, paddingVertical: 2,
+    borderWidth: 1, borderColor: uiColor.primary + alpha.medium,
   },
   historikkBadgeTxt: { color: uiColor.primary, fontSize: 12, fontWeight: "900" },
 
   // Fane-velger (Aktive/Historikk)
   faneRad: {
-    flexDirection: "row", gap: 8, marginBottom: 10,
-    backgroundColor: "#090F0C", borderRadius: 12, padding: 4,
-    borderWidth: 1, borderColor: "#172218",
+    flexDirection: "row", gap: uiSpacing.sm, marginBottom: uiSpacing.sm + 2,
+    backgroundColor: uiColor.surface, borderRadius: uiRadius.md,
+    padding: 4, borderWidth: 1, borderColor: uiColor.border,
   },
-  faneBtn: { flex: 1, borderRadius: 9, paddingVertical: 9, alignItems: "center" },
-  faneBtnActive: { backgroundColor: "#122E1C" },
-  faneBtnTxt: { color: "#5A7A68", fontSize: 13, fontWeight: "700" },
+  faneBtn: { flex: 1, borderRadius: uiRadius.sm - 1, paddingVertical: uiSpacing.sm + 1, alignItems: "center" },
+  faneBtnActive: { backgroundColor: uiColor.surfaceHover },
+  faneBtnTxt: { color: uiColor.textMuted, fontSize: 13, fontWeight: "700" },
   faneBtnTxtActive: { color: uiColor.primarySoft, fontWeight: "800" },
-  faneForklaring: { color: uiColor.textFaint, fontSize: 12, marginBottom: 10, lineHeight: 17 },
+  faneForklaring: { ...uiType.caption, color: uiColor.textFaint, marginBottom: uiSpacing.sm + 2, lineHeight: 17 },
+
   historikkListe: {
-    backgroundColor: "#090F0C", borderRadius: 18,
-    borderWidth: 1, borderColor: "#172218",
-    marginBottom: 20, overflow: "hidden",
+    paddingHorizontal: uiSpacing.md + 2,
+    marginBottom: uiSpacing.xl,
   },
-  historikkRad: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 14, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: "#111C14",
+  historikkTomKort: {
+    padding: uiSpacing.lg, marginBottom: uiSpacing.xl, alignItems: "center",
   },
-  historikkRadSiste: { backgroundColor: "rgba(44,195,107,0.06)" },
-  historikkEmoji:    { fontSize: 20 },
-  historikkBody:     { flex: 1 },
-  historikkDyr:      { color: uiColor.textPrimary, fontSize: 14, fontWeight: "700" },
-  historikkType:     { color: uiColor.textFaint, fontWeight: "600" },
-  historikkTid:      { color: uiColor.textFaint, fontSize: 12, marginTop: 2 },
+  historikkTom: { color: uiColor.textFaint, fontSize: 13, textAlign: "center" },
+  radTrailing: { flexDirection: "row", alignItems: "center", gap: uiSpacing.sm },
   historikkSlett: {
     width: 32, height: 32, borderRadius: 16,
-    backgroundColor: "rgba(248,113,113,0.07)",
+    backgroundColor: uiColor.danger + alpha.soft,
     alignItems: "center", justifyContent: "center",
   },
-  historikkTom: { color: uiColor.textFaint, fontSize: 13, padding: 16, textAlign: "center" },
 
   // Lenker
-  linksRow: { flexDirection: "row", gap: 10 },
+  linksRow: { flexDirection: "row", gap: uiSpacing.sm + 2 },
   linkBtn: {
-    flex: 1, backgroundColor: "#09120D",
-    borderRadius: 16, paddingVertical: 15,
+    flex: 1, backgroundColor: uiColor.surface,
+    borderRadius: uiRadius.lg, paddingVertical: uiSpacing.md + 3,
     alignItems: "center", flexDirection: "row",
     justifyContent: "center", gap: 7,
-    borderWidth: 1, borderColor: "#182218",
+    borderWidth: 1, borderColor: uiColor.border,
   },
-  linkBtnText: { color: "#7AB890", fontSize: 13, fontWeight: "800" },
+  linkBtnText: { color: uiColor.primarySoft, fontSize: 13, fontWeight: "800" },
 
-  // Modal
-  modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "flex-end",
-  },
-  modalCard: {
-    backgroundColor: "#0C1610",
-    borderTopLeftRadius: 32, borderTopRightRadius: 32,
-    paddingHorizontal: 24, paddingBottom: 48, paddingTop: 14,
-    borderWidth: 1, borderBottomWidth: 0, borderColor: "#1E3226",
-  },
-  modalHandle: {
-    width: 44, height: 5, borderRadius: 3,
-    backgroundColor: "#243B2C", alignSelf: "center", marginBottom: 22,
-  },
+  // Retningsmodal-innhold
   modalTitle: { color: uiColor.textPrimary, fontSize: 22, fontWeight: "900", marginBottom: 6 },
-  modalSub:   { color: uiColor.textMuted, fontSize: 14, lineHeight: 20, marginBottom: 26 },
+  modalSub:   { color: uiColor.textMuted, fontSize: 14, lineHeight: 20, marginBottom: uiSpacing.xxl - 2 },
 
   // Kompassrose
-  compass:    { gap: 10, alignItems: "center", marginBottom: 14 },
-  compassRow: { flexDirection: "row", gap: 10 },
+  compass:    { gap: uiSpacing.sm + 2, alignItems: "center", marginBottom: uiSpacing.md + 2 },
+  compassRow: { flexDirection: "row", gap: uiSpacing.sm + 2 },
   compassBtn: {
-    width: 68, height: 68, borderRadius: 18,
-    backgroundColor: "#0E1A12", borderWidth: 1, borderColor: "#1E3226",
+    width: 68, height: 68, borderRadius: uiRadius.lg,
+    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
     alignItems: "center", justifyContent: "center",
   },
   compassBtnActive: {
-    backgroundColor: "#122E1C", borderColor: uiColor.primary,
-    shadowColor: uiColor.primary, shadowOpacity: 0.22, shadowRadius: 10, elevation: 5,
+    backgroundColor: uiColor.surfaceHover, borderColor: uiColor.primary,
   },
-  compassBtnText:       { color: "#5A7A68", fontSize: 15, fontWeight: "900" },
+  compassBtnText:       { color: uiColor.textMuted, fontSize: 15, fontWeight: "900" },
   compassBtnTextActive: { color: uiColor.primary },
   compassCenter: {
     width: 68, height: 68, borderRadius: 34,
-    backgroundColor: "#091210", borderWidth: 1, borderColor: "#1A2B20",
+    backgroundColor: uiColor.background, borderWidth: 1, borderColor: uiColor.border,
     alignItems: "center", justifyContent: "center",
   },
 
   retningValgt: {
-    flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16,
-    backgroundColor: "rgba(44,195,107,0.07)",
-    borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: "rgba(44,195,107,0.15)",
+    flexDirection: "row", alignItems: "center", gap: uiSpacing.sm, marginBottom: uiSpacing.lg,
+    backgroundColor: uiColor.primary + alpha.soft,
+    borderRadius: uiRadius.md, padding: uiSpacing.md,
+    borderWidth: 1, borderColor: uiColor.primary + alpha.medium,
   },
   retningValgtText: { color: uiColor.primarySoft, fontSize: 14, fontWeight: "600", flex: 1 },
 
   // Modal-knapper
-  modalActions: { flexDirection: "row", gap: 12, marginTop: 4 },
+  modalActions: { flexDirection: "row", gap: uiSpacing.md, marginTop: uiSpacing.xs },
   skipBtn: {
-    flex: 1, backgroundColor: "#0E1A12",
-    borderRadius: 16, paddingVertical: 17, alignItems: "center",
-    borderWidth: 1, borderColor: "#1E3226",
+    flex: 1, backgroundColor: uiColor.surface,
+    borderRadius: uiRadius.md, paddingVertical: uiSpacing.lg + 1, alignItems: "center",
+    borderWidth: 1, borderColor: uiColor.border,
   },
-  skipBtnText: { color: "#6B8A76", fontSize: 15, fontWeight: "800" },
+  skipBtnText: { color: uiColor.textMuted, fontSize: 15, fontWeight: "800" },
   confirmBtn: {
     flex: 1.6, backgroundColor: uiColor.primary,
-    borderRadius: 16, paddingVertical: 17,
+    borderRadius: uiRadius.md, paddingVertical: uiSpacing.lg + 1,
     flexDirection: "row", alignItems: "center",
-    justifyContent: "center", gap: 8,
+    justifyContent: "center", gap: uiSpacing.sm,
   },
   confirmBtnText: { color: uiColor.primaryText, fontSize: 15, fontWeight: "900" },
 });

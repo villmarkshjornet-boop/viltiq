@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { color, minTouchTarget, radius, spacing, typography } from "@/src/design/tokens";
+import { alpha, color, minTouchTarget, radius, spacing, typography } from "@/src/design/tokens";
 
 type ListRowProps = {
   icon?: keyof typeof Ionicons.glyphMap;
@@ -16,6 +16,8 @@ type ListRowProps = {
   onPress?: () => void;
   /** Skillelinje under raden — slå av på siste rad i en liste. Default true. */
   divider?: boolean;
+  /** Svak grønn bakgrunnstint — markerer f.eks. raden som nettopp ble lagret. */
+  highlighted?: boolean;
 };
 
 /**
@@ -35,12 +37,13 @@ export default function ListRow({
   trailing,
   onPress,
   divider = true,
+  highlighted = false,
 }: ListRowProps) {
   const Wrapper = onPress ? Pressable : View;
 
   return (
     <Wrapper
-      style={[styles.row, divider && styles.divider]}
+      style={[styles.row, divider && styles.divider, highlighted && styles.highlighted]}
       {...(onPress ? { onPress, hitSlop: 4 } : {})}
     >
       {(icon || emoji) && (
@@ -75,6 +78,9 @@ const styles = StyleSheet.create({
   divider: {
     borderBottomWidth: 1,
     borderBottomColor: color.border,
+  },
+  highlighted: {
+    backgroundColor: color.primary + alpha.soft,
   },
   iconPlate: {
     width: 32,
