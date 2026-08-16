@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { getSpeciesProfile, type PredictionZone } from "@/src/engine";
-import { color, confidenceColor, levelColor, spacing, typography } from "@/src/design/tokens";
+import { color, confidenceColor, levelColor, motion, spacing, typography } from "@/src/design/tokens";
 import Badge from "./Badge";
 
 type EngineStatusPanelProps = {
@@ -21,10 +23,31 @@ type EngineStatusPanelProps = {
   showScore?: boolean;
 };
 
+/**
+ * Redesign-oppdraget §10: den ENE motor-statusanimasjonen (bevisst kun
+ * confidence-baren, ikke også en hotspot-ring-puls i samme visning) —
+ * animerer `width`, ikke `transform`, samme trygge mønster som
+ * BottomSheet.tsx (en `transform`-basert innslagsanimasjon i ModalSheet.tsx
+ * skapte tidligere en reell web-krasj i en helt annen sammenheng — se den
+ * filens historie — så width holdes som den bevist trygge veien her også).
+ */
 function ConfidenceBar({ confidence, tone }: { confidence: number; tone: string }) {
+  const width = useSharedValue(0);
+
+  useEffect(() => {
+    width.value = withTiming(Math.round(confidence * 100), {
+      duration: motion.base,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [confidence, width]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: `${width.value}%`,
+  }));
+
   return (
     <View style={styles.barTrack}>
-      <View style={[styles.barFill, { width: `${Math.round(confidence * 100)}%`, backgroundColor: tone }]} />
+      <Animated.View style={[styles.barFill, animatedStyle, { backgroundColor: tone }]} />
     </View>
   );
 }
