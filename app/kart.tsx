@@ -38,6 +38,7 @@ import {
   type UserPosition,
 } from "@/src/services/location";
 import { getAktivtJaktlagId } from "@/src/services/jaktlag";
+import { auth } from "@/src/config/firebase";
 import {
   deleteObservation,
   saveObservation,
@@ -55,23 +56,28 @@ import type { Observasjon, SporType } from "@/src/types/observation";
 import {
   dyrEmoji,
   hentRelativTid,
-  hentTidsvekt,
 } from "@/src/lib/aktivitet";
 import {
   anonymiserPosisjon,
   buildSector,
   calcBearing,
+  distanceMeters,
   movePoint,
 } from "@/src/lib/geo";
 import {
   runEngine,
   runEcologicalEngine,
   resolveEnvironmentContext,
+  buildPredictionSnapshot,
+  shouldSaveSnapshot,
+  DEFAULT_SNAPSHOT_MIN_INTERVAL_MS,
   type Species as EngineSpecies,
   type EnvironmentResolver,
   type PredictionZone,
   type HeatmapPoint,
+  type EngineResult,
 } from "@/src/engine";
+import { savePredictionSnapshot } from "@/src/services/predictions";
 import { color as uiColor, radius as uiRadius, spacing as uiSpacing, zIndex as uiZ, elevation as uiElevation, minTouchTarget, glass as uiGlass, alpha as uiAlpha, typography as uiType } from "@/src/design/tokens";
 import Surface from "@/components/ui/Surface";
 import Toggle from "@/components/ui/Toggle";
@@ -82,27 +88,7 @@ import { visAlert } from "@/src/lib/confirmAlert";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
 
-type HeatZone = {
-  id: string;
-  latitude: number;
-  longitude: number;
-  score: number;
-  count: number;
-  avgRetning: number | null;
-};
-
 type MapPin = { latitude: number; longitude: number };
-
-type PrediksjonssoneVisning = {
-  dyr: string;
-  latitude: number;
-  longitude: number;
-  radius: number;
-  farge: string;
-  antall: number;
-  /** Ferdig formatert visningstekst (nivå+confidence for motor-arter, prosent for arter uten motorprofil). */
-  etikett: string;
-};
 
 type AktivSone = {
   id: string;
@@ -148,49 +134,6 @@ const retningListe = [
 ];
 
 // ─── Hjelpefunksjoner ─────────────────────────────────────────────────────────
-
-function buildHeatZones(obs: Observasjon[]): HeatZone[] {
-  const thresh = 0.003;
-  const zones: HeatZone[] = [];
-
-  for (const o of obs) {
-    if (o.latitude == null || o.longitude == null) continue;
-    const w = hentTidsvekt(o.tid);
-
-    const addPoint = (lat: number, lng: number, weight: number) => {
-      const ex = zones.find(
-        (z) => Math.abs(z.latitude - lat) < thresh && Math.abs(z.longitude - lng) < thresh
-      );
-      if (ex) {
-        const n = ex.count + 1;
-        ex.latitude  = (ex.latitude  * ex.count + lat) / n;
-        ex.longitude = (ex.longitude * ex.count + lng) / n;
-        ex.count = n;
-        ex.score += weight;
-        if (o.retning != null) {
-          ex.avgRetning = ex.avgRetning != null
-            ? (ex.avgRetning * (n - 1) + o.retning) / n
-            : o.retning;
-        }
-      } else {
-        zones.push({
-          id: o.id,
-          latitude: lat, longitude: lng,
-          score: weight, count: 1,
-          avgRetning: o.retning ?? null,
-        });
-      }
-    };
-
-    addPoint(o.latitude, o.longitude, w);
-    if (o.retning != null) {
-      const pred = movePoint(o.latitude, o.longitude, o.retning, 250);
-      addPoint(pred.latitude, pred.longitude, w * 0.6);
-    }
-  }
-
-  return zones.sort((a, b) => b.score - a.score);
-}
 
 // Kalkuler aktive soner basert på klokkeslett-mønster fra historiske observasjoner.
 // "nå"-soner: observasjoner innen ±1.5h av nåværende klokkeslett (alle dager).
@@ -265,65 +208,6 @@ function buildAktiveSoner(obs: Observasjon[]): AktivSone[] {
   }
 
   return soner;
-}
-
-/**
- * Enkel 48t-vektet-sentrum-beregning — den ORIGINALE prediksjonslogikken,
- * beholdt uendret kun for arter ViltIQ Engine ikke (ennå) har en profil for
- * (i praksis: Rev). Hjort/Rådyr/Elg bruker motoren (src/engine), se
- * prediksjonsoner i komponenten under. Ikke slett denne uten samtidig å
- * legge til en motorprofil for artene som fortsatt bruker den.
- */
-function beregnEnkelPrediksjonssone(
-  dyr: string,
-  observasjoner: Observasjon[],
-  farge: string
-): PrediksjonssoneVisning | null {
-  const relevante = observasjoner.filter(
-    (o) =>
-      o.dyr === dyr &&
-      o.latitude != null &&
-      o.longitude != null &&
-      (Date.now() - new Date(o.tid).getTime()) <= 48 * 3600000
-  );
-  if (relevante.length === 0) return null;
-  let sumLat = 0, sumLon = 0, sumVekt = 0;
-  for (const o of relevante) {
-    const t = (Date.now() - new Date(o.tid).getTime()) / 3600000;
-    const v = t <= 6 ? 5 : t <= 24 ? 4 : 3;
-    sumLat  += (o.latitude  as number) * v;
-    sumLon  += (o.longitude as number) * v;
-    sumVekt += v;
-  }
-  const konfidens = Math.min(Math.round((sumVekt / (relevante.length * 5)) * 100), 95);
-  return {
-    dyr,
-    latitude:  sumLat / sumVekt,
-    longitude: sumLon / sumVekt,
-    radius:    relevante.length >= 5 ? 600 : relevante.length >= 2 ? 400 : 250,
-    farge,
-    antall:    relevante.length,
-    etikett:   `${konfidens}%`,
-  };
-}
-
-function getZoneRadius(score: number): number {
-  if (score >= 12) return 500;
-  if (score >= 8)  return 350;
-  if (score >= 4)  return 230;
-  return 150;
-}
-
-function normaliserScore(score: number): string {
-  return Math.min((score * 10) / 15, 10).toFixed(1);
-}
-
-function scoreEtikett(score: number): string {
-  const n = Math.min((score * 10) / 15, 10);
-  if (n >= 8.5) return "Utmerket";
-  if (n >= 7.0) return "Bra";
-  if (n >= 5.0) return "Greit";
-  return "Lavt";
 }
 
 function formatDato(verdi?: any): string {
@@ -425,6 +309,12 @@ export default function KartScreen() {
   const [filterOpen,   filterOpenSet]   = useState(false);
   const [aktivtFilter,   setAktivtFilter]   = useState(params.filter || "Alle");
   const [visPrediksjon,  setVisPrediksjon]  = useState(params.heatmap === "1");
+  // Motor-tidsvindu (§18 i motor-oppdraget) — "nå" = ingen ekstra filter
+  // (motorens egen tidsvekting, se signals.ts timeWeight, gjør allerede at
+  // ferske signaler dominerer); "6t"/"24t" filtrerer bort observasjoner
+  // eldre enn vinduet FØR de sendes til motoren, som en hard, forståelig
+  // grense brukeren selv velger — ikke en endring i selve decay-matematikken.
+  const [tidsvindu, setTidsvindu] = useState<"nå" | "6t" | "24t">("nå");
   const [visKameraer,    setVisKameraer]    = useState(true);
   const [visAktiveSoner, setVisAktiveSoner] = useState(false);
   const [visSporAnnet,   setVisSporAnnet]   = useState(true);
@@ -845,26 +735,6 @@ export default function KartScreen() {
     [obsMedGps]
   );
 
-  const heatZones = useMemo(() => buildHeatZones(obsMedGps), [obsMedGps]);
-
-  const bestZone = heatZones[0] ?? null;
-
-  const sektorBearing = useMemo(() => {
-    if (!bestZone) return null;
-    if (bestZone.avgRetning != null) return bestZone.avgRetning;
-    if (userLocation) return calcBearing(bestZone, userLocation);
-    return 0;
-  }, [bestZone, userLocation]);
-
-  const sektorCoords = useMemo(() => {
-    if (!bestZone || sektorBearing === null) return null;
-    return buildSector(
-      { latitude: bestZone.latitude, longitude: bestZone.longitude },
-      1400,
-      sektorBearing
-    );
-  }, [bestZone, sektorBearing]);
-
   const kameraSektorCoords = useMemo(() => {
     if (!selectedCamera) return null;
     return buildSector(
@@ -902,86 +772,149 @@ export default function KartScreen() {
     return () => { aktiv = false; };
   }, [visPrediksjon, userLocation, radiusKm]);
 
-  // Per-art prediksjonssoner. Hjort/Rådyr/Elg vurderes av ViltIQ Engine v1
-  // (src/engine) — kartet sender kun inn observasjonene og viser resultatet,
-  // det er ALDRI kart.tsx selv som regner ut score/confidence for disse
-  // artene lenger. Motoren isolerer selv arten (§14 i motor-oppdraget), så
-  // kartet trenger ikke filtrere observasjoner per art før kallet. Bruker
-  // den økologiske motoren når miljødata er løst, ellers den rene
-  // observasjonsmotoren (identisk med oppførselen før miljølaget fantes).
-  const { prediksjonsoner, besteMotorSone, heatmapPerArt } = useMemo(() => {
-    if (!visPrediksjon) {
-      return {
-        prediksjonsoner: [] as PrediksjonssoneVisning[],
-        besteMotorSone: null as PredictionZone | null,
-        heatmapPerArt: {} as Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[]; zone: PredictionZone | null }>>,
-      };
-    }
-    const artsfarger: Record<string, string> = {
-      Rådyr: "#A78BFA", Elg: "#38BDF8", Hjort: "#FCD34D", Rev: "#FB923C",
-    };
-    const motorArter: Partial<Record<string, EngineSpecies>> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg" };
+  // Motor-tidsvindu (§18): filtrer INPUT til motoren, ikke selve
+  // decay-matematikken — "nå" sender alt inn uendret (motorens egen
+  // tidsvekting prioriterer allerede ferskt, se signals.ts timeWeight),
+  // "6t"/"24t" er en hard, forståelig grense brukeren selv velger.
+  const observasjonerITidsvindu = useMemo(() => {
+    if (tidsvindu === "nå") return observasjoner;
+    const grenseMs = tidsvindu === "6t" ? 6 * 3600000 : 24 * 3600000;
+    const nå = Date.now();
+    return observasjoner.filter((o) => nå - new Date(o.tid).getTime() <= grenseMs);
+  }, [observasjoner, tidsvindu]);
 
-    const visning: PrediksjonssoneVisning[] = [];
-    const heatmap: Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[]; zone: PredictionZone | null }>> = {};
+  // Per-art motorresultat. ALLE fire arter (Hjort/Rådyr/Elg/Rev) vurderes av
+  // ViltIQ Engine v1 (src/engine) — kartet sender kun inn observasjonene og
+  // viser resultatet, det er ALDRI kart.tsx selv som regner ut score/
+  // confidence. Rev har ingen egen artsprofil ennå og mappes til motorens
+  // nøytrale "annet"-profil (samme profil normalizeSpecies() allerede bruker
+  // for enhver ukjent art) — IKKE en egen parallell beregning lenger (se
+  // gjennomgangen som fjernet den tidligere beregnEnkelPrediksjonssone()).
+  // Motoren kjører alltid, uavhengig av "Prediksjon"-bryteren — den bryteren
+  // styrer kun (a) om det tyngre økologiske miljølaget hentes (nettverkskall)
+  // og (b) om selve heatmap-gradienten TEGNES, se aktivHeatmap/JSX under.
+  // Motoren isolerer selv arten (§14 i motor-oppdraget), så kartet trenger
+  // ikke filtrere observasjoner per art før kallet.
+  const { besteMotorSone, heatmapPerArt } = useMemo(() => {
+    const motorArter: Record<string, EngineSpecies> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg", Rev: "annet" };
+
+    const heatmap: Partial<Record<string, { species: EngineSpecies; points: HeatmapPoint[]; zone: PredictionZone | null; result: EngineResult }>> = {};
     let beste: PredictionZone | null = null;
 
     for (const dyr of dyrListe) {
-      const farge = artsfarger[dyr] ?? "#FFFFFF";
       const motorArt = motorArter[dyr];
-      if (!motorArt) {
-        const fallback = beregnEnkelPrediksjonssone(dyr, observasjoner, farge);
-        if (fallback) visning.push(fallback);
-        continue;
-      }
 
       const resultat = (environmentResolver && userLocation)
-        ? runEcologicalEngine(observasjoner, motorArt, {
+        ? runEcologicalEngine(observasjonerITidsvindu, motorArt, {
             areaCenter: userLocation,
             areaRadiusMeters: Math.min(radiusKm * 1000, 5000),
             environment: environmentResolver,
           })
-        : runEngine(observasjoner, motorArt);
+        : runEngine(observasjonerITidsvindu, motorArt);
 
       // Heatmap (§5–§8 i STEG 4-oppdraget): vektede grid-punkter fra HELE
       // motorens skårede flate, ikke bare klyngede soner — samme sannhets-
-      // kilde som prediksjonsoner/besteMotorSone under, kun uklynget.
+      // kilde som besteMotorSone under, kun uklynget. Hele `resultat`
+      // beholdes også (ikke bare points/zone) — se prediction-snapshot-
+      // effekten under, som trenger engineVersion/configVersion/summary osv.
       const sone = resultat.zones[0] ?? null;
-      heatmap[dyr] = { species: motorArt, points: resultat.heatmapPoints, zone: sone };
+      heatmap[dyr] = { species: motorArt, points: resultat.heatmapPoints, zone: sone, result: resultat };
       if (!sone) continue;
-
-      visning.push({
-        dyr,
-        latitude:  sone.center.latitude,
-        longitude: sone.center.longitude,
-        radius:    sone.radiusMeters,
-        farge,
-        antall:    sone.observationCount,
-        etikett:   `${sone.level} · ${sone.confidenceLevel} konfidens`,
-      });
       if (!beste || sone.score > beste.score) beste = sone;
     }
 
-    return { prediksjonsoner: visning, besteMotorSone: beste, heatmapPerArt: heatmap };
-  }, [visPrediksjon, observasjoner, environmentResolver, userLocation, radiusKm]);
+    return { besteMotorSone: beste, heatmapPerArt: heatmap };
+  }, [observasjonerITidsvindu, environmentResolver, userLocation, radiusKm]);
+
+  // Prediction snapshots (§21–24 i motor-oppdraget): lagre et komprimert
+  // øyeblikksbilde av motorens vurdering per art, kraftig throttlet (§28 —
+  // ALDRI et nytt Firestore-skriv på hver re-render). Kun mens brukeren er
+  // innlogget og har en posisjon (samme areal som den økologiske motor-
+  // kjøringen over bruker). Lagringsfeil skal ALDRI påvirke kartets egen
+  // visning — se catch under. jaktlagId settes til "" her bevisst:
+  // savePredictionSnapshot() løser det EGENTLIGE feltet som skrives til
+  // Firestore på nytt selv (samme mønster som observations.ts/felling.ts),
+  // så verdien herfra er kun et kortlevd, ubrukt plassholder-felt.
+  const sisteSnapshotRef = useRef<Partial<Record<string, number>>>({});
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !userLocation) return;
+    const areaRadiusMeters = Math.min(radiusKm * 1000, 5000);
+    const nå = Date.now();
+
+    for (const dyr of dyrListe) {
+      const entry = heatmapPerArt[dyr];
+      if (!entry || !entry.zone) continue;
+      const nøkkel = entry.species;
+      if (!shouldSaveSnapshot(sisteSnapshotRef.current[nøkkel], nå, DEFAULT_SNAPSHOT_MIN_INTERVAL_MS)) continue;
+
+      // Settes FØR async-kallet, ikke etter — unngår flere samtidige
+      // lagringer av samme art hvis effekten trigges igjen før forrige
+      // lagring er ferdig.
+      sisteSnapshotRef.current[nøkkel] = nå;
+      const snapshot = buildPredictionSnapshot(entry.result, {
+        userId: uid,
+        jaktlagId: "",
+        areaCenter: userLocation,
+        areaRadiusMeters,
+      });
+      savePredictionSnapshot(snapshot).catch(() => {
+        // Stille — snapshot-lagring er et fremtidig valideringsgrunnlag,
+        // ikke noe kartet skal blokkere eller varsle brukeren om ved feil.
+      });
+    }
+  }, [heatmapPerArt, userLocation, radiusKm]);
 
   // Heatmap-laget følger det aktive artsfilteret (§8: "Ikke bland rådyr-,
   // elg- og hjortedata til ett uforståelig heatkart når én art er valgt").
   // Uten et spesifikt artsfilter ("Alle") vises heatmapet for arten med
   // høyest score akkurat nå — aldri en blanding av flere arters data.
   const aktivHeatmap = useMemo(() => {
-    if (!visPrediksjon) return null;
-    if (aktivtFilter !== "Alle" && heatmapPerArt[aktivtFilter]) return heatmapPerArt[aktivtFilter] ?? null;
-    if (aktivtFilter !== "Alle") return null; // valgt art uten motorstøtte (f.eks. Rev) — intet heatmap, ikke en gjettet blanding
+    if (aktivtFilter !== "Alle") return heatmapPerArt[aktivtFilter] ?? null;
     const besteDyr = dyrListe.find((d) => heatmapPerArt[d]?.species && besteMotorSone?.species === heatmapPerArt[d]?.species);
     return besteDyr ? heatmapPerArt[besteDyr] ?? null : null;
-  }, [visPrediksjon, aktivtFilter, heatmapPerArt, besteMotorSone]);
+  }, [aktivtFilter, heatmapPerArt, besteMotorSone]);
 
-  // STEG 5 §5: sonen som faktisk forklares når brukeren trykker på hotspot-
-  // markøren — sonen bak DET SYNLIGE heatmap-laget (kan avvike fra
-  // besteMotorSone når et artsfilter er valgt), med besteMotorSone som
-  // fallback når heatmapet av en eller annen grunn ikke har egen sone.
+  // Sonen som faktisk forklares når brukeren trykker på hotspot-markøren —
+  // sonen bak DET SYNLIGE heatmap-laget (kan avvike fra besteMotorSone når
+  // et artsfilter er valgt), med besteMotorSone som fallback. Alltid
+  // tilgjengelig (ikke lenger avhengig av "Prediksjon"-bryteren) — dette ER
+  // nå appens ENESTE "beste område"-kilde, se statusInnhold().
   const hotspotSone = aktivHeatmap?.zone ?? besteMotorSone;
+
+  // Presentasjonslag: sektor-kjeglen som peker "hvilken vei" rundt hotspot-
+  // sonen. Dette DUPLISERER ikke motorens retningsscoring (den bruker
+  // cameraDirectionDeg/movementDirectionDeg helt separat internt, se
+  // src/engine/signals.ts directionalAlignment) — det er bare et sirkulært
+  // gjennomsnitt av retning blant observasjoner nær sonesenteret, for å
+  // gi kjeglen noe å peke mot. Ingen observasjoner med retning nær sonen →
+  // faller tilbake til retningen FRA brukeren TIL sonen, ellers 0.
+  const hotspotSektorBearing = useMemo(() => {
+    if (!hotspotSone) return null;
+    const nær = obsMedGps.filter((o) => {
+      if (o.retning == null || o.latitude == null || o.longitude == null) return false;
+      return distanceMeters(
+        { latitude: o.latitude, longitude: o.longitude },
+        hotspotSone.center
+      ) <= hotspotSone.radiusMeters;
+    });
+    if (nær.length > 0) {
+      let sumSin = 0, sumCos = 0;
+      for (const o of nær) {
+        const rad = ((o.retning as number) * Math.PI) / 180;
+        sumSin += Math.sin(rad);
+        sumCos += Math.cos(rad);
+      }
+      return (((Math.atan2(sumSin, sumCos) * 180) / Math.PI) + 360) % 360;
+    }
+    if (userLocation) return calcBearing(hotspotSone.center, userLocation);
+    return 0;
+  }, [hotspotSone, obsMedGps, userLocation]);
+
+  const hotspotSektorCoords = useMemo(() => {
+    if (!hotspotSone || hotspotSektorBearing === null) return null;
+    return buildSector(hotspotSone.center, 1400, hotspotSektorBearing);
+  }, [hotspotSone, hotspotSektorBearing]);
 
   // Tidbaserte aktive soner (klokkeslett-mønster)
   const aktiveSoner = useMemo<AktivSone[]>(() => {
@@ -1010,10 +943,9 @@ export default function KartScreen() {
   }, [params.focusLat, params.focusLng, userLocation, mapReady]);
 
   // "Hva skjer nå"-innholdet delt mellom desktop-panelet og mobilens bottom
-  // sheet (§16/§24) — samme data, to ulike beholdere. Viser motorens svar
-  // (art/nivå/confidence/signaler) når Prediksjon er på og har et resultat,
-  // ellers samme "beste område"-info (heatZones-basert) som eksisterte før
-  // STEG 3 — ingen datalogikk endret, kun hvor og hvordan den vises.
+  // sheet (§16/§24) — samme data, to ulike beholdere. Motoren er nå appens
+  // ENESTE "beste område"-kilde (se hotspotSone over) — ingen egen parallell
+  // heatZones-basert visning lenger.
   function statusInnhold(compact: boolean, medHeadline = true) {
     if (loading) {
       return (
@@ -1026,59 +958,39 @@ export default function KartScreen() {
     if (errorText) {
       return <Text style={styles.bottomError}>{errorText}</Text>;
     }
-    if (visPrediksjon && hotspotSone) {
-      return <EngineStatusPanel zone={hotspotSone} compact={compact} showScore />;
-    }
-    if (bestZone) {
-      if (compact) {
-        return (
-          <View style={styles.bottomTopRow}>
-            <Text style={styles.bottomTitle}>Beste område</Text>
-            <View style={styles.scoreBadge}>
-              <Text style={styles.scoreBadgeText}>
-                {normaliserScore(bestZone.score)} · {scoreEtikett(bestZone.score)}
-              </Text>
-            </View>
-          </View>
-        );
-      }
+    if (hotspotSone) {
       return (
         <>
-          {medHeadline && (
-            <View style={styles.bottomTopRow}>
-              <Text style={styles.bottomTitle}>Beste område</Text>
-              <View style={styles.scoreBadge}>
-                <Text style={styles.scoreBadgeText}>
-                  {normaliserScore(bestZone.score)} · {scoreEtikett(bestZone.score)}
-                </Text>
-              </View>
-            </View>
+          <EngineStatusPanel zone={hotspotSone} compact={compact} showScore />
+          {!compact && medHeadline && (
+            <>
+              <Text style={styles.bottomMeta}>
+                {obs24tMedGps.length} obs siste 24t · {kameraer.length} kamera
+              </Text>
+              {sisteObs.slice(0, 2).map((obs) => (
+                <View key={obs.id} style={styles.recentRow}>
+                  <Text style={styles.recentEmoji}>{dyrEmoji(obs.dyr)}</Text>
+                  <Text style={styles.recentAnimal}>{obs.dyr}</Text>
+                  <Text style={styles.recentTime}>{hentRelativTid(obs.tid)}</Text>
+                  {obs.retning != null && (
+                    <Ionicons
+                      name="navigate" size={12} color={uiColor.primary}
+                      style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
+                    />
+                  )}
+                </View>
+              ))}
+              <Pressable style={styles.moreLinkRow} onPress={() =>
+                mapRef.current?.animateToRegion(
+                  { latitude: hotspotSone.center.latitude, longitude: hotspotSone.center.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 },
+                  500
+                )
+              }>
+                <Text style={styles.moreLinkText}>Sentrer kart</Text>
+                <Ionicons name="chevron-forward" size={13} color={uiColor.primary} />
+              </Pressable>
+            </>
           )}
-          <Text style={styles.bottomMeta}>
-            {obs24tMedGps.length} obs siste 24t · {kameraer.length} kamera
-          </Text>
-          {sisteObs.slice(0, 2).map((obs) => (
-            <View key={obs.id} style={styles.recentRow}>
-              <Text style={styles.recentEmoji}>{dyrEmoji(obs.dyr)}</Text>
-              <Text style={styles.recentAnimal}>{obs.dyr}</Text>
-              <Text style={styles.recentTime}>{hentRelativTid(obs.tid)}</Text>
-              {obs.retning != null && (
-                <Ionicons
-                  name="navigate" size={12} color={uiColor.primary}
-                  style={{ transform: [{ rotate: `${obs.retning}deg` }] }}
-                />
-              )}
-            </View>
-          ))}
-          <Pressable style={styles.moreLinkRow} onPress={() =>
-            mapRef.current?.animateToRegion(
-              { latitude: bestZone.latitude, longitude: bestZone.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 },
-              500
-            )
-          }>
-            <Text style={styles.moreLinkText}>Sentrer kart</Text>
-            <Ionicons name="chevron-forward" size={13} color={uiColor.primary} />
-          </Pressable>
         </>
       );
     }
@@ -1131,10 +1043,10 @@ export default function KartScreen() {
               fillColor="rgba(44,195,107,0.04)"
             />
 
-            {/* Sektoroverlegg — beste sone */}
-            {sektorCoords && (
+            {/* Sektoroverlegg — hotspot-sonen fra motoren */}
+            {hotspotSektorCoords && (
               <Polygon
-                coordinates={sektorCoords}
+                coordinates={hotspotSektorCoords}
                 fillColor="rgba(59,130,246,0.22)"
                 strokeColor="rgba(59,130,246,0.55)"
                 strokeWidth={1.5}
@@ -1150,18 +1062,6 @@ export default function KartScreen() {
                 strokeWidth={1.5}
               />
             )}
-
-            {/* Varmesoner */}
-            {heatZones.map((z) => (
-              <Circle
-                key={`z-${z.id}`}
-                center={{ latitude: z.latitude, longitude: z.longitude }}
-                radius={getZoneRadius(z.score)}
-                strokeWidth={1}
-                strokeColor="rgba(250,168,50,0.5)"
-                fillColor="rgba(250,168,50,0.16)"
-              />
-            ))}
 
             {/* Tidbaserte aktive soner */}
             {aktiveSoner.map((s) => (
@@ -1179,26 +1079,22 @@ export default function KartScreen() {
               />
             ))}
 
-            {/* Beste sone */}
-            {bestZone && (
+            {/* Beste sone (motorens hotspot) */}
+            {hotspotSone && (
               <Marker
-                coordinate={{ latitude: bestZone.latitude, longitude: bestZone.longitude }}
+                coordinate={{ latitude: hotspotSone.center.latitude, longitude: hotspotSone.center.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
                 tracksViewChanges={false}
               >
-                <MarkerBadge kind="best-zone" size="lg" emoji="🦌" />
+                <MarkerBadge kind="best-zone" size="lg" emoji={hotspotSone.species === "annet" ? "🦊" : "🦌"} />
               </Marker>
             )}
 
-            {/* Observasjonsmarkører — dyr sett (manuelt/kamera). Filtrerer
-                bort observasjonen som "sådde" beste-sonen (bestZone.id er
-                id-en til den første observasjonen buildHeatZones klynget
-                inn i sonen), slik at den ikke også vises som en vanlig pin
-                rett under den store elg-emoji-markøren. Sammenlignet
-                tidligere kun breddegrad mot bestZone sin VEKTEDE
-                GJENNOMSNITTSPOSISJON — som i praksis nesten aldri stemte
-                eksakt, og ga en dobbel-pin de fleste steder. */}
-            {visObservasjoner && dyrObsMedGps.filter((o) => !bestZone || o.id !== bestZone.id).map((o) => (
+            {/* Observasjonsmarkører — dyr sett (manuelt/kamera). Sonesenteret
+                over er et beregnet grid-punkt fra motoren, ikke koordinatet
+                til en enkelt observasjon, så det er ikke lenger behov for å
+                filtrere bort en "sådde sonen"-observasjon her. */}
+            {visObservasjoner && dyrObsMedGps.map((o) => (
               <Marker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
@@ -1296,14 +1192,16 @@ export default function KartScreen() {
                 native-maps sin EGEN standardgradient, så de to plattformene
                 sannsynligvis så forskjellige ut. Nå eksplisitt likt begge
                 steder. */}
-            {aktivHeatmap && aktivHeatmap.points.length > 0 && (
+            {visPrediksjon && aktivHeatmap && aktivHeatmap.points.length > 0 && (
               <Heatmap points={aktivHeatmap.points} radius={32} gradient={heatmapGradientProp} />
             )}
 
             {/* STEG 5 §5: trykkbar hotspot-markør — åpner den fulle
                 motorforklaringen (art/nivå/confidence/signaler/score) for
                 sonen bak det synlige heatmap-laget. En diskret ring, ikke en
-                pin, for ikke å late som om dette er et eksakt punkt (§7). */}
+                pin, for ikke å late som om dette er et eksakt punkt (§7).
+                Vises uavhengig av "Prediksjon"-bryteren (som kun styrer selve
+                heatmap-gradienten over) — motoren har alltid en vurdering. */}
             {hotspotSone && (
               <Marker
                 coordinate={{ latitude: hotspotSone.center.latitude, longitude: hotspotSone.center.longitude }}
@@ -1316,21 +1214,6 @@ export default function KartScreen() {
                 </View>
               </Marker>
             )}
-
-            {/* Arter uten motorstøtte (i praksis: Rev) beholder den enkle
-                sirkel-visningen — ingen heatmap å hente fra motoren for dem. */}
-            {prediksjonsoner
-              .filter((p) => !heatmapPerArt[p.dyr])
-              .map((p) => (
-                <Circle
-                  key={`pred-${p.dyr}`}
-                  center={{ latitude: p.latitude, longitude: p.longitude }}
-                  radius={p.radius}
-                  strokeWidth={2}
-                  strokeColor={p.farge + "CC"}
-                  fillColor={p.farge + "22"}
-                />
-              ))}
 
             {/* Jaktlag-medlemmers live-posisjoner */}
             {medlsPosisjon.map((m) => (
@@ -1465,7 +1348,23 @@ export default function KartScreen() {
             <Text style={styles.layersPanelTitle}>Kartlag</Text>
 
             <Text style={styles.layersGroupTitle}>ViltIQ</Text>
-            <Toggle label="Heatmap / prediksjon" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
+            <Toggle label="Motor (heatmap)" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
+            {/* Motor-tidsvindu (§18) — hvor langt tilbake motoren ser etter
+                signaler. Kompakt 3-valgs segmentkontroll, samme visuelle
+                mønster som Topo/Satellitt-bryteren i navBar. */}
+            <View style={styles.tidsvinduRad}>
+              {(["nå", "6t", "24t"] as const).map((v) => (
+                <Pressable
+                  key={v}
+                  onPress={() => setTidsvindu(v)}
+                  style={[styles.tidsvinduBtn, tidsvindu === v && styles.tidsvinduBtnActive]}
+                >
+                  <Text style={[styles.tidsvinduTxt, tidsvindu === v && styles.tidsvinduTxtActive]}>
+                    {v === "nå" ? "Nå" : `Siste ${v}`}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
             <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor="#22D3EE" />
 
             <Text style={styles.layersGroupTitle}>Registreringer</Text>
@@ -2064,10 +1963,9 @@ export default function KartScreen() {
           </ScrollView>
         )}
 
-        {/* ── Mobil: status i bottom sheet (§24/§25) — erstatter det gamle
-            faste "Bunnkort". Samme underliggende data (bestZone/besteMotorSone),
-            kun ny presentasjon: motorens svar når Prediksjon er på, ellers
-            samme "beste område"-info som før. ── */}
+        {/* ── Mobil: status i bottom sheet (§24/§25) — motorens svar
+            (besteMotorSone/hotspotSone) er nå appens eneste "beste
+            område"-kilde, se statusInnhold(). ── */}
         {!erDesktop && !selectedPin && !selectedCamera && !filterOpen && (
           <BottomSheet
             snap={sheetSnap}
@@ -2161,6 +2059,19 @@ const styles = StyleSheet.create({
     textTransform: "uppercase", letterSpacing: 0.6,
     marginTop: uiSpacing.sm, marginBottom: 2,
   },
+
+  // Motor-tidsvindu — kompakt 3-valgs segmentkontroll (samme visuelle
+  // mønster som Topo/Satellitt-toggleItem over).
+  tidsvinduRad: {
+    flexDirection: "row", backgroundColor: uiColor.surface,
+    borderRadius: uiRadius.md, padding: 3, gap: 2,
+    borderWidth: 1, borderColor: uiColor.border,
+    marginTop: uiSpacing.xs, marginBottom: uiSpacing.sm,
+  },
+  tidsvinduBtn: { flex: 1, paddingVertical: 6, borderRadius: 9, alignItems: "center" },
+  tidsvinduBtnActive: { backgroundColor: uiColor.primary },
+  tidsvinduTxt: { color: uiColor.textMuted, fontSize: 11, fontWeight: "700" },
+  tidsvinduTxtActive: { color: uiColor.primaryText, fontWeight: "900" },
 
   // Desktop engine-panel — starter UNDER artsfilter-raden (top: 60 + rad-
   // høyde), aldri på samme høyde, for å unngå at panelet dekker filtrene.
@@ -2330,18 +2241,9 @@ const styles = StyleSheet.create({
   },
 
   bottomRow:    { flexDirection: "row", alignItems: "center", gap: 8 },
-  bottomTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
-  bottomTitle:  { ...uiType.sectionTitle, color: uiColor.textPrimary },
   bottomMeta:   { ...uiType.caption, color: uiColor.textFaint, marginBottom: 10 },
   bottomLoadText: { ...uiType.body, color: uiColor.textMuted },
   bottomError:    { ...uiType.metadata, color: uiColor.danger },
-
-  scoreBadge: {
-    backgroundColor: uiColor.primary + uiAlpha.soft,
-    borderRadius: uiRadius.pill, paddingHorizontal: 12, paddingVertical: 6,
-    borderWidth: 1, borderColor: uiColor.primary + uiAlpha.soft,
-  },
-  scoreBadgeText: { ...uiType.metadata, color: uiColor.primary },
 
   recentRow: {
     flexDirection: "row", alignItems: "center",
