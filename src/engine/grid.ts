@@ -15,6 +15,7 @@ import {
   effectiveRadiusMeters,
   sourceWeight,
   timeWeight,
+  trackFreshnessAgeOffsetHours,
 } from "./signals";
 import { corridorBonusAt } from "./reinforcement";
 import type { SpeciesProfile } from "./species/profiles";
@@ -154,7 +155,14 @@ export function scoreCell(
   let total = 0;
 
   for (const o of observations) {
-    const ageHours = (nowMs - o.timestamp) / 3600000;
+    const recordedAgeHours = (nowMs - o.timestamp) / 3600000;
+    // Spor (source === "track") får en ekstra effektiv-alder-offset basert på
+    // hvor gammelt sporet SÅ UT (trackFreshness) — se signals.ts sin
+    // trackFreshnessAgeOffsetHours for begrunnelse. No-op (0) for alle andre
+    // kilder og for spor uten trackFreshness satt — fullt bakoverkompatibelt.
+    const freshnessOffsetHours =
+      o.source === "track" ? trackFreshnessAgeOffsetHours(o.trackFreshness) : 0;
+    const ageHours = recordedAgeHours + freshnessOffsetHours;
     const tWeight = timeWeight(ageHours, cfg.timeDecay);
     const radius = effectiveRadiusMeters(profile.baseRadiusMeters, ageHours, cfg.distance);
     const dist = distanceMeters(point, o.position);

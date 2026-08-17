@@ -7,6 +7,17 @@
 
 export const ENGINE_VERSION = "ViltIQ Engine v1";
 
+/**
+ * Versjonerer INNHOLDET i `DEFAULT_ENGINE_CONFIG` separat fra selve
+ * motor-koden (`ENGINE_VERSION`). Bump denne når du endrer en tallverdi her
+ * (vekter, terskler, decay osv.) — IKKE når du endrer scoring-*logikken* i
+ * grid.ts/signals.ts (det er ENGINE_VERSION sin jobb). Uten dette kan en
+ * lagret prediction snapshot fra før en vekt-justering se ut som den kom fra
+ * samme motor som en etter justeringen, selv om tallene bak var forskjellige
+ * — noe som gjør senere kalibrering/hit-miss-evaluering (§21–24) upålitelig.
+ */
+export const CONFIG_VERSION = "1";
+
 export type EngineConfig = {
   /** Rutestørrelse i det interne scoring-gridet. */
   cellSizeMeters: number;

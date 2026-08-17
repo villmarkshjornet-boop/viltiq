@@ -83,6 +83,36 @@ export function directionalAlignment(
   return floor + (1 - floor) * t;
 }
 
+/**
+ * Ekstra "effektive alders"-timer for et SPOR (source === "track") basert på
+ * hvor gammelt selve sporet/tegnet SÅ UT da jegeren fant det — IKKE fordi
+ * observasjonen ble REGISTRERT lenger tilbake i tid (det er `timestamp`,
+ * allerede håndtert av timeWeight). Et spor som ser gammelt ut representerer
+ * trolig eldre dyreaktivitet enn et helt ferskt spor funnet på nøyaktig
+ * samme registreringstidspunkt, så vi adderer denne offset-en til
+ * ageHours FØR timeWeight/effectiveRadiusMeters regnes ut i grid.ts.
+ *
+ * Tallene under er en enkel, IKKE-vitenskapelig plassholder-kalibrering —
+ * INGEN påstand om en bevist biologisk konstant (samme forbehold som resten
+ * av config.ts) — kun ment å gi en svak, konservativ retningsjustering.
+ * Fraværende trackFreshness (eller ikke-track kilde) gir alltid 0 — dette
+ * er et rent no-op for all eksisterende/bakoverkompatibel data.
+ */
+export function trackFreshnessAgeOffsetHours(
+  freshness: "fresh" | "days" | "old" | undefined
+): number {
+  switch (freshness) {
+    case "fresh":
+      return 0;
+    case "days":
+      return 48; // "noen dager" — plassholder, ikke en bevist biologisk konstant
+    case "old":
+      return 120; // "gammelt" — plassholder, ikke en bevist biologisk konstant
+    default:
+      return 0;
+  }
+}
+
 // Artsisolasjon (§14) er strukturell, ikke et signal: engine.ts filtrerer
 // EngineObservation[] til én art FØR noen av funksjonene over kalles, så en
 // hjorteobservasjon aldri kan bidra til rådyr- eller elg-scoren.

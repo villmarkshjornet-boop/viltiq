@@ -12,6 +12,7 @@ const {
   sourceWeight,
   angularDifferenceDeg,
   directionalAlignment,
+  trackFreshnessAgeOffsetHours,
 } = await import("./signals");
 
 const TIME_CFG = { halfLifeHours: 5, backgroundFloor: 0.05 };
@@ -118,4 +119,23 @@ test("directionalAlignment: glatt og symmetrisk overgang mellom foran og bak", (
   const atMinus90 = directionalAlignment(270, 0, floor);
   assert.ok(Math.abs(at90 - atMinus90) < 1e-9, "90° til hver side skal gi samme vekt");
   assert.ok(at90 > floor && at90 < 1, `forventet verdi mellom floor og 1, fikk ${at90}`);
+});
+
+// ---------------------------------------------------------------------------
+// trackFreshnessAgeOffsetHours
+// ---------------------------------------------------------------------------
+
+test("trackFreshnessAgeOffsetHours: 'fresh' gir ingen ekstra alder", () => {
+  assert.equal(trackFreshnessAgeOffsetHours("fresh"), 0);
+});
+
+test("trackFreshnessAgeOffsetHours: 'days' og 'old' gir stigende, positiv ekstra alder", () => {
+  const days = trackFreshnessAgeOffsetHours("days");
+  const old = trackFreshnessAgeOffsetHours("old");
+  assert.ok(days > 0, `forventet 'days' > 0, fikk ${days}`);
+  assert.ok(old > days, `forventet 'old' (${old}) > 'days' (${days})`);
+});
+
+test("trackFreshnessAgeOffsetHours: undefined (feltet ikke satt) gir 0 — no-op for bakoverkompatibilitet", () => {
+  assert.equal(trackFreshnessAgeOffsetHours(undefined), 0);
 });

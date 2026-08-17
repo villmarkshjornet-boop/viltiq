@@ -39,6 +39,27 @@ function normalizeSource(kilde: string | null | undefined): EngineSource {
   return "manual";
 }
 
+/**
+ * Norske sporAlder-verdier → motorens interne trackFreshness-enum. Mappes
+ * uavhengig av observationSource (samme prinsipp som trackType/sporType under)
+ * — feltet er uansett kun MENINGSFULLT når source === "track", noe
+ * grid.ts sin scoreCell håndhever ved bruk, ikke normalize.ts.
+ */
+function normalizeTrackFreshness(
+  sporAlder: string | null | undefined
+): "fresh" | "days" | "old" | undefined {
+  if (sporAlder === "fersk") return "fresh";
+  if (sporAlder === "noen_dager") return "days";
+  if (sporAlder === "gammel") return "old";
+  return undefined;
+}
+
+function normalizeAccuracyMeters(accuracyMeters: number | null | undefined): number | undefined {
+  return typeof accuracyMeters === "number" && Number.isFinite(accuracyMeters)
+    ? accuracyMeters
+    : undefined;
+}
+
 /** ISO-streng/annet → epoketid i ms, eller null hvis ugyldig/tomt. */
 function normalizeTimestamp(tid: string): number | null {
   const ms = new Date(tid).getTime();
@@ -109,6 +130,8 @@ export function normalizeObservations(input: readonly Observasjon[]): EngineObse
       trackType: o.sporType ?? null,
       cameraId: o.cameraId ?? null,
       jaktlagId: o.jaktlagId ?? "",
+      accuracyMeters: normalizeAccuracyMeters(o.accuracyMeters),
+      trackFreshness: normalizeTrackFreshness(o.sporAlder),
       dataQuality: estimateDataQuality({ species, movementDirectionDeg, cameraDirectionDeg, count }),
     });
   }

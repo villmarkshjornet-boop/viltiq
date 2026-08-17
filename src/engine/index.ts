@@ -1,7 +1,7 @@
 // ViltIQ Engine v1 — offentlig API. Kartet (og annen kode) skal kun
 // importere herfra, ikke fra motorens interne filer direkte.
 
-export { runEngine, runEcologicalEngine, ENGINE_VERSION, DEFAULT_ENGINE_CONFIG } from "./engine";
+export { runEngine, runEcologicalEngine, ENGINE_VERSION, CONFIG_VERSION, DEFAULT_ENGINE_CONFIG } from "./engine";
 export type { RunEngineOptions, RunEcologicalEngineOptions, EngineConfig, AreaOfInterest } from "./engine";
 export { getSpeciesProfile, HJORT_PROFILE, RADYR_PROFILE, ELG_PROFILE } from "./species/profiles";
 export type { SpeciesProfile } from "./species/profiles";
@@ -31,3 +31,17 @@ export type {
 export { getEcologyProfile } from "./ecology/profiles";
 export type { SpeciesEcologyProfile, Season, EvidenceStrength } from "./ecology/types";
 export { determineSeason } from "./ecology/suitability";
+
+// Prediction snapshots (§21–24 i motor-oppdraget) — se snapshot.ts for
+// hvorfor dette er en egen, ren fil adskilt fra Firestore-I/O.
+export {
+  buildPredictionSnapshot,
+  validityWindowHours,
+  shouldSaveSnapshot,
+  DEFAULT_SNAPSHOT_MIN_INTERVAL_MS,
+} from "./snapshot";
+export type {
+  PredictionSnapshot,
+  PredictionSnapshotZone,
+  BuildSnapshotContext,
+} from "./snapshot";

@@ -42,6 +42,20 @@ export type EngineObservation = {
   cameraId: string | null;
   jaktlagId: string;
   /**
+   * GPS-nøyaktighet i meter på registreringstidspunktet, FØR personvern-
+   * anonymisering (anonymiserPosisjon). Rent diagnostisk/kvalitetssignal per
+   * nå — brukes IKKE i scoring (se grid.ts/signals.ts).
+   */
+  accuracyMeters?: number;
+  /**
+   * Hvor "ferskt" et spor/tegn SÅ UT da jegeren fant det — kun satt når
+   * source === "track". Dette er ET ANNET begrep enn observasjonens ALDER
+   * (timestamp), som motorens vanlige tidsvekting (timeWeight) allerede
+   * håndterer. Se trackFreshnessAgeOffsetHours i signals.ts for hvordan de to
+   * kombineres.
+   */
+  trackFreshness?: "fresh" | "days" | "old";
+  /**
    * Grov 0–1 fullstendighetsheuristikk (har retning? har art? rimelig antall?)
    * — brukt som et svakt signal, IKKE en påstand om at observasjonen er sann.
    */
@@ -123,6 +137,8 @@ export type HeatmapPoint = { latitude: number; longitude: number; weight: number
 
 export type EngineResult = {
   engineVersion: string;
+  /** Versjon av DEFAULT_ENGINE_CONFIG-verdiene brukt til å produsere dette resultatet — se config.ts sin CONFIG_VERSION. */
+  configVersion: string;
   species: Species;
   /** Epoketid (ms) da resultatet ble generert. */
   generatedAt: number;

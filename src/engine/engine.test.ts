@@ -10,6 +10,8 @@ const { getSpeciesProfile } = await import("./species/profiles");
 const { DEFAULT_ENGINE_CONFIG } = await import("./config");
 const { normalizeObservations } = await import("./normalize");
 const { movePoint, distanceMeters } = await import("@/src/lib/geo");
+const { timeWeight, distanceWeight, effectiveRadiusMeters, countWeight, sourceWeight } =
+  await import("./signals");
 
 const NOW = new Date("2026-08-10T21:31:00.000Z").getTime();
 
@@ -237,6 +239,118 @@ test("Scenario 8: rådyr-observasjoner påvirker aldri hjort-resultatet, selv p�
   const mixed = runEngine([...hjortObs, ...radyrObs] as never, "hjort", { now: NOW });
 
   assert.deepEqual(mixed, hjortOnly, "hjort-resultatet skal være identisk uansett hvor mye rådyr-data som følger med");
+});
+
+// ===========================================================================
+// Scenario 9 — Sporalder / trackFreshness (Motor V1 datamodell-utvidelse)
+// ===========================================================================
+
+test("Scenario 9: et 'fersk' spor scorer høyere enn et ellers identisk 'gammelt' spor registrert på nøyaktig samme tidspunkt", () => {
+  const point = { latitude: 60.0, longitude: 10.0 };
+  const freshRaw = [
+    obs({
+      observationSource: "track", sporType: "Fotspor", sporAlder: "fersk",
+      latitude: point.latitude, longitude: point.longitude, tid: hoursAgoIso(0),
+    }),
+  ];
+  const oldRaw = [
+    obs({
+      observationSource: "track", sporType: "Fotspor", sporAlder: "gammel",
+      latitude: point.latitude, longitude: point.longitude, tid: hoursAgoIso(0),
+    }),
+  ];
+
+  const profile = getSpeciesProfile("hjort");
+  const freshNorm = normalizeObservations(freshRaw as never).filter((o) => o.species === "hjort");
+  const oldNorm = normalizeObservations(oldRaw as never).filter((o) => o.species === "hjort");
+
+  const freshScored = scoreCell(point, freshNorm, profile, DEFAULT_ENGINE_CONFIG, NOW, []);
+  const oldScored = scoreCell(point, oldNorm, profile, DEFAULT_ENGINE_CONFIG, NOW, []);
+
+  assert.ok(
+    freshScored.score > oldScored.score,
+    `forventet at 'fersk' spor (${freshScored.score}) scorer høyere enn 'gammelt' spor (${oldScored.score}) ved samme registreringstidspunkt`
+  );
+});
+
+test("Scenario 9 (bakoverkompatibilitet): spor UTEN trackFreshness scorer identisk med formelen fra FØR track-freshness-utvidelsen", () => {
+  const point = { latitude: 60.0, longitude: 10.0 };
+  const raw = [
+    obs({
+      observationSource: "track", sporType: "Fotspor",
+      latitude: point.latitude, longitude: point.longitude, tid: hoursAgoIso(30),
+      // sporAlder bevisst IKKE satt — simulerer et eldre dokument/skjermbilde
+      // som ikke kjenner til det nye feltet.
+    }),
+  ];
+  const profile = getSpeciesProfile("hjort");
+  const normalized = normalizeObservations(raw as never).filter((o) => o.species === "hjort");
+  assert.equal(normalized[0].trackFreshness, undefined, "forutsetning: ingen sporAlder oppgitt");
+
+  const actual = scoreCell(point, normalized, profile, DEFAULT_ENGINE_CONFIG, NOW, []);
+
+  // Reimplementerer scoreCell sin formel slik den var FØR track-freshness-
+  // utvidelsen (ageHours = kun registreringsalder, ingen offset) — beviser at
+  // fravær av trackFreshness gir eksakt samme score som tidligere, ikke bare
+  // "omtrent samme".
+  const o = normalized[0];
+  const ageHoursBefore = (NOW - o.timestamp) / 3600000;
+  const tWeight = timeWeight(ageHoursBefore, DEFAULT_ENGINE_CONFIG.timeDecay);
+  const radius = effectiveRadiusMeters(profile.baseRadiusMeters, ageHoursBefore, DEFAULT_ENGINE_CONFIG.distance);
+  const dWeight = distanceWeight(distanceMeters(point, o.position), radius);
+  const cWeight = countWeight(o.count, DEFAULT_ENGINE_CONFIG.maxCountPerObservation);
+  const srcWeight = sourceWeight(o.source, profile.sourceWeights);
+  const qualityFactor = 0.5 + 0.5 * o.dataQuality;
+  const expected = tWeight * dWeight * cWeight * srcWeight * qualityFactor;
+
+  assert.ok(
+    Math.abs(actual.score - expected) < 1e-9,
+    `forventet uendret score ${expected} (formel fra før utvidelsen), fikk ${actual.score}`
+  );
+});
+
+test("Scenario 9 (bakoverkompatibilitet): spor UTEN trackFreshness scorer identisk med et spor der trackFreshness eksplisitt er 'fresh' (offset 0)", () => {
+  const point = { latitude: 60.0, longitude: 10.0 };
+  const withoutRaw = [
+    obs({ observationSource: "track", sporType: "Fotspor", latitude: point.latitude, longitude: point.longitude, tid: hoursAgoIso(10) }),
+  ];
+  const freshRaw = [
+    obs({ observationSource: "track", sporType: "Fotspor", sporAlder: "fersk", latitude: point.latitude, longitude: point.longitude, tid: hoursAgoIso(10) }),
+  ];
+
+  const profile = getSpeciesProfile("hjort");
+  const withoutNorm = normalizeObservations(withoutRaw as never).filter((o) => o.species === "hjort");
+  const freshNorm = normalizeObservations(freshRaw as never).filter((o) => o.species === "hjort");
+
+  const withoutScored = scoreCell(point, withoutNorm, profile, DEFAULT_ENGINE_CONFIG, NOW, []);
+  const freshScored = scoreCell(point, freshNorm, profile, DEFAULT_ENGINE_CONFIG, NOW, []);
+
+  assert.ok(
+    Math.abs(withoutScored.score - freshScored.score) < 1e-9,
+    `forventet at manglende trackFreshness (${withoutScored.score}) gir samme score som eksplisitt 'fresh' (${freshScored.score})`
+  );
+});
+
+test("Scenario 9: trackFreshness på en IKKE-spor (kamera/manuell) observasjon påvirker aldri scoren", () => {
+  const point = { latitude: 60.0, longitude: 10.0 };
+  const withSporAlderRaw = [
+    obs({ observationSource: "manual", sporAlder: "gammel", latitude: point.latitude, longitude: point.longitude, tid: hoursAgoIso(10) }),
+  ];
+  const withoutRaw = [
+    obs({ observationSource: "manual", latitude: point.latitude, longitude: point.longitude, tid: hoursAgoIso(10) }),
+  ];
+
+  const profile = getSpeciesProfile("hjort");
+  const withNorm = normalizeObservations(withSporAlderRaw as never).filter((o) => o.species === "hjort");
+  const withoutNorm = normalizeObservations(withoutRaw as never).filter((o) => o.species === "hjort");
+
+  const withScored = scoreCell(point, withNorm, profile, DEFAULT_ENGINE_CONFIG, NOW, []);
+  const withoutScored = scoreCell(point, withoutNorm, profile, DEFAULT_ENGINE_CONFIG, NOW, []);
+
+  assert.ok(
+    Math.abs(withScored.score - withoutScored.score) < 1e-9,
+    "sporAlder/trackFreshness på en manuell observasjon skal være fullstendig virkningsløs"
+  );
 });
 
 // ===========================================================================

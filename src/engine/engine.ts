@@ -7,7 +7,7 @@
 
 import { distanceMeters } from "@/src/lib/geo";
 import type { Observasjon } from "@/src/types/observation";
-import { DEFAULT_ENGINE_CONFIG, ENGINE_VERSION, type EngineConfig } from "./config";
+import { CONFIG_VERSION, DEFAULT_ENGINE_CONFIG, ENGINE_VERSION, type EngineConfig } from "./config";
 import { computeFallbackConfidence, computeZoneConfidence, confidenceLevelFromScore } from "./confidence";
 import { buildZoneExplanation } from "./explain";
 import {
@@ -33,7 +33,7 @@ import {
   isRutActive,
 } from "./ecology/suitability";
 
-export { ENGINE_VERSION, DEFAULT_ENGINE_CONFIG };
+export { ENGINE_VERSION, CONFIG_VERSION, DEFAULT_ENGINE_CONFIG };
 export type { EngineConfig };
 export type { AreaOfInterest } from "./grid";
 
@@ -110,6 +110,7 @@ function emptyResult(species: Species, nowMs: number, cfg: EngineConfig, inputCo
   const profile = getSpeciesProfile(species);
   return {
     engineVersion: ENGINE_VERSION,
+    configVersion: CONFIG_VERSION,
     species,
     generatedAt: nowMs,
     zones: [],
@@ -234,6 +235,7 @@ function runPipeline(
 
   return {
     engineVersion: ENGINE_VERSION,
+    configVersion: CONFIG_VERSION,
     species,
     generatedAt: nowMs,
     zones,
