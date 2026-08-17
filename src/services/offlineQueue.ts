@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { ObservasjonKilde, SporType } from "@/src/types/observation";
+import type { ObservasjonKilde, SporAlder, SporType } from "@/src/types/observation";
 
 const KEY = "offline_obs_queue_v1";
 
@@ -19,6 +19,8 @@ export type QueuedObservation = {
   sporType?: SporType | null;
   kjonn?: string | null;
   alder?: string | null;
+  accuracyMeters?: number | null;
+  sporAlder?: SporAlder | null;
   koelagtTid: string; // når den ble lagt i kø
 };
 

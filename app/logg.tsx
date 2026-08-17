@@ -27,7 +27,7 @@ import {
   saveObservation,
   subscribeToMyObservations,
 } from "../src/services/observations";
-import type { Observasjon } from "../src/types/observation";
+import type { Observasjon, SporAlder } from "../src/types/observation";
 import { anonymiserPosisjon } from "../src/lib/geo";
 import { AKTIV_REGISTRERING_TERSKEL_TIMER, dyrEmoji, erAktivRegistrering } from "../src/lib/aktivitet";
 import { visAlert } from "../src/lib/confirmAlert";
@@ -36,6 +36,14 @@ type Fane = "aktive" | "historikk";
 
 const dyrListe = ["Rådyr", "Elg", "Hjort", "Rev"] as const;
 const typeListe = ["Sett dyr", "Spor", "Kamera"] as const;
+
+// Valgfri, hoppbar sporalder-velger — vises kun når Type === "Spor" (samme
+// "valgfritt, defaulter til null" UX-mønster som retningsvelgeren under).
+const sporAlderListe: { value: SporAlder; label: string }[] = [
+  { value: "fersk",       label: "Fersk" },
+  { value: "noen_dager",  label: "Noen dager" },
+  { value: "gammel",      label: "Gammelt" },
+];
 
 const retningListe = [
   { label: "NV", grader: 315 },
@@ -60,6 +68,11 @@ export default function LoggScreen() {
   const [valgtDyr,  setValgtDyr]  = useState<string>("Rådyr");
   const [valgtType, setValgtType] = useState<string>("Sett dyr");
   const [kommentar, setKommentar] = useState("");
+
+  // Valgfri sporalder — kun relevant når valgtType === "Spor". Nullstilles
+  // hvis brukeren bytter bort fra "Spor" igjen, slik at et gammelt valg aldri
+  // sniker seg med på en senere, urelatert registrering.
+  const [valgtSporAlder, setValgtSporAlder] = useState<SporAlder | null>(null);
 
   const [melding,    setMelding]    = useState("");
   const [statusTone, setStatusTone] = useState<StatusTone>("info");
@@ -113,6 +126,7 @@ export default function LoggScreen() {
       const tid = new Date().toISOString();
       let latitude:  number | null = null;
       let longitude: number | null = null;
+      let accuracyMeters: number | null = null;
       let harGps = false;
 
       try {
@@ -121,6 +135,10 @@ export default function LoggScreen() {
           const loc = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
+          // Nøyaktigheten hentes FØR anonymiserPosisjon() flytter punktet —
+          // den beskriver GPS-en sin presisjon på selve målingen, uavhengig
+          // av personvern-forskyvningen som legges på rett under.
+          accuracyMeters = typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null;
           const p = anonymiserPosisjon(loc.coords.latitude, loc.coords.longitude);
           latitude  = p.latitude;
           longitude = p.longitude;
@@ -128,10 +146,20 @@ export default function LoggScreen() {
         }
       } catch {}
 
+      // NB: setter bevisst IKKE observationSource ut fra valgtType her — denne
+      // skjermen har alltid latt observationSource stå på default ("manual"),
+      // og kart.tsx filtrerer visning på nettopp observationSource === "track"
+      // (egen sporvisning) vs. øvrige observasjoner. Å endre det her ville
+      // stille dataflyten om under et skjerm-bilde vi ikke skal røre. sporAlder
+      // lagres uansett — feltet er meningsløst (og ignoreres av motoren) for
+      // alt som ikke har observationSource === "track", akkurat som spesifisert.
+      const erSpor = valgtType === "Spor";
       const { id: firestoreId, offline } = await saveObservation({
         dyr: valgtDyr, type: valgtType,
         kommentar: kommentar.trim(),
         tid, latitude, longitude, retning,
+        accuracyMeters,
+        sporAlder: erSpor ? valgtSporAlder : null,
       });
 
       if (!offline) setSisteId(firestoreId);
@@ -143,6 +171,7 @@ export default function LoggScreen() {
           : harGps ? "Lagret med anonymisert GPS." : "Lagret uten GPS."
       );
       setKommentar("");
+      setValgtSporAlder(null);
     } catch (err: any) {
       setStatusTone("error");
       setMelding(`Feil: ${String(err?.message || err)}`);
@@ -219,8 +248,14 @@ export default function LoggScreen() {
               {typeListe.map((type) => {
                 const a = valgtType === type;
                 return (
-                  <Pressable key={type} onPress={() => setValgtType(type)}
-                    style={[styles.chip, styles.chipThird, a && styles.chipActive]}>
+                  <Pressable
+                    key={type}
+                    onPress={() => {
+                      setValgtType(type);
+                      if (type !== "Spor") setValgtSporAlder(null);
+                    }}
+                    style={[styles.chip, styles.chipThird, a && styles.chipActive]}
+                  >
                     <Text style={[styles.chipText, a && styles.chipTextActive]}>
                       {type}
                     </Text>
@@ -229,6 +264,29 @@ export default function LoggScreen() {
               })}
             </View>
           </View>
+
+          {/* ── Sporalder — valgfritt, vises kun ved Type = Spor ── */}
+          {valgtType === "Spor" && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Hvor gammelt så sporet ut? (valgfritt)</Text>
+              <View style={styles.chipGrid}>
+                {sporAlderListe.map((sa) => {
+                  const a = valgtSporAlder === sa.value;
+                  return (
+                    <Pressable
+                      key={sa.value}
+                      onPress={() => setValgtSporAlder((v) => (v === sa.value ? null : sa.value))}
+                      style={[styles.chip, styles.chipThird, a && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, a && styles.chipTextActive]}>
+                        {sa.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
 
           {/* ── Kommentar ── */}
           <View style={styles.section}>

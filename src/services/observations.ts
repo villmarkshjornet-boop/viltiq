@@ -1,5 +1,11 @@
 import { auth, db } from "@/src/config/firebase";
-import type { Observasjon, ObservasjonKilde, SporType } from "@/src/types/observation";
+import {
+  OBSERVASJON_SCHEMA_VERSION,
+  type Observasjon,
+  type ObservasjonKilde,
+  type SporAlder,
+  type SporType,
+} from "@/src/types/observation";
 import {
     addDoc,
     collection,
@@ -40,6 +46,8 @@ type SaveObservationInput = {
   sporType?: SporType | null;
   kjonn?: string | null;
   alder?: string | null;
+  accuracyMeters?: number | null; // GPS-nøyaktighet (meter) FØR anonymiserPosisjon() — se app/logg.tsx
+  sporAlder?: SporAlder | null;
 };
 
 type NearbyOptions = {
@@ -47,10 +55,15 @@ type NearbyOptions = {
   radiusKm?: number;
 };
 
-function mapDocToObservation(d: any): Observasjon {
-  const data = d.data();
+/**
+ * Eldre observasjon-dokumenter kan mangle accuracyMeters/sporAlder/
+ * schemaVersion (fra før disse feltene fantes). Gi trygge standardverdier ved
+ * lesing i stedet for å kreve en engangs-datamigrering — samme mønster som
+ * normaliserKameraData i src/services/cameras.ts.
+ */
+function normaliserObservasjonData(id: string, data: any): Observasjon {
   return {
-    id:        d.id,
+    id,
     userId:    data.userId    ?? "",
     jaktlagId: data.jaktlagId ?? "",
     dyr:       data.dyr       ?? "",
@@ -68,8 +81,15 @@ function mapDocToObservation(d: any): Observasjon {
     sporType:  data.sporType ?? null,
     kjonn:     data.kjonn ?? null,
     alder:     data.alder ?? null,
+    accuracyMeters: typeof data.accuracyMeters === "number" ? data.accuracyMeters : null,
+    sporAlder: data.sporAlder ?? null,
+    schemaVersion: typeof data.schemaVersion === "number" ? data.schemaVersion : 1,
     createdAt: data.createdAt,
   };
+}
+
+function mapDocToObservation(d: any): Observasjon {
+  return normaliserObservasjonData(d.id, d.data());
 }
 
 function dedupeObservations(items: Observasjon[]): Observasjon[] {
@@ -119,6 +139,9 @@ async function saveObservationToFirestore(
     sporType:  input.sporType ?? null,
     kjonn:     input.kjonn ?? null,
     alder:     input.alder ?? null,
+    accuracyMeters: input.accuracyMeters ?? null,
+    sporAlder: input.sporAlder ?? null,
+    schemaVersion: OBSERVASJON_SCHEMA_VERSION,
     createdAt: serverTimestamp(),
   };
   if (geohash) payload.geohash = geohash;
@@ -196,6 +219,8 @@ export async function saveObservation(
       sporType:  beriket.sporType ?? null,
       kjonn:     beriket.kjonn ?? null,
       alder:     beriket.alder ?? null,
+      accuracyMeters: beriket.accuracyMeters ?? null,
+      sporAlder: beriket.sporAlder ?? null,
     });
     return { id: "offline", offline: true };
   }
