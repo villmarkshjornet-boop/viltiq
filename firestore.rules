@@ -102,6 +102,23 @@ service cloud.firestore {
         request.resource.data.opprettet == resource.data.opprettet;
     }
 
+    // ── Prediction-snapshots (Motor V1 persistens) ─────────────────────────
+    // Samme synlighetsmodell som observations/fellings: eier, offentlig
+    // (jaktlagId == ""), eller medlem av jaktlaget snapshotet tilhører.
+    // Immutable historiske poster — kun create/read/delete, aldri update.
+    match /predictions/{id} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.jaktlagId == "" ||
+        isMember(resource.data.jaktlagId)
+      );
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid && (
+        request.resource.data.jaktlagId == "" || isMember(request.resource.data.jaktlagId)
+      );
+      allow update: if false;
+      allow delete: if resource.data.userId == request.auth.uid;
+    }
+
     // ── Jaktlag ─────────────────────────────────────────────────────────────
     // Alle innloggede kan lese (nødvendig for å finne lag via invitasjonskode).
     // Kun lederen kan endre jaktlaget.

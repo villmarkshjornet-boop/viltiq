@@ -64,6 +64,15 @@
         { "fieldPath": "jaktlagId", "order": "ASCENDING"  },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "predictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jaktlagId",    "order": "ASCENDING"  },
+        { "fieldPath": "species",      "order": "ASCENDING"  },
+        { "fieldPath": "calculatedAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
