@@ -22,6 +22,7 @@ import MapView, {
   PROVIDER_GOOGLE,
 } from "@/components/MapView";
 import type { LongPressEvent, MapViewHandle } from "@/components/MapView";
+import type { Region } from "@/components/MapView.types";
 
 import RetningVelger from "@/components/RetningVelger";
 import {
@@ -51,7 +52,7 @@ import {
   subscribeToVisibleMapPoints,
   type MapPoint,
 } from "@/src/services/mapPoints";
-import { getSettings } from "@/src/services/settings";
+import { getSettings, saveSettings } from "@/src/services/settings";
 import type { Observasjon, SporType } from "@/src/types/observation";
 import {
   dyrEmoji,
@@ -60,10 +61,15 @@ import {
 import {
   anonymiserPosisjon,
   buildSector,
-  calcBearing,
-  distanceMeters,
   movePoint,
 } from "@/src/lib/geo";
+import { applyHeatmapRenderWeight } from "@/src/lib/heatmapRender";
+import {
+  deriveViewportRadiusMeters,
+  shouldReuseAnalysisAnchor,
+  MAX_ANALYSIS_RADIUS_METERS,
+  type AnalysisAnchor,
+} from "@/src/lib/analysisAnchor";
 import {
   runEngine,
   runEcologicalEngine,
@@ -74,16 +80,29 @@ import {
   type Species as EngineSpecies,
   type EnvironmentResolver,
   type PredictionZone,
+  type PredictionMode,
   type HeatmapPoint,
   type EngineResult,
+  type LatLng,
+  logIntelligenceDebug,
 } from "@/src/engine";
+import { setCachedIntelligenceResult, getCachedIntelligenceResult } from "@/src/engine/resultCache";
+import { zoneVisualWeight, scaleHexAlpha, smoothPolygonRing } from "@/src/lib/zonePresentation";
 import { savePredictionSnapshot } from "@/src/services/predictions";
+// HuntPlan-oppdraget (§3): buildHuntPlan()/HuntPlan bygges av en parallell
+// motoroppgave i src/engine/huntPlan.ts (NY fil — kart.tsx eier kun
+// VISNINGEN, ikke selve vind-/bevegelses-/rangeringslogikken der). Kartet
+// kaller funksjonen akkurat som runEngine/runEcologicalEngine over — én
+// deterministisk motorkall, ingen egen parallell beregning her.
+import { buildHuntPlan, stablePredictionSnapshotId, type HuntPlan } from "@/src/engine/huntPlan";
 import { color as uiColor, radius as uiRadius, spacing as uiSpacing, zIndex as uiZ, elevation as uiElevation, minTouchTarget, glass as uiGlass, alpha as uiAlpha, typography as uiType } from "@/src/design/tokens";
 import Surface from "@/components/ui/Surface";
 import Toggle from "@/components/ui/Toggle";
 import BottomSheet, { type SheetSnap } from "@/components/ui/BottomSheet";
+import ModalSheet from "@/components/ui/ModalSheet";
 import EngineStatusPanel from "@/components/ui/EngineStatusPanel";
-import { MarkerBadge, MarkerRing } from "@/components/ui/Marker";
+import HuntPlanPanel, { MEANINGFUL_MOVEMENT_CONFIDENCE } from "@/components/ui/HuntPlanPanel";
+import { MarkerBadge, MarkerRing, StableMarker } from "@/components/ui/Marker";
 import { visAlert } from "@/src/lib/confirmAlert";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
@@ -114,8 +133,170 @@ const heatmapGradientProp = {
   colorMapSize: HEATMAP_GRADIENT.colorMapSize,
 };
 
+// V1.3 (§K/§L): hevet fra 32 — heatmapets grid-celler ligger cfg.cellSizeMeters
+// (150 m, src/engine/config.ts) fra hverandre, og radius er i SKJERM-PIKSLER,
+// ikke meter (se Heatmap-kommentaren under). Ved zoom-nivåene brukeren faktisk
+// analyserer et område på, ga 32 px for lite overlapp mellom nabo-celler til
+// at feltet leste som én sammenhengende sone — det så ut som spredte,
+// isolerte prikker i stedet (§L). 42 px, kombinert med den økte
+// blur/radius-andelen i LeafletMapImpl.tsx (0.7 → 0.9), gir bredere,
+// mykere overlappende "stempler" som smelter sammen til en flate ved typisk
+// analysezoom, uten å endre selve vektene som sendes inn (samme
+// heatmapRenderPoints, kun presentasjon).
+const HEATMAP_POINT_RADIUS = 42;
+
+// Hunting-zones-oppdraget §7: matcher motorens egen zones.maxZones-hensikt
+// ("få, meningsfulle soner") — kartet viser aldri flere soner enn dette selv
+// om motoren i prinsippet returnerte flere, se visteHotspots under.
+const MAX_VISIBLE_ZONES = 5;
+
+/**
+ * Hunting-zones-oppdraget §1: rangeringsbasert visuell hierarki for
+ * sonepolygoner/-ringer på kartet — "#1 skal være øyeblikkelig synlig som
+ * ViltIQs anbefaling", ikke bare noe brukeren må trykke seg frem til. Rene,
+ * deterministiske presentasjonsverdier avledet fra SAMME uiColor.levelHøy-
+ * tone (design-tokens, ingen nye farger oppfunnet her) — jo lavere
+ * rangering (høyere rank-tall), jo svakere/mer transparent. Rank 4/5
+ * (innenfor motorens egen maxZones-tak, se config.ts) deler samme, svakeste
+ * tier som rank 3 — en femte sone skal fortsatt være LESBAR, ikke visuell støy.
+ */
+// Kold-start-visningsoppdraget §5/§9: rangering (rank) og datagrunnlag
+// (predictionMode) er to UAVHENGIGE akser — en cold-start-sone kan fortsatt
+// være #1 (best av det som finnes), men skal ALDRI se like "bekreftet" ut
+// som en observasjonsdrevet sone. `zoneVisualWeight` (src/lib/zonePresentation)
+// gir den andre aksen; multiplisert inn i den eksisterende rank-baserte
+// tieringen under, ikke en erstatning for den.
+function zoneTierStyle(rank: number, predictionMode: PredictionMode) {
+  const base = (() => {
+    if (rank <= 1) {
+      return {
+        ringSize: 32,
+        ringColor: uiColor.levelHøy,
+        strokeColor: uiColor.levelHøy,
+        strokeWidth: 2.5,
+        fillColor: uiColor.levelHøy + "40", // ~25% — klart synlig, men obscurerer ikke heatmapet/kartet under
+      };
+    }
+    if (rank === 2) {
+      return {
+        ringSize: 24,
+        ringColor: uiColor.levelHøy + "CC", // ~80%
+        strokeColor: uiColor.levelHøy + "B3", // ~70%
+        strokeWidth: 1.75,
+        fillColor: uiColor.levelHøy + "26", // ~15%
+      };
+    }
+    return {
+      ringSize: 18,
+      ringColor: uiColor.levelHøy + "80", // ~50%
+      strokeColor: uiColor.levelHøy + "66", // ~40%
+      strokeWidth: 1,
+      fillColor: uiColor.levelHøy + "14", // ~8%
+    };
+  })();
+
+  const weight = zoneVisualWeight(predictionMode);
+  return {
+    ...base,
+    fillColor: scaleHexAlpha(base.fillColor, weight.fillAlphaFactor),
+    strokeColor: scaleHexAlpha(base.strokeColor, weight.strokeAlphaFactor),
+    ringColor: scaleHexAlpha(base.ringColor, weight.strokeAlphaFactor),
+    lineDashPattern: weight.dashed ? [8, 6] : undefined,
+  };
+}
+
 const dyrListe    = ["Rådyr", "Elg", "Hjort", "Rev"];
 const dyrFilter   = ["Alle", ...dyrListe];
+/** Registrering (nytt pin/spor/kamera) skal IKKE tilby Rev som valg — kun
+ * jaktbare arter registreres aktivt. "Rev" beholdes i dyrListe/dyrFilter selv
+ * (motorberegning + visningsfilter for evt. allerede lagrede Rev-observasjoner). */
+const dyrRegistrerbar = dyrListe.filter((d) => d !== "Rev");
+/** De tre artene Hjem sin art-karusell støtter (§3 i art-karusell-oppdraget) — "Alle"/"Rev" har ingen egen hero der, så et filtervalg av dem skriver ikke selectedSpecies. */
+const KARUSELL_ART_FRA_DYR: Partial<Record<string, EngineSpecies>> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg" };
+
+// ─── "Åpne kart fra Hjem"-fokusering ───────────────────────────────────────
+//
+// Kart-fokuseringsoppdraget: Hjem sin "Åpne kart"-knapp navigerer hit med
+// focusLat/focusLng (senteret av Hjem sin anbefalte sone) — effekten under
+// (§"Fokuser kart") brukte tidligere en FAST 0.10° delta rundt kun DETTE
+// punktet, uavhengig av hvor brukerens EGEN posisjon lå. Resultatet: et
+// altfor tett utsnitt uten terrengkontekst når sonen lå noen kilometer unna
+// brukeren (og motsatt: et utsnitt som ikke fanget opp sonens faktiske
+// utstrekning når den var stor). Målet her er samme "fit bounds + padding"-
+// oppførsel som f.eks. Google Maps gir ved åpning av et søkeresultat: vis
+// BÅDE brukerens posisjon OG hele den anbefalte sonens fotavtrykk, med nok
+// margin til at omkringliggende terreng er synlig — IKKE et gjettet fast
+// zoomnivå.
+//
+// Sonens EKTE fotavtrykk (footprint.hull, samme konvekse skrog kartets egen
+// polygon-rendering allerede bruker, se lenger ned) hentes fra DEN SAMME
+// delte resultCache.ts Hjem nettopp skrev til (§20/§25) — Hjem har alltid
+// rukket å kjøre sin egen motor/cache-skriveeffekt FØR brukeren rekker å
+// trykke "Åpne kart" og komme hit, så et cache-treff her er det normale
+// tilfellet, ikke unntaket. Uteblir det (cache tom/utløpt/annen art), faller
+// vi tilbake til KUN det rå focusLat/focusLng-punktet — fortsatt riktig
+// oppført sammen med brukerposisjonen, bare uten sonens egen utstrekning.
+//
+// Bevisst IKKE en ny motorkjøring her — vi LESER kun et allerede beregnet
+// resultat, akkurat som Hjem/Jakt sin egen cache-lesing. Kartets EGEN
+// analysisAnchor-drevne motorkjøring (lenger ned i filen) er helt urørt og
+// tar uansett over cache-oppføringen for arten kort tid etter mount — denne
+// fokuseringen er kun det ENGANGS initiale kamera-utsnittet.
+
+/** Nedre grense for fokus-deltaen — hindrer "gate-nivå" overzooming når sonen ligger rett ved/på brukerens posisjon. ~0.05° ≈ 5,5 km nord-sør, dvs. fortsatt en tydelig regional oversikt (til sammenligning: gate-nivå-zoom i denne kodebasen bruker delta ned mot 0.005–0.01). */
+const FOCUS_MIN_DELTA = 0.05;
+/** Øvre grense for fokus-deltaen — hindrer et ubrukelig "hele fylket"-utsnitt hvis brukeren skulle stå uvanlig langt fra sonen (analyseradiusen er normalt langt mindre enn dette). ~0.8° ≈ 89 km nord-sør. */
+const FOCUS_MAX_DELTA = 0.8;
+/** Marginfaktor rundt selve fit-bounds-utstrekningen (brukerposisjon + sonens fotavtrykk) — 1,6× gir ca. 30 % luft på hver side, slik at ingen av de to punktene havner helt i kartkanten (§"generøs padding" i oppdraget). */
+const FOCUS_PADDING_FACTOR = 1.6;
+
+const METERS_PER_LAT_DEGREE = 111_320;
+
+/**
+ * Sonens fotavtrykk som en liste med punkter fit-bounds-utregningen kan
+ * spenne over — foretrekker det EKTE konvekse skroget (footprint.hull,
+ * samme kilde som polygon-rendering, se lenger ned i filen), og faller kun
+ * tilbake til en grov firepunkts sirkel-approksimasjon (senter ± radiusMeters
+ * i fire himmelretninger) hvis sonen mangler et brukbart hull.
+ */
+function sonefotavtrykkPunkter(sone: PredictionZone): LatLng[] {
+  const hull = sone.footprint?.hull;
+  if (hull && hull.length >= 3) return hull;
+  const latRad = (sone.center.latitude * Math.PI) / 180;
+  const dLat = sone.radiusMeters / METERS_PER_LAT_DEGREE;
+  const dLng = sone.radiusMeters / (METERS_PER_LAT_DEGREE * Math.max(Math.cos(latRad), 0.01));
+  return [
+    sone.center,
+    { latitude: sone.center.latitude + dLat, longitude: sone.center.longitude },
+    { latitude: sone.center.latitude - dLat, longitude: sone.center.longitude },
+    { latitude: sone.center.latitude, longitude: sone.center.longitude + dLng },
+    { latitude: sone.center.latitude, longitude: sone.center.longitude - dLng },
+  ];
+}
+
+/**
+ * Bygger en Region som (med padding) omslutter alle `punkter` — samme
+ * "fit bounds"-idé som kartbiblioteker flest sin fitBounds()/fitToCoordinates(),
+ * her implementert selv siden MapViewHandle (components/MapView.types.ts) kun
+ * eksponerer imperativ animateToRegion(region), ikke en egen bounds-variant.
+ * Deltaene klemmes til [FOCUS_MIN_DELTA, FOCUS_MAX_DELTA] (§ moderat
+ * oversiktszoom, aldri gate-nivå, aldri et ubrukelig fylkesutsnitt).
+ */
+function fitRegionRundtPunkter(punkter: LatLng[]): Region {
+  const breddegrader = punkter.map((p) => p.latitude);
+  const lengdegrader = punkter.map((p) => p.longitude);
+  const minLat = Math.min(...breddegrader);
+  const maxLat = Math.max(...breddegrader);
+  const minLng = Math.min(...lengdegrader);
+  const maxLng = Math.max(...lengdegrader);
+  const clamp = (delta: number) => Math.min(FOCUS_MAX_DELTA, Math.max(FOCUS_MIN_DELTA, delta));
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: clamp((maxLat - minLat) * FOCUS_PADDING_FACTOR),
+    longitudeDelta: clamp((maxLng - minLng) * FOCUS_PADDING_FACTOR),
+  };
+}
 const sporTypeListe: SporType[] = [
   "Fotspor", "Avføring", "Beitespor", "Liggeplass", "Feiing", "Annet",
 ];
@@ -283,6 +464,8 @@ export default function KartScreen() {
     filter?:   string;
     /** "1" — slå på ViltIQ Heatmap automatisk (brukt av "Vis i kart" fra Hjem/Jakt). */
     heatmap?:  string;
+    /** Jaktplan-produktflyt-oppdraget §1: "1" — åpne Jaktplan-arket automatisk for beste synlige sone én gang etter mount (brukt av "Planlegg jakten" fra Jakt-fanen). Se auto-åpne-effekten lenger ned. */
+    openPlan?: string;
   }>();
   const router = useRouter();
   const mapRef = useRef<MapViewHandle | null>(null);
@@ -303,6 +486,16 @@ export default function KartScreen() {
   const [mapMode,      setMapMode]      = useState<"terrain" | "satellite">("terrain");
   const [radiusKm,     setRadiusKm]     = useState<10 | 25 | 50>(50);
   const [userLocation, setUserLocation] = useState<UserPosition | null>(null);
+  // V1.2.2 KORRIGERING: motoren analyserte tidligere ALLTID området rundt
+  // userLocation, uansett hvor brukeren hadde panorert kartet — bekreftet
+  // feil ved faktisk testing (GPS i Kristiansand, men brukeren undersøkte et
+  // jaktterreng langt unna). `analyseSenter` er kartets EGEN region-senter
+  // (satt fra onRegionChangeComplete under, debounced), IKKE userLocation.
+  // userLocation brukes fortsatt uendret til: initial kartposisjon,
+  // posisjon-prikken på kartet, og "min posisjon"-knappen — se de stedene i
+  // JSX-en under, urørt av denne endringen.
+  const [kartRegion, setKartRegion] = useState<Region | null>(null);
+  const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [observasjoner, setObservasjoner] = useState<Observasjon[]>([]);
   const [kameraer,     setKameraer]     = useState<Viltkamera[]>([]);
   const [mapPoints,    setMapPoints]    = useState<MapPoint[]>([]);
@@ -333,6 +526,20 @@ export default function KartScreen() {
   const erDesktop = skjermBredde >= 900;
   const [lagmenyÅpen, setLagmenyÅpen] = useState(false);
   const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
+  // V1.2 Steg 7 (§30-33): hvilken av motorens EGNE klyngede soner brukeren
+  // har valgt å se forklaringen for. Faller automatisk tilbake til beste
+  // sone (visteHotspots[0]) når valget ikke lenger finnes blant de viste
+  // sonene (art-filter byttet, ny motorkjøring ga andre soner) — se
+  // hotspotSone under. Ingen egen reset-effekt nødvendig.
+  const [valgtHotspotId, setValgtHotspotId] = useState<string | null>(null);
+
+  // ── HuntPlan (Jaktplan) §3.1/§3.15: id-en til sonen en jaktplan er åpen
+  // for — null = ingen plan åpen. Bevisst en id (ikke sonen selv), samme
+  // "slå opp i den ferske listen"-mønster som hotspotSone under, slik at en
+  // ny motorkjøring aldri kan la panelet vise en foreldet sone-referanse.
+  // IKKE navigasjon bort fra Kart (§3.15) — kun en modal/ark OVER kartet.
+  const [huntPlanZoneId, setHuntPlanZoneId] = useState<string | null>(null);
+  const [huntPlanTargetMs, setHuntPlanTargetMs] = useState<number>(() => Date.now());
 
   // ── Langtrykk-meny og nye punkter ──
   const [selectedPin,  setSelectedPin]  = useState<MapPin | null>(null);
@@ -364,6 +571,11 @@ export default function KartScreen() {
   const [regKjonn,     setRegKjonn]     = useState<string | null>(null);
   const [regAlder,     setRegAlder]     = useState<string | null>(null);
   const [regKommentar, setRegKommentar] = useState("");
+  // Hvilken vei DYRET gikk — IKKE det samme som kameraets faste retning
+  // (selectedCamera.directionDegrees). Valgfritt (§ kritisk korrigering):
+  // regRetningKjent styrer om regRetning i det hele tatt sendes med ved lagring.
+  const [regRetningKjent, setRegRetningKjent] = useState(false);
+  const [regRetning,      setRegRetning]      = useState(0);
 
   const [editNavn,     setEditNavn]     = useState("");
   const [editRetning,  setEditRetning]  = useState(0);
@@ -473,6 +685,21 @@ export default function KartScreen() {
   }, [selectedCamera]);
 
   // ─── Kartevent ────────────────────────────────────────────────────────────
+
+  // V1.2.2 KORRIGERING: fyres når brukeren er FERDIG å panorere/zoome
+  // (Leaflet "moveend"/"zoomend", react-native-maps sin native
+  // onRegionChangeComplete — se MapView.types.ts). Debounces selve
+  // state-oppdateringen (ikke bare event-fyringen, som allerede er
+  // "ferdig-bevegelse", ikke per-pixel) med 500 ms, slik at rask,
+  // gjentatt panorering ("panorer raskt flere ganger") ikke trigger en full
+  // miljøoppslag+motorkjøring-kaskade for hvert mellomsteg — kun den SISTE
+  // regionen etter at kartet har fått "hvile kort" faktisk publiseres.
+  function handleMapRegionChangeComplete(region: Region) {
+    if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
+    regionDebounceRef.current = setTimeout(() => {
+      setKartRegion(region);
+    }, 500);
+  }
 
   function handleMapLongPress(e: LongPressEvent) {
     setSelectedPin(e.nativeEvent.coordinate);
@@ -599,7 +826,7 @@ export default function KartScreen() {
         tid:      new Date().toISOString(),
         latitude:  null,
         longitude: null,
-        retning:  null,
+        retning:  regRetningKjent ? regRetning : null,
         antall:   regAntall,
         observationSource: "camera",
         cameraId: selectedCamera.id,
@@ -752,25 +979,164 @@ export default function KartScreen() {
     [obsMedGps]
   );
 
+  // V1.5 KORRIGERING (produktregel, absolutt — se src/lib/analysisAnchor.ts
+  // sin filkommentar for hele historikken): V1.3s geografiske hysterese
+  // reduserte "prediksjonen hopper ved panorering" til KUN å skje ved en STOR
+  // nok panorering — men det var fortsatt feil produktoppførsel. Brukeren
+  // skal ALDRI oppleve at kameraet alene flytter en allerede beregnet
+  // prediksjon, uansett hvor langt kartet panoreres/zoomes. `analysisAnchor`
+  // er derfor nå det GEOGRAFISK LÅSTE ankeret siste motorkjøring faktisk
+  // dekket, og settes KUN i to situasjoner:
+  //   (a) FØRSTE gang appen har noe å analysere i det hele tatt (GPS/initial
+  //       viewport etablerer det aller første ankeret, se effekten under) —
+  //       og ALDRI igjen automatisk etter det, heller ikke ved videre
+  //       GPS-drift;
+  //   (b) et EKSPLISITT brukertrykk på "Analyser dette området"
+  //       (se reanalyserHer() under).
+  // Kartets region (`kartRegion`/`viewportCandidate`) kan bevege seg helt
+  // fritt UTEN at ankeret følger med — `onRegionChangeComplete` skriver KUN
+  // til `kartRegion`, aldri til `analysisAnchor`. Se `kanReanalysere` under
+  // for hvordan den samme geografiske hysterese-regelen (shouldReuseAnalysisAnchor)
+  // nå brukes til noe helt annet enn før: KUN til å avgjøre CTA-synlighet,
+  // aldri til å selv trigge en ny analyse.
+  const [analysisAnchor, setAnalysisAnchor] = useState<AnalysisAnchor | null>(null);
+
+  // Den "kandidat"-regionen en NY analyse VILLE dekket hvis brukeren ba om
+  // det akkurat nå — kartets egen region når den finnes (med en
+  // viewport-avledet radius, §D), ellers userLocation som fallback FØR
+  // kartets første region-hendelse. Rent presentasjons-/kandidatformål (§ "kan
+  // brukes til UI-logikk, men ikke til å flytte eksisterende analyse") —
+  // IKKE koblet til analysisAnchor med mindre brukeren eksplisitt ber om det.
+  const viewportCandidate = useMemo(() => {
+    if (kartRegion) {
+      return {
+        center: { latitude: kartRegion.latitude, longitude: kartRegion.longitude },
+        radiusMeters: deriveViewportRadiusMeters(kartRegion),
+      };
+    }
+    if (userLocation) {
+      // Kald start, ingen region-hendelse ennå — samme sjenerøse (tak-
+      // begrensede) radius som V1.2.2 brukte som standard, inntil kartet
+      // selv rapporterer sin faktiske region.
+      return { center: { latitude: userLocation.latitude, longitude: userLocation.longitude }, radiusMeters: MAX_ANALYSIS_RADIUS_METERS };
+    }
+    return null;
+  }, [kartRegion?.latitude, kartRegion?.longitude, kartRegion?.latitudeDelta, kartRegion?.longitudeDelta, userLocation?.latitude, userLocation?.longitude]);
+
+  // Etablerer det ALLER FØRSTE ankeret, nøyaktig én gang (§9: "GPS kan
+  // etablere initial analysisAnchor... men når prediction er laget skal
+  // GPS-drift ikke flytte prediction"). Vokteren er `analysisAnchor === null`
+  // — så snart ankeret er satt (uansett om det var fra GPS eller en
+  // eksplisitt reanalyse), gjør IKKE denne effekten noe mer, selv om
+  // `viewportCandidate` fortsetter å endre seg (GPS-drift, panorering, osv.).
+  // Ingen debounce/hysterese trengs her — dette er en engangs "har vi noe å
+  // analysere ennå?"-sjekk, ikke en løpende re-evaluering.
+  useEffect(() => {
+    if (analysisAnchor !== null) return;
+    if (!viewportCandidate) return;
+    setAnalysisAnchor(viewportCandidate);
+  }, [viewportCandidate, analysisAnchor]);
+
+  const analyseSenter: LatLng | null = analysisAnchor?.center ?? null;
+  const analyseRadiusMeter = analysisAnchor?.radiusMeters ?? MAX_ANALYSIS_RADIUS_METERS;
+
+  // §CTA "Analyser dette området" — DEN ENESTE andre veien (utenom det
+  // initiale ankeret over) et nytt `analysisAnchor` kan oppstå. Gjenbruker
+  // shouldReuseAnalysisAnchor (samme geografiske dead-zone-regel som §C)
+  // for å avgjøre om viewporten har beveget seg langt nok fra det låste
+  // ankeret til at en ny analyse ville vært meningsfull — men bruker
+  // resultatet KUN til CTA-synlighet, ALDRI til å selv sette et nytt anker.
+  const kanReanalysereHer =
+    analysisAnchor != null &&
+    viewportCandidate != null &&
+    !shouldReuseAnalysisAnchor(analysisAnchor, viewportCandidate.center, viewportCandidate.radiusMeters);
+
+  /** Den ENESTE funksjonen i hele kartet som flytter et allerede etablert analysisAnchor. Kalt UTELUKKENDE av et eksplisitt brukertrykk på "Analyser dette området" (se JSX under) — aldri fra en kart-/region-hendelse. */
+  function reanalyserHer() {
+    if (!viewportCandidate) return;
+    // `environmentResolver` nullstilles i SAMME hendelseshåndterer (ikke i en
+    // reaktiv useEffect senere) — React 18 batcher begge state-oppdateringene
+    // inn i ÉN render. Uten dette ville heatmapPerArt-useMemoen (avhengig av
+    // BÅDE environmentResolver OG analyseSenter) rukket å kjøre motoren for
+    // det NYE ankeret med den GAMLE (feil-områdets) resolveren i render-fasen
+    // FØR noen effekt fikk sjanse til å nullstille noe — en reell (om enn
+    // kortvarig) geografisk feilkobling, avdekket av
+    // .e2e-scratch/viewportDoesNotMutatePrediction.mjs sin "eksakt ÉN ny
+    // motorkjøring"-påstand. Se også resetEffekten ved analysisAnchor-bytte
+    // over, som dekker samme nullstilling defensivt for andre ev. fremtidige
+    // kall-steder.
+    setEnvironmentResolver(null);
+    setAnalysisAnchor(viewportCandidate);
+  }
+
+  // Selve sone-VALGET (valgtHotspotId/huntPlanZoneId) er kun meningsfullt
+  // for de sonene DEN SAMME analysen produserte — se zoneIdentity()/
+  // zoneListSnapshotId under. Når analysisAnchor faktisk BYTTES UT (ikke
+  // den initiale null->verdi-etableringen over) er dette signalet om at en
+  // GENUINT ny analyse er i gang: nullstill valget, ellers kan en gammel
+  // valgt-id ("hjort-zone-2") ved et uhell matche en NY sone med samme
+  // indeksbaserte id, men på et helt annet geografisk sted (§10-12).
+  const forrigeAnkerRef = useRef<AnalysisAnchor | null>(null);
+  useEffect(() => {
+    if (analysisAnchor && __DEV__) {
+      // V1.5 utvikler-diagnostikk (samme "kun __DEV__, aldri i prod"-mønster
+      // som logIntelligenceDebug): ÉN linje per gang det LÅSTE ankeret
+      // faktisk endres — den geografiske sannhetskilden viewport-stabilitets-
+      // testscript i .e2e-scratch/ leser for å bevise at panorering/zoom
+      // ALENE aldri produserer en ny linje her.
+      // eslint-disable-next-line no-console
+      console.log(
+        `analysisAnchor: center=${analysisAnchor.center.latitude.toFixed(5)},${analysisAnchor.center.longitude.toFixed(5)} radiusMeters=${analysisAnchor.radiusMeters.toFixed(0)}`
+      );
+    }
+    if (forrigeAnkerRef.current !== null && analysisAnchor !== null && forrigeAnkerRef.current !== analysisAnchor) {
+      setValgtHotspotId(null);
+      setHuntPlanZoneId(null);
+      // KRITISK (avdekket av .e2e-scratch/viewportDoesNotMutatePrediction.mjs
+      // sin "eksakt ÉN ny motorkjøring"-påstand): `environmentResolver` er
+      // FAKTISK bundet til FORRIGE anker sitt geografiske område (den er
+      // resultatet av `resolveEnvironmentContext(analyseSenter, ...)` for det
+      // GAMLE senteret, se effekten under). Uten denne nullstillingen ville
+      // heatmapPerArt-useMemo-en (som avhenger av BÅDE environmentResolver OG
+      // analyseSenter/analyseRadiusMeter) kortvarig kjøre motoren for det NYE
+      // ankeret med det GAMLE miljøoppslaget — en reell, om enn kortvarig,
+      // feilkobling (score for feil sted, ikke bare et unødvendig ekstra
+      // motorkjøring-logglinje). Nullstilling her tvinger heatmapPerArt til
+      // midlertidig å falle tilbake til den rene, alltid-korrekte
+      // observasjonsmotoren (runEngine) for det nye ankeret helt til en fersk
+      // resolver for DET området faktisk er løst.
+      setEnvironmentResolver(null);
+    }
+    forrigeAnkerRef.current = analysisAnchor;
+  }, [analysisAnchor]);
+
   // Løs miljøkontekst (høyde/habitat/vær/snø/vind) for den økologiske
-  // prioren KUN når "Prediksjon" er slått på og vi har en posisjon å ta
+  // prioren KUN når "Prediksjon" er slått på og vi har et analysesenter å ta
   // utgangspunkt i — dette er eksterne nettverkskall (Geonorge/NIBIO/
   // Open-Meteo/Overpass, se src/engine/environment), ikke noe kartet skal
   // gjøre uoppfordret. Feiler oppslaget (offline e.l.), forblir resolveren
   // null og prediksjonsoner faller tilbake til den rene, alltid-tilgjengelige
   // observasjonsmotoren under — kartet skal ALDRI blokkere eller krasje på
   // et mislykket miljøoppslag.
+  //
+  // Async-sikkerhet (§7/§16 i korrigeringsoppdraget): `aktiv`-mønsteret under
+  // er allerede Reacts standard vern mot at en TREG, ELDRE analyse
+  // overskriver en NYERE — hver gang `analyseSenter` endres (bruker
+  // panorerer til nytt område), kjører effekten på nytt, og OPPRYDDINGEN fra
+  // FORRIGE kjøring setter DEN sin `aktiv=false` FØR den nye kjøringen
+  // starter. Et sent-ankommende resolve-resultat fra et FORLATT kartområde
+  // kan derfor aldri publiseres — ingen ny request-id-mekanisme trengs
+  // utover dette allerede eksisterende mønsteret.
   useEffect(() => {
-    if (!visPrediksjon || !userLocation) return;
+    if (!visPrediksjon || !analyseSenter) return;
     let aktiv = true;
-    const analyseRadiusMeter = Math.min(radiusKm * 1000, 5000);
 
-    resolveEnvironmentContext(userLocation, analyseRadiusMeter)
+    resolveEnvironmentContext(analyseSenter, analyseRadiusMeter)
       .then((resolver) => { if (aktiv) setEnvironmentResolver(() => resolver); })
       .catch(() => { /* stille — kartet fungerer uten miljødata, se fallback under */ });
 
     return () => { aktiv = false; };
-  }, [visPrediksjon, userLocation, radiusKm]);
+  }, [visPrediksjon, analyseSenter, analyseRadiusMeter]);
 
   // Motor-tidsvindu (§18): filtrer INPUT til motoren, ikke selve
   // decay-matematikken — "nå" sender alt inn uendret (motorens egen
@@ -804,13 +1170,22 @@ export default function KartScreen() {
     for (const dyr of dyrListe) {
       const motorArt = motorArter[dyr];
 
-      const resultat = (environmentResolver && userLocation)
+      // debug:true kun i __DEV__ — se logIntelligenceDebug-effekten under.
+      // Billig nok til alltid å regnes ut i dev (noen ekstra O(n)-tellinger/
+      // sorteringer over et grid som uansett allerede er scoret), og gir
+      // GRID/SCORE/HEATMAP/ZONES-instrumenteringen (V1.2.1 §21) faktisk noe
+      // å vise i konsollen i stedet for å alltid falle tilbake til "ingen
+      // debug-info"-linjen.
+      // V1.2.2: areaCenter er nå analyseSenter (kartets region), IKKE
+      // userLocation — se analyseSenter-definisjonen over.
+      const resultat = (environmentResolver && analyseSenter)
         ? runEcologicalEngine(observasjonerITidsvindu, motorArt, {
-            areaCenter: userLocation,
-            areaRadiusMeters: Math.min(radiusKm * 1000, 5000),
+            areaCenter: analyseSenter,
+            areaRadiusMeters: analyseRadiusMeter,
             environment: environmentResolver,
+            debug: __DEV__,
           })
-        : runEngine(observasjonerITidsvindu, motorArt);
+        : runEngine(observasjonerITidsvindu, motorArt, { debug: __DEV__ });
 
       // Heatmap (§5–§8 i STEG 4-oppdraget): vektede grid-punkter fra HELE
       // motorens skårede flate, ikke bare klyngede soner — samme sannhets-
@@ -820,11 +1195,45 @@ export default function KartScreen() {
       const sone = resultat.zones[0] ?? null;
       heatmap[dyr] = { species: motorArt, points: resultat.heatmapPoints, zone: sone, result: resultat };
       if (!sone) continue;
+      // V1.3 §W: dette SAMMENLIGNER kun de fire artenes egne beste-sone-score
+      // for å velge HVILKEN art som "vinner" — det summerer/blander ALDRI
+      // scorene deres. `beste` blir alltid én enkelt PredictionZone fra ett
+      // enkelt art-rent motorresultat (sammen med `sone.species`), aldri et
+      // konstruert gjennomsnitt/max av flere arters heatmap-vekter.
       if (!beste || sone.score > beste.score) beste = sone;
     }
 
     return { besteMotorSone: beste, heatmapPerArt: heatmap };
-  }, [observasjonerITidsvindu, environmentResolver, userLocation, radiusKm]);
+  }, [observasjonerITidsvindu, environmentResolver, analyseSenter, analyseRadiusMeter]);
+
+  // V1.2 Steg 6: Kart er skrive-siden av den delte Intelligence-cachen
+  // (resultCache.ts) — Hjem og Jakt leser herfra i stedet for å kjøre sin
+  // egen (potensielt avvikende) motor på de samme observasjonene, se §17–19
+  // i motor-oppdraget. En egen effekt (ikke inne i useMemo over) fordi dette
+  // er en bevisst side-effekt, ikke en del av selve utregningen.
+  useEffect(() => {
+    // V1.3 (§ cache-key): den eksplisitte konteksten resultatet faktisk ble
+    // beregnet i/for — analyseSenter/analyseRadiusMeter er ANKERET (aldri
+    // kartets rå viewport, se analysisAnchor.ts), ikke tegneposisjonen.
+    // Værmålingen leses fra SAMME environmentResolver-kall scoringen selv
+    // brukte for dette senteret, ingen ny/parallell værhenting.
+    const weather = environmentResolver && analyseSenter ? environmentResolver(analyseSenter).dynamic : null;
+    const cacheContext = {
+      area: analyseSenter ? { center: analyseSenter, radiusMeters: analyseRadiusMeter } : null,
+      weather: weather ? { temperatureC: weather.temperatureC, windSpeedMs: weather.windSpeedMs } : null,
+      observationCount: observasjonerITidsvindu.length,
+    };
+    for (const dyr of dyrListe) {
+      const entry = heatmapPerArt[dyr];
+      if (!entry) continue;
+      setCachedIntelligenceResult(entry.species, entry.result, environmentResolver != null, cacheContext);
+      // V1.2 §39: rå utvikler-diagnostikk i devtools-konsollen, aldri i
+      // produksjonsbuilds — kun for arten som faktisk driver "beste sone".
+      if (__DEV__ && besteMotorSone && entry.species === besteMotorSone.species) {
+        logIntelligenceDebug(entry.result);
+      }
+    }
+  }, [heatmapPerArt, environmentResolver, besteMotorSone, analyseSenter, analyseRadiusMeter, observasjonerITidsvindu]);
 
   // Prediction snapshots (§21–24 i motor-oppdraget): lagre et komprimert
   // øyeblikksbilde av motorens vurdering per art, kraftig throttlet (§28 —
@@ -838,8 +1247,8 @@ export default function KartScreen() {
   const sisteSnapshotRef = useRef<Partial<Record<string, number>>>({});
   useEffect(() => {
     const uid = auth.currentUser?.uid;
-    if (!uid || !userLocation) return;
-    const areaRadiusMeters = Math.min(radiusKm * 1000, 5000);
+    if (!uid || !analyseSenter) return;
+    const areaRadiusMeters = analyseRadiusMeter;
     const nå = Date.now();
 
     for (const dyr of dyrListe) {
@@ -852,69 +1261,222 @@ export default function KartScreen() {
       // lagringer av samme art hvis effekten trigges igjen før forrige
       // lagring er ferdig.
       sisteSnapshotRef.current[nøkkel] = nå;
+      // V1.2.2: areaCenter er analyseSenter (kartets region) — snapshotet
+      // skal beskrive HVA som faktisk ble analysert, ikke brukerens GPS.
       const snapshot = buildPredictionSnapshot(entry.result, {
         userId: uid,
         jaktlagId: "",
-        areaCenter: userLocation,
+        areaCenter: analyseSenter,
         areaRadiusMeters,
+        ecologyUsed: environmentResolver != null,
       });
       savePredictionSnapshot(snapshot).catch(() => {
         // Stille — snapshot-lagring er et fremtidig valideringsgrunnlag,
         // ikke noe kartet skal blokkere eller varsle brukeren om ved feil.
       });
     }
-  }, [heatmapPerArt, userLocation, radiusKm]);
+  }, [heatmapPerArt, analyseSenter, analyseRadiusMeter, environmentResolver]);
 
   // Heatmap-laget følger det aktive artsfilteret (§8: "Ikke bland rådyr-,
   // elg- og hjortedata til ett uforståelig heatkart når én art er valgt").
   // Uten et spesifikt artsfilter ("Alle") vises heatmapet for arten med
   // høyest score akkurat nå — aldri en blanding av flere arters data.
+  //
+  // V1.3 §W (Alle-modus audit): "høyest score akkurat nå" betyr HELE det
+  // uklyngede resultatet (heatmapPoints OG zones) til DEN ENE arten som eier
+  // besteMotorSone (se heatmapPerArt-loopen over: hver art kjøres gjennom
+  // motoren HELT SEPARAT, med sin egen runEngine/runEcologicalEngine-kjøring
+  // og sin egen liste med soner — `besteDyr` her plukker bare UT hvilket av
+  // disse fire allerede-ferdige, art-rene resultatene som skal vises, den
+  // regner ikke noe nytt). Det finnes IKKE noen skjult
+  // max(hjort, rådyr, elg)-sammenslåing av selve heatmap-vektene eller
+  // sonene et sted i denne funksjonen — `heatmapPerArt[besteDyr]` er akkurat
+  // det samme objektet som ville blitt vist om brukeren selv hadde trykket på
+  // "Hjort" (eller hvilken art som vant). Bekreftet ved lesing 2026-08:
+  // logikken er allerede biologisk sund og krever ingen endring, kun denne
+  // dokumentasjonen.
   const aktivHeatmap = useMemo(() => {
     if (aktivtFilter !== "Alle") return heatmapPerArt[aktivtFilter] ?? null;
     const besteDyr = dyrListe.find((d) => heatmapPerArt[d]?.species && besteMotorSone?.species === heatmapPerArt[d]?.species);
     return besteDyr ? heatmapPerArt[besteDyr] ?? null : null;
   }, [aktivtFilter, heatmapPerArt, besteMotorSone]);
 
-  // Sonen som faktisk forklares når brukeren trykker på hotspot-markøren —
-  // sonen bak DET SYNLIGE heatmap-laget (kan avvike fra besteMotorSone når
-  // et artsfilter er valgt), med besteMotorSone som fallback. Alltid
-  // tilgjengelig (ikke lenger avhengig av "Prediksjon"-bryteren) — dette ER
-  // nå appens ENESTE "beste område"-kilde, se statusInnhold().
-  const hotspotSone = aktivHeatmap?.zone ?? besteMotorSone;
+  // V1.2.1 §10-11: kartlagets EGET renderWeight, adskilt fra motorens
+  // faktiske (absolutte) score — se src/lib/heatmapRender.ts for hvorfor.
+  // `aktivHeatmap.points` (motorens sannhet) forblir uendret; kun denne
+  // avledede kopien sendes til <Heatmap>.
+  const heatmapRenderPoints = useMemo(
+    () => (aktivHeatmap ? applyHeatmapRenderWeight(aktivHeatmap.points) : []),
+    [aktivHeatmap]
+  );
 
-  // Presentasjonslag: sektor-kjeglen som peker "hvilken vei" rundt hotspot-
-  // sonen. Dette DUPLISERER ikke motorens retningsscoring (den bruker
-  // cameraDirectionDeg/movementDirectionDeg helt separat internt, se
-  // src/engine/signals.ts directionalAlignment) — det er bare et sirkulært
-  // gjennomsnitt av retning blant observasjoner nær sonesenteret, for å
-  // gi kjeglen noe å peke mot. Ingen observasjoner med retning nær sonen →
-  // faller tilbake til retningen FRA brukeren TIL sonen, ellers 0.
-  const hotspotSektorBearing = useMemo(() => {
-    if (!hotspotSone) return null;
-    const nær = obsMedGps.filter((o) => {
-      if (o.retning == null || o.latitude == null || o.longitude == null) return false;
-      return distanceMeters(
-        { latitude: o.latitude, longitude: o.longitude },
-        hotspotSone.center
-      ) <= hotspotSone.radiusMeters;
-    });
-    if (nær.length > 0) {
-      let sumSin = 0, sumCos = 0;
-      for (const o of nær) {
-        const rad = ((o.retning as number) * Math.PI) / 180;
-        sumSin += Math.sin(rad);
-        sumCos += Math.cos(rad);
-      }
-      return (((Math.atan2(sumSin, sumCos) * 180) / Math.PI) + 360) % 360;
+  // V1.2 Steg 7 (§30-33): opptil MAX_VISIBLE_ZONES REELT distinkte områder
+  // fra motorens egen klynging (result.zones, se grid.ts sin extractZones —
+  // samme sannhetskilde som heatmap-laget), ikke bare den ene beste sonen.
+  // Etter Steg 3-fiksen (kjede-relativ watershed) er disse nå genuint
+  // separate områder, ikke nesten-identiske duplikater av samme platå, så
+  // det er trygt å vise flere uten å drukne kartet i like blobs.
+  //
+  // Hunting-zones-oppdraget §7: hevet fra 3 til MAX_VISIBLE_ZONES (5) —
+  // brukeren skal kunne se "alternativ 2 og 3" (og opptil 4/5 der de
+  // faktisk finnes), samme tak som motorens egen zones.maxZones (config.ts),
+  // ikke en ny, uavhengig grense kartet finner på selv.
+  const visteHotspots = useMemo<PredictionZone[]>(() => {
+    const soner = aktivHeatmap?.result.zones ?? (besteMotorSone ? [besteMotorSone] : []);
+    return soner.slice(0, MAX_VISIBLE_ZONES);
+  }, [aktivHeatmap, besteMotorSone]);
+
+  // V1.5 (§10-12, zone-identitet på tvers av en anker-/analysegrense):
+  // `zone.id` (f.eks. "hjort-zone-1", se engine.ts) er kun stabilt INNAD i ÉN
+  // motorkjøring — indeksbasert på rangeringsrekkefølgen i akkurat DEN
+  // kjøringen. Etter at analysisAnchor er byttet ut (§ eksplisitt reanalyse)
+  // kan en HELT ANNEN geografisk sone få nøyaktig samme id-streng. Sone-VALG
+  // som overlever på tvers av en re-render (valgtHotspotId/huntPlanZoneId)
+  // identifiserer derfor sonen med BÅDE hvilken motorkjøring den kom fra
+  // (predictionSnapshotId — samme `${species}-${engineResultGeneratedAt}`-
+  // mønster som huntPlan.ts sin stablePredictionSnapshotId, gjenbrukt her
+  // uendret, ikke en ny parallell id) OG selve zone.id. Reset-effekten over
+  // (ved analysisAnchor-bytte) nullstiller allerede valget ved enhver reell
+  // ny analyse — denne id-skopingen er en eksplisitt EKSTRA sikring, per
+  // oppdragets egen anbefaling, som gjør at en gammel id uansett aldri kan
+  // matche en ny, geografisk annerledes sone selv om reset-effekten av en
+  // eller annen grunn skulle utebli.
+  function generatedAtForSpecies(species: EngineSpecies): number | null {
+    if (aktivHeatmap?.species === species) return aktivHeatmap.result.generatedAt;
+    const dyr = dyrListe.find((d) => heatmapPerArt[d]?.species === species);
+    return dyr ? heatmapPerArt[dyr]?.result.generatedAt ?? null : null;
+  }
+  function zoneIdentity(sone: PredictionZone): string {
+    const generatedAt = generatedAtForSpecies(sone.species);
+    return generatedAt != null ? `${stablePredictionSnapshotId(sone.species, generatedAt)}:${sone.id}` : sone.id;
+  }
+
+  // Kold-start-visningsoppdraget §5: "Vis heatmapet mer subtilt" når HELE
+  // det synlige resultatet er ren terrengantakelse — ALLE synlige soner
+  // environment_only, ingen observasjonsbidrag noe sted. Rent presentasjon
+  // (opacity), rører ALDRI selve vektene/gradienten — se heatmapRenderPoints,
+  // uendret. `false` (full, vanlig opasitet) når det ikke finnes noen synlig
+  // sone i det hele tatt — det er IKKE et cold-start-signal, bare "ingenting
+  // å vise ennå".
+  const heatmapErRentTerrengbasert = useMemo(
+    () => visteHotspots.length > 0 && visteHotspots.every((s) => s.predictionMode === "environment_only"),
+    [visteHotspots]
+  );
+
+  // Kold-start-visningsoppdraget §8/§13: glatter det rå rutenett-omrisset
+  // (zone.footprint.hull, se grid.ts sin gridBoundaryPolygon) til en rundere
+  // kontur for RENDERING — samme geografiske utstrekning, ikke et nytt
+  // omriss. Beregnet ÉN gang per faktisk endring i visteHotspots (§13: ikke
+  // per frame), ikke inline i selve JSX-mapet under.
+  const smoothedFootprintByZone = useMemo(() => {
+    const map = new Map<string, LatLng[]>();
+    for (const sone of visteHotspots) {
+      const hull = sone.footprint?.hull;
+      if (hull && hull.length >= 3) map.set(zoneIdentity(sone), smoothPolygonRing(hull));
     }
-    if (userLocation) return calcBearing(hotspotSone.center, userLocation);
-    return 0;
-  }, [hotspotSone, obsMedGps, userLocation]);
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- zoneIdentity er en ren funksjon av visteHotspots+aktivHeatmap/besteMotorSone (via generatedAtForSpecies), ikke egen state.
+  }, [visteHotspots]);
 
-  const hotspotSektorCoords = useMemo(() => {
-    if (!hotspotSone || hotspotSektorBearing === null) return null;
-    return buildSector(hotspotSone.center, 1400, hotspotSektorBearing);
-  }, [hotspotSone, hotspotSektorBearing]);
+  // Sonen som faktisk forklares når brukeren trykker på en hotspot-markør —
+  // den brukeren sist valgte blant visteHotspots, eller beste sone som
+  // standard. Alltid tilgjengelig (ikke lenger avhengig av "Prediksjon"-
+  // bryteren) — dette ER nå appens ENESTE "beste område"-kilde, se
+  // statusInnhold().
+  const hotspotSone = visteHotspots.find((s) => zoneIdentity(s) === valgtHotspotId) ?? visteHotspots[0] ?? null;
+
+  // ── HuntPlan (§3.1): sonen en åpen jaktplan gjelder for — slått opp i
+  // SAMME ferske visteHotspots-liste som hotspotSone over, ikke en frossen
+  // kopi fra da knappen ble trykket.
+  const huntPlanZone = useMemo(
+    () => (huntPlanZoneId ? visteHotspots.find((s) => zoneIdentity(s) === huntPlanZoneId) ?? null : null),
+    [huntPlanZoneId, visteHotspots, aktivHeatmap, heatmapPerArt]
+  );
+  // §3.16: styrer kartets "kun ÉN sones detaljer om gangen"-modus mens en
+  // jaktplan er åpen — se overlay-filtrene i JSX-en under.
+  const erJaktplanAktiv = huntPlanZoneId !== null;
+
+  // Motoren krever et løst EnvironmentResolver-oppslag (samme forutsetning
+  // som den økologiske motoren over) — når det mangler (f.eks. "Prediksjon"
+  // ikke slått på ennå), vises en ærlig statusbeskjed i panelet i stedet for
+  // å late som en plan finnes (§3.4: aldri fabrikkert sikkerhet).
+  const huntPlanUnavailableReason = !environmentResolver
+    ? "Slå på Prediksjon i Kartlag for å beregne en jaktplan her."
+    : null;
+
+  // buildHuntPlan() krever `engineResultGeneratedAt` — det ENGINE-KJØRING
+  // huntPlanZone faktisk kom fra (§ stablePredictionSnapshotId i
+  // huntPlan.ts), ikke Date.now(). aktivHeatmap.result er den kjøringen NÅR
+  // artsfilteret matcher; ellers slås heatmapPerArt opp direkte på art
+  // (dekker fallback-grenen der visteHotspots kommer fra besteMotorSone).
+  const huntPlanEngineResultGeneratedAt = useMemo(
+    () => (huntPlanZone ? generatedAtForSpecies(huntPlanZone.species) : null),
+    [huntPlanZone, aktivHeatmap, heatmapPerArt]
+  );
+
+  const huntPlan = useMemo<HuntPlan | null>(() => {
+    if (!huntPlanZone || !environmentResolver || huntPlanEngineResultGeneratedAt == null) return null;
+    try {
+      return buildHuntPlan(
+        huntPlanZone,
+        visteHotspots,
+        environmentResolver(huntPlanZone.center),
+        huntPlanTargetMs,
+        huntPlanEngineResultGeneratedAt
+      );
+    } catch {
+      return null;
+    }
+  }, [huntPlanZone, visteHotspots, environmentResolver, huntPlanTargetMs, huntPlanEngineResultGeneratedAt]);
+
+  function apneJaktplan(sone: PredictionZone) {
+    setHuntPlanZoneId(zoneIdentity(sone));
+    setHuntPlanTargetMs(Date.now());
+  }
+
+  function lukkJaktplan() {
+    setHuntPlanZoneId(null);
+  }
+
+  // Jaktplan-produktflyt-oppdraget §1/§2: "Planlegg jakten" fra Jakt-fanen
+  // sender `openPlan=1` sammen med de allerede eksisterende focusLat/focusLng/
+  // filter/heatmap-parameterne (se den eksisterende fokuserings-effekten over)
+  // — denne effekten åpner Jaktplan-arket for `hotspotSone` (samme "beste
+  // synlige sone"-kilde som resten av kartet allerede bruker, nå riktig
+  // artsfiltrert siden `aktivtFilter` allerede leses fra `params.filter` ved
+  // mount) automatisk ÉN gang, via SAMME apneJaktplan()/HuntPlanPanel som det
+  // manuelle "Planlegg jakt her"-trykket på en sone bruker — ingen ny
+  // Jaktplan-vei, kun en ekstra automatisk trigger av den eksisterende. Ren
+  // ledningstrekking: ingen ny motor-/utregningslogikk. `autoOpenedPlanRef`
+  // sikrer at dette skjer maks ÉN gang per navigasjon hit — uten den ville
+  // enhver senere re-render (f.eks. etter at brukeren selv lukker arket)
+  // risikere å åpne det på nytt av seg selv, som ville vært uventet/irriterende
+  // UX. Uten `openPlan=1` i URL-en (den vanlige "trykk på Kart-fanen"-veien,
+  // eller den eksisterende "Se på kart"-lenken) gjør denne effekten
+  // ingenting — kartet oppfører seg nøyaktig som før.
+  const autoOpenedPlanRef = useRef(false);
+  useEffect(() => {
+    if (params.openPlan !== "1") return;
+    if (autoOpenedPlanRef.current) return;
+    if (!hotspotSone) return;
+    autoOpenedPlanRef.current = true;
+    apneJaktplan(hotspotSone);
+  }, [params.openPlan, hotspotSone]);
+
+  // FJERNET (V1.2, arkitekturbeslutning): en tidligere "hotspot-sektor" som
+  // pekte "hvilken vei" rundt hotspot-sonen, beregnet fra en egen sirkulær
+  // gjennomsnitt av rå `retning`-felt blant nærliggende observasjoner. Dette
+  // var PARALLELL prediksjonslogikk i UI — motoren selv eksponerer ingen
+  // autoritativ bearing på en PredictionZone (signalBreakdown.movementDirection
+  // og .corridor er scorebidrag, ikke retningsvinkler), så sektoren kunne i
+  // prinsippet peke en annen vei enn det motorens egen scoring/heatmap
+  // faktisk uttrykker. "Motoren er sannhetskilden" — inntil motoren selv
+  // eksponerer et ekte, tidsavtagende directional-hint-felt på en sone
+  // (dokumentert som en mulig V1.3-retning), skal kartet IKKE tegne en egen
+  // retningspil. Heatmap-gradienten bærer den geografiske directional
+  // influence-informasjonen i mellomtiden. Kameraets EGEN fysiske
+  // retningssektor (kameraSektorCoords over) er UBERØRT — det er
+  // utstyrsmetadata, ikke en prediksjon.
 
   // Tidbaserte aktive soner (klokkeslett-mønster)
   const aktiveSoner = useMemo<AktivSone[]>(() => {
@@ -930,17 +1492,23 @@ export default function KartScreen() {
     const fLat = params.focusLat ? Number(params.focusLat) : null;
     const fLng = params.focusLng ? Number(params.focusLng) : null;
     if (fLat && fLng && !Number.isNaN(fLat) && !Number.isNaN(fLng)) {
-      mapRef.current.animateToRegion(
-        { latitude: fLat, longitude: fLng, latitudeDelta: 0.10, longitudeDelta: 0.10 },
-        600
-      );
+      // Fra Hjem ("Åpne kart") — fit-bounds rundt BÅDE brukerens posisjon OG
+      // den anbefalte sonens fotavtrykk (§ "Åpne kart fra Hjem"-fokusering
+      // over), ikke lenger et fast tett utsnitt rundt kun ett punkt. Sonen
+      // hentes fra DEN SAMME delte cachen (resultCache.ts) Hjem nettopp
+      // skrev til — samme kanoniske resultat, ingen ny motorkjøring her.
+      const species = params.filter ? KARUSELL_ART_FRA_DYR[params.filter] : undefined;
+      const cachedSone = species ? getCachedIntelligenceResult(species)?.result.zones[0] ?? null : null;
+      const fokusPunkt: LatLng = { latitude: fLat, longitude: fLng };
+      const punkter = cachedSone ? [userLocation, ...sonefotavtrykkPunkter(cachedSone)] : [userLocation, fokusPunkt];
+      mapRef.current.animateToRegion(fitRegionRundtPunkter(punkter), 600);
     } else {
       mapRef.current.animateToRegion(
         { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.6, longitudeDelta: 0.6 },
         600
       );
     }
-  }, [params.focusLat, params.focusLng, userLocation, mapReady]);
+  }, [params.focusLat, params.focusLng, params.filter, userLocation, mapReady]);
 
   // "Hva skjer nå"-innholdet delt mellom desktop-panelet og mobilens bottom
   // sheet (§16/§24) — samme data, to ulike beholdere. Motoren er nå appens
@@ -961,7 +1529,11 @@ export default function KartScreen() {
     if (hotspotSone) {
       return (
         <>
-          <EngineStatusPanel zone={hotspotSone} compact={compact} showScore />
+          {/* V1.3 §N/§O: engine.ts bygger nå recommendation for hver sone
+              (samme Støtter/Begrenser-grunner som explanation/dominantSignals,
+              ingen ny beregning her) — se PredictionZone.recommendation i
+              types.ts og buildZoneRecommendation() i explain.ts. */}
+          <EngineStatusPanel zone={hotspotSone} recommendation={hotspotSone.recommendation} compact={compact} showScore userLocation={userLocation} />
           {!compact && medHeadline && (
             <>
               <Text style={styles.bottomMeta}>
@@ -990,6 +1562,16 @@ export default function KartScreen() {
                 <Ionicons name="chevron-forward" size={13} color={uiColor.primary} />
               </Pressable>
             </>
+          )}
+          {/* HuntPlan-oppdraget §3.1: åpner planen i et ARK OVER kartet
+              (ModalSheet), ALDRI en navigasjon bort fra Kart (§3.15). Vist i
+              alle ikke-kompakte visninger av statusInnhold() — både desktop-
+              panelet og mobilens utvidede bottom sheet. */}
+          {!compact && (
+            <Pressable style={styles.planKnapp} onPress={() => apneJaktplan(hotspotSone)}>
+              <Ionicons name="compass-outline" size={16} color={uiColor.primaryText} />
+              <Text style={styles.planKnappText}>Planlegg jakt her</Text>
+            </Pressable>
           )}
         </>
       );
@@ -1033,28 +1615,54 @@ export default function KartScreen() {
             showPropertyBoundaries={visEiendomsgrenser}
             onLongPress={handleMapLongPress}
             onPress={() => { setSelectedCamera(null); filterOpenSet(false); }}
+            onRegionChangeComplete={handleMapRegionChangeComplete}
           >
-            {/* Radius-sirkel */}
+            {/* Radius-sirkel — V1.2.2: sentrert på analyseSenter (kartets
+                region etter panorering), ikke lenger alltid userLocation,
+                ellers ville sirkelen løyet om hvor motoren faktisk ser. */}
             <Circle
-              center={userLocation}
+              center={analyseSenter ?? userLocation}
               radius={radiusKm * 1000}
               strokeWidth={1.5}
               strokeColor="rgba(44,195,107,0.4)"
               fillColor="rgba(44,195,107,0.04)"
             />
 
-            {/* Sektoroverlegg — hotspot-sonen fra motoren */}
-            {hotspotSektorCoords && (
-              <Polygon
-                coordinates={hotspotSektorCoords}
-                fillColor="rgba(59,130,246,0.22)"
-                strokeColor="rgba(59,130,246,0.55)"
-                strokeWidth={1.5}
+            {/* Hunting-zones-oppdraget §1 (lag-rekkefølge): "topo → heatmap →
+                soner → observasjoner/kamera/spor → jaktlag". ViltIQ heatmap
+                (§5–§7 i STEG 4-oppdraget) er den UNDERLIGGENDE "Intelligence
+                Layer" — motorens sannsynlighetslandskap for den aktive arten
+                — og skal derfor tegnes FØR (altså visuelt UNDER, siden
+                JSX-rekkefølge = lag-rekkefølge på både Leaflet og
+                react-native-maps) sone-polygonene/-ringene, observasjons-
+                markørene og jaktlagets posisjoner under. Tidligere lå dette
+                laget lengst NEDE i treet (dermed øverst/oppå alt annet) —
+                det begravde både sonepolygonene og observasjonsmarkørene
+                under gradienten i stedet for omvendt. Flyttet hit, rett
+                under radius-sirkelen; selve punktene/vektene (heatmapRenderPoints)
+                er UENDRET, dette er ren presentasjons-rekkefølge.
+
+                STEG 5 §7 — zoom-oppførsel er VERIFISERT, ikke bygget på nytt:
+                radius er i SKJERM-piksler, ikke geografiske meter, på begge
+                plattformer (leaflet.heat sin simpleheat-motor på web, Google
+                Maps' HeatmapTileProvider via react-native-maps på native).
+                Se components/LeafletMapImpl.tsx sin Heatmap-komponent for
+                web-implementasjonen. */}
+            {visPrediksjon && !erJaktplanAktiv && heatmapRenderPoints.length > 0 && (
+              <Heatmap
+                points={heatmapRenderPoints}
+                radius={HEATMAP_POINT_RADIUS}
+                gradient={heatmapGradientProp}
+                // Kold-start-visningsoppdraget §5: uendret (biblioteksdefault)
+                // opasitet når det finnes ekte lokal evidens noe sted i
+                // resultatet — kun dempet ved REN terrengantakelse, se
+                // heatmapErRentTerrengbasert over.
+                opacity={heatmapErRentTerrengbasert ? 0.55 : undefined}
               />
             )}
 
             {/* Sektoroverlegg — valgt kameras retningsfelt */}
-            {kameraSektorCoords && (
+            {kameraSektorCoords && !erJaktplanAktiv && (
               <Polygon
                 coordinates={kameraSektorCoords}
                 fillColor="rgba(96,165,250,0.20)"
@@ -1063,8 +1671,9 @@ export default function KartScreen() {
               />
             )}
 
-            {/* Tidbaserte aktive soner */}
-            {aktiveSoner.map((s) => (
+            {/* Tidbaserte aktive soner — HuntPlan-oppdraget §3.16: skjult
+                mens en jaktplan er åpen ("ikke vis 25 overlays samtidig"). */}
+            {!erJaktplanAktiv && aktiveSoner.map((s) => (
               <Circle
                 key={s.id}
                 center={{ latitude: s.latitude, longitude: s.longitude }}
@@ -1079,27 +1688,108 @@ export default function KartScreen() {
               />
             ))}
 
-            {/* Beste sone (motorens hotspot) */}
-            {hotspotSone && (
-              <Marker
-                coordinate={{ latitude: hotspotSone.center.latitude, longitude: hotspotSone.center.longitude }}
-                anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
-              >
-                <MarkerBadge kind="best-zone" size="lg" emoji={hotspotSone.species === "annet" ? "🦊" : "🦌"} />
-              </Marker>
-            )}
+            {/* V1.3 (§K/§L): sonens FAKTISKE geografiske utstrekning —
+                zone.footprint.hull, de faktisk krevde grid-cellenes konvekse
+                skrog fra extractZones() (src/engine/grid.ts), IKKE en
+                kunstig sirkel rundt zone.center. Tegnes UNDER rangerings-
+                ringene under (JSX-rekkefølge = lag-rekkefølge på både
+                Leaflet og react-native-maps).
+
+                Hunting-zones-oppdraget §1: rangeringsbasert visuell hierarki
+                (zoneTierStyle, definert ovenfor komponenten) — #1 tydelig
+                grønn kontur+fylling, #2 merkbart svakere, #3 (og #4/#5,
+                innenfor motorens egne maxZones-tak) subtilest. Den valgte
+                sonen (trykket/åpen i panelet) får i tillegg en liten
+                strokeWidth-boost OVENPÅ sin rangerings-tier — men rangeringen
+                er fortsatt PRIMÆRSIGNALET, ikke valgt-status alene (§ "på ett
+                sekund se hvor ViltIQ mener jeg bør være", ikke bare ved å
+                trykke). Et skrog med under 3 punkter (en liten/enkelt-celle-
+                sone — se convexHull() i src/lib/geo.ts) har intet
+                meningsfullt polygon å tegne og hoppes derfor over. */}
+            {/* HuntPlan-oppdraget §3.16: mens en plan er åpen vises KUN den
+                planlagte sonens polygon/ring, ikke de andre 1–4 sonene —
+                "ikke vis 25 overlays samtidig". */}
+            {(erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
+              const hull = smoothedFootprintByZone.get(zoneIdentity(sone));
+              if (!hull || hull.length < 3) return null;
+              const rank = sone.rank ?? 1;
+              const tier = zoneTierStyle(rank, sone.predictionMode);
+              const erValgtFootprint = sone.id === hotspotSone?.id;
+              return (
+                <Polygon
+                  key={`footprint-${zoneIdentity(sone)}`}
+                  coordinates={hull}
+                  strokeColor={tier.strokeColor}
+                  strokeWidth={erValgtFootprint ? tier.strokeWidth + 0.75 : tier.strokeWidth}
+                  fillColor={tier.fillColor}
+                  lineDashPattern={tier.lineDashPattern}
+                />
+              );
+            })}
+
+            {/* V1.2.2 KORRIGERING (§10-11 i korrigeringsoppdraget): hotspots
+                var tidligere store dyre-emoji-PINNER — det leser visuelt som
+                "dyret står akkurat her", falsk presisjon motoren aldri
+                påstår. Erstattet med diskrete, tallrangerte RINGER (samme
+                MarkerRing-primitiv som allerede fantes for akkurat dette
+                formålet, se komponentens egen kommentar: "en pin ville løyet
+                om presisjon"). Ringene forblir trykkbare for å velge/åpne
+                forklaringen. Trykk på EN ring gjør den til valgt sone OG
+                åpner forklaringen samlet.
+
+                Hunting-zones-oppdraget §1/§4: ring-STØRRELSE og -FARGE er nå
+                rangeringsbasert (zoneTierStyle), ikke bare valgt/ikke-valgt —
+                #1 er alltid størst/klarest uansett om den er trykket akkurat
+                nå. Rangeringstall+score ("#1 · 68") vises nå for ALLE synlige
+                soner (også #1), og #1 får i tillegg en liten "ANBEFALT"-
+                merkelapp — rangeringen skal være øyeblikkelig synlig, ikke
+                noe brukeren må trykke seg frem til for å oppdage. */}
+            {(erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
+              const rank = sone.rank ?? 1;
+              const tier = zoneTierStyle(rank, sone.predictionMode);
+              const erValgt = sone.id === hotspotSone?.id;
+              return (
+                <StableMarker
+                  key={zoneIdentity(sone)}
+                  coordinate={{ latitude: sone.center.latitude, longitude: sone.center.longitude }}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  onPress={() => { setValgtHotspotId(zoneIdentity(sone)); setSheetSnap("expanded"); }}
+                >
+                  <View style={styles.hotspotRingWrap}>
+                    <MarkerRing
+                      variant="hotspot"
+                      size={erValgt ? tier.ringSize + 4 : tier.ringSize}
+                      color={tier.ringColor}
+                    />
+                  </View>
+                  <View style={[styles.hotspotScoreBadge, rank > 1 && styles.hotspotScoreBadgeSecondary]} pointerEvents="none">
+                    <Text style={styles.hotspotScoreText}>#{rank} · {Math.round(sone.score)}</Text>
+                  </View>
+                  {/* V1.3: mens Jaktplan-arket er åpent for NETTOPP denne
+                      sonen, viser HuntPlan sin egen markør (under) allerede
+                      en "ANBEFALT POST"-merkelapp på SAMME koordinat
+                      (recommendedPosition = zone.center for primærsonen) —
+                      denne badgen droppes da for å unngå to overlappende
+                      merkelapper på samme punkt. Utenfor jaktplan-visningen
+                      (vanlig hotspot-browsing) vises den som før. */}
+                  {rank === 1 && !(erJaktplanAktiv && zoneIdentity(sone) === huntPlanZoneId) && (
+                    <View style={styles.hotspotAnbefaltWrap} pointerEvents="none">
+                      <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>
+                    </View>
+                  )}
+                </StableMarker>
+              );
+            })}
 
             {/* Observasjonsmarkører — dyr sett (manuelt/kamera). Sonesenteret
                 over er et beregnet grid-punkt fra motoren, ikke koordinatet
                 til en enkelt observasjon, så det er ikke lenger behov for å
                 filtrere bort en "sådde sonen"-observasjon her. */}
-            {visObservasjoner && dyrObsMedGps.map((o) => (
-              <Marker
+            {visObservasjoner && !erJaktplanAktiv && dyrObsMedGps.map((o) => (
+              <StableMarker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
                 anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
                 title={`${o.dyr} · ${o.type}`}
                 description={o.kommentar || undefined}
                 onPress={() => bekreftSlettObservasjonFraKart(o)}
@@ -1110,45 +1800,42 @@ export default function KartScreen() {
                   emoji={dyrEmoji(o.dyr)}
                   accentColor={o.dyr === "Rev" ? uiColor.levelHøy : undefined}
                 />
-              </Marker>
+              </StableMarker>
             ))}
 
             {/* Sporregistreringer */}
-            {visSporAnnet && sporObsMedGps.map((o) => (
-              <Marker
+            {visSporAnnet && !erJaktplanAktiv && sporObsMedGps.map((o) => (
+              <StableMarker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
                 anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
                 title={`Spor${o.sporType ? " · " + o.sporType : ""}`}
                 description={o.kommentar || undefined}
                 onPress={() => bekreftSlettObservasjonFraKart(o)}
               >
                 <MarkerBadge kind="spor" size="sm" icon="paw-outline" />
-              </Marker>
+              </StableMarker>
             ))}
 
             {/* "Annet"-kartpunkter */}
-            {visSporAnnet && mapPoints.map((p) => (
-              <Marker
+            {visSporAnnet && !erJaktplanAktiv && mapPoints.map((p) => (
+              <StableMarker
                 key={p.id}
                 coordinate={{ latitude: p.latitude, longitude: p.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
                 title={p.label || p.pointType}
                 description={p.kommentar || undefined}
               >
                 <MarkerBadge kind="annet" size="sm" icon="pricetag-outline" />
-              </Marker>
+              </StableMarker>
             ))}
 
             {/* Kameramarkører */}
-            {visKameraer && kameraer.map((k) => (
-              <Marker
+            {visKameraer && !erJaktplanAktiv && kameraer.map((k) => (
+              <StableMarker
                 key={k.id}
                 coordinate={{ latitude: k.latitude, longitude: k.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
                 onPress={() => {
                   setSelectedCamera(k);
                   setCameraView("info");
@@ -1166,67 +1853,86 @@ export default function KartScreen() {
                   </View>
                   <MarkerBadge kind="kamera" size="md" icon="camera" />
                 </View>
-              </Marker>
+              </StableMarker>
             ))}
 
-            {/* ViltIQ heatmap (§5–§7 i STEG 4-oppdraget) — motorens
-                sannsynlighetslandskap for den aktive arten, ikke bare
-                sonesentrene. Erstatter de gamle per-art-sirklene for de tre
-                artene motoren faktisk vurderer.
-
-                STEG 5 §7 — zoom-oppførsel er VERIFISERT, ikke bygget på nytt:
-                radius er i SKJERM-piksler, ikke geografiske meter, på begge
-                plattformer (leaflet.heat sin simpleheat-motor på web, Google
-                Maps' HeatmapTileProvider via react-native-maps på native).
-                Siden punktene projiseres til piksler på nytt ved hver
-                zoom/pan (leaflet: "moveend"-lytter, Android: kvadtre-baserte
-                tiles per zoom-nivå), gir SAMME piksel-radius automatisk
-                bredere/jevnere flater når man zoomer ut og mer lokal
-                variasjon når man zoomer inn — uten noe eget GIS-lag. Se
-                components/LeafletMapImpl.tsx sin Heatmap-komponent for
-                web-implementasjonen.
-
-                Redesign-oppdraget: `gradient` ble aldri sendt inn her før —
-                web fikk HEATMAP_GRADIENT uansett (LeafletMapImpl hardkoder
-                den internt), men native falt stille tilbake til react-
-                native-maps sin EGEN standardgradient, så de to plattformene
-                sannsynligvis så forskjellige ut. Nå eksplisitt likt begge
-                steder. */}
-            {visPrediksjon && aktivHeatmap && aktivHeatmap.points.length > 0 && (
-              <Heatmap points={aktivHeatmap.points} radius={32} gradient={heatmapGradientProp} />
-            )}
-
-            {/* STEG 5 §5: trykkbar hotspot-markør — åpner den fulle
-                motorforklaringen (art/nivå/confidence/signaler/score) for
-                sonen bak det synlige heatmap-laget. En diskret ring, ikke en
-                pin, for ikke å late som om dette er et eksakt punkt (§7).
-                Vises uavhengig av "Prediksjon"-bryteren (som kun styrer selve
-                heatmap-gradienten over) — motoren har alltid en vurdering. */}
-            {hotspotSone && (
-              <Marker
-                coordinate={{ latitude: hotspotSone.center.latitude, longitude: hotspotSone.center.longitude }}
-                anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges={false}
-                onPress={() => setSheetSnap("expanded")}
-              >
-                <View style={styles.hotspotRingWrap}>
-                  <MarkerRing variant="hotspot" />
-                </View>
-              </Marker>
-            )}
-
             {/* Jaktlag-medlemmers live-posisjoner */}
-            {medlsPosisjon.map((m) => (
-              <Marker
+            {!erJaktplanAktiv && medlsPosisjon.map((m) => (
+              <StableMarker
                 key={`medl-${m.uid}`}
                 coordinate={{ latitude: m.latitude, longitude: m.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
                 title={m.epost || "Jeger"}
               >
                 <MarkerBadge kind="party" size="sm" emoji={(m.epost?.[0] ?? "J").toUpperCase()} />
-              </Marker>
+              </StableMarker>
             ))}
+
+            {/* HuntPlan-oppdraget §3.16: mens en plan er åpen — KUN det
+                anbefalte punktet (egen markør, tydelig ulik sonens egen
+                rangerings-ring), en tilnærmings-sektor (buildSector, samme
+                primitiv som kameraets retningsfelt over) langs
+                approach.recommendedApproachDirectionDeg, og — KUN når
+                expectedMovement faktisk har en retning OG en meningsfull
+                confidence (samme terskel som HuntPlanPanel sin tekst-hedging,
+                se MEANINGFUL_MOVEMENT_CONFIDENCE) — en dempet bevegelsespil.
+                Motoren er sannhetskilden for alle tre punktene/retningene;
+                kartet tegner kun det motoren allerede har regnet ut. */}
+            {erJaktplanAktiv && huntPlan && (
+              <>
+                {/* recommendedApproachDirectionDeg er `null` når motoren ikke
+                    kjenner vindretningen for punktet (§3.9 i huntPlan.ts) —
+                    ALDRI en gjettet kurs, så sektoren tegnes rett og slett
+                    ikke i det tilfellet i stedet for å late som en retning
+                    finnes. */}
+                {huntPlan.approach.recommendedApproachDirectionDeg != null && (
+                  <Polygon
+                    key="huntplan-approach-sector"
+                    coordinates={buildSector(
+                      huntPlan.recommendedPosition,
+                      90,
+                      huntPlan.approach.recommendedApproachDirectionDeg,
+                      36
+                    )}
+                    fillColor="rgba(44,195,107,0.22)"
+                    strokeColor="rgba(44,195,107,0.65)"
+                    strokeWidth={1.5}
+                  />
+                )}
+                {huntPlan.expectedMovement.directionDeg != null &&
+                  huntPlan.expectedMovement.confidence >= MEANINGFUL_MOVEMENT_CONFIDENCE && (
+                    <Polygon
+                      key="huntplan-movement-arrow"
+                      coordinates={buildSector(
+                        huntPlan.expectedMovement.from ?? huntPlan.primaryZone.center,
+                        130,
+                        huntPlan.expectedMovement.directionDeg,
+                        20
+                      )}
+                      fillColor="rgba(96,165,250,0.20)"
+                      strokeColor="rgba(96,165,250,0.55)"
+                      strokeWidth={1.5}
+                    />
+                  )}
+                <Marker
+                  key="huntplan-position"
+                  coordinate={huntPlan.recommendedPosition}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  tracksViewChanges={false}
+                >
+                  <View style={styles.huntPlanTargetWrap} pointerEvents="none">
+                    <Ionicons name="locate" size={22} color={uiColor.primary} />
+                  </View>
+                  {/* V1.3 "Anbefalt jaktpost": samme merkelapp-mønster som
+                      hotspotAnbefaltWrap/hotspotAnbefaltText over (rank 1-
+                      hotspoten) — gjenbruker eksisterende visuelt språk i
+                      stedet for å finne opp et nytt. */}
+                  <View style={styles.hotspotAnbefaltWrap} pointerEvents="none">
+                    <Text style={styles.hotspotAnbefaltText}>ANBEFALT POST</Text>
+                  </View>
+                </Marker>
+              </>
+            )}
 
             {/* Valgt ny-pin — der brukeren nettopp trykket for å registrere noe */}
             {selectedPin && (
@@ -1274,6 +1980,25 @@ export default function KartScreen() {
           </View>
         </View>
 
+        {/* ── "Analyser dette området" — DEN ENESTE knappen i hele kartet som
+            kan flytte analysisAnchor (se reanalyserHer() og filkommentaren
+            ved analysisAnchor-state over). Vises KUN når viewporten faktisk
+            har beveget seg langt nok fra det låste ankeret til at en ny
+            analyse ville dekket noe reelt annet (kanReanalysereHer — samme
+            geografiske hysterese-regel som §C, men her brukt UTELUKKENDE til
+            synlighet). Panorering/zoom ALENE gjør ALDRI noe mer enn å vise
+            denne knappen — trykket er obligatorisk. Skjult mens en jaktplan
+            er åpen (samme "kun én sones detaljer om gangen"-filosofi som
+            resten av §3.16-overlayene). */}
+        {kanReanalysereHer && !erJaktplanAktiv && !selectedPin && !selectedCamera && (
+          <View style={styles.reanalyserWrap} pointerEvents="box-none">
+            <Pressable style={styles.reanalyserKnapp} onPress={reanalyserHer} hitSlop={4}>
+              <Ionicons name="refresh-outline" size={16} color={uiColor.primaryText} />
+              <Text style={styles.reanalyserKnappText}>Analyser dette området</Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* ── Artsfilter — alltid synlig rad, ikke en gjemt dropdown (§22) ── */}
         {!selectedPin && !selectedCamera && (
           <ScrollView
@@ -1287,7 +2012,18 @@ export default function KartScreen() {
               return (
                 <Pressable
                   key={dyr}
-                  onPress={() => setAktivtFilter(dyr)}
+                  onPress={() => {
+                    setAktivtFilter(dyr);
+                    // §3 i art-karusell-oppdraget: Kart sitt artsfilter og Hjem sin
+                    // art-karusell deler ett valg via settings.ts — skriv tilbake KUN
+                    // for de tre artene karusellen faktisk støtter, se KARUSELL_ART_FRA_DYR.
+                    const karusellArt = KARUSELL_ART_FRA_DYR[dyr];
+                    if (karusellArt) {
+                      getSettings()
+                        .then((s) => saveSettings({ ...s, selectedSpecies: karusellArt }))
+                        .catch(() => {});
+                    }
+                  }}
                   style={[styles.filterChip, active && styles.filterChipActive]}
                 >
                   <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
@@ -1490,6 +2226,7 @@ export default function KartScreen() {
                     onPress={() => {
                       setRegDyr("Rådyr"); setRegAntall(1);
                       setRegKjonn(null); setRegAlder(null); setRegKommentar("");
+                      setRegRetningKjent(false); setRegRetning(0);
                       setCameraView("observasjon");
                     }}
                     style={styles.cameraActionBtn}
@@ -1542,7 +2279,7 @@ export default function KartScreen() {
                 <Text style={styles.pinLabel}>Dyr</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View style={styles.chipRow}>
-                    {dyrListe.map((dyr) => {
+                    {dyrRegistrerbar.map((dyr) => {
                       const a = regDyr === dyr;
                       return (
                         <Pressable key={dyr} onPress={() => setRegDyr(dyr)}
@@ -1584,6 +2321,27 @@ export default function KartScreen() {
                     );
                   })}
                 </View>
+
+                <Text style={styles.pinLabel}>Retning dyret gikk (valgfritt)</Text>
+                <Text style={styles.pinHint}>
+                  Kameraets retning ({selectedCamera.directionDegrees ?? 0}°) endres ikke — dette er
+                  hvilken vei DYRET beveget seg, ikke hvor kameraet peker.
+                </Text>
+                <View style={styles.chipRow}>
+                  <Pressable
+                    onPress={() => setRegRetningKjent((p) => !p)}
+                    style={[styles.pinChip, !regRetningKjent && styles.pinChipActive]}
+                  >
+                    <Text style={[styles.pinChipText, !regRetningKjent && styles.pinChipTextActive]}>
+                      Ukjent retning
+                    </Text>
+                  </Pressable>
+                </View>
+                {regRetningKjent && (
+                  <View style={{ marginTop: 16, alignItems: "center" }}>
+                    <RetningVelger value={regRetning} onChange={setRegRetning} label="Dyrets retning" />
+                  </View>
+                )}
 
                 <Text style={styles.pinLabel}>Kommentar (valgfritt)</Text>
                 <TextInput
@@ -1771,7 +2529,7 @@ export default function KartScreen() {
             <Text style={styles.pinLabel}>Dyr</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.chipRow}>
-                {dyrListe.map((dyr) => {
+                {dyrRegistrerbar.map((dyr) => {
                   const a = valgtDyr === dyr;
                   return (
                     <Pressable key={dyr} onPress={() => setValgtDyr(dyr)}
@@ -1849,7 +2607,7 @@ export default function KartScreen() {
             <Text style={styles.pinLabel}>Dyr (valgfritt)</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.chipRow}>
-                {dyrListe.map((dyr) => {
+                {dyrRegistrerbar.map((dyr) => {
                   const a = sporDyr === dyr;
                   return (
                     <Pressable key={dyr} onPress={() => setSporDyr((p) => (p === dyr ? null : dyr))}
@@ -1977,6 +2735,42 @@ export default function KartScreen() {
           >
             {statusInnhold(false, false)}
           </BottomSheet>
+        )}
+
+        {/* ── HuntPlan (Jaktplan) §3.1/§3.15 ── Ark OVER kartet, IKKE en
+            navigasjon bort fra Kart — kartet er fortsatt synlig rundt/bak
+            (ModalSheet sin scrim), samme mønster som appens øvrige
+            ark-baserte skjemaer (jakt.tsx/logg.tsx/kamera). Lukkes ved å
+            trykke utenfor, X-knappen i panelet, eller Android tilbake-knapp
+            (RN <Modal> sin onRequestClose, uendret i ModalSheet). */}
+        {huntPlanZone && (
+          <ModalSheet visible={erJaktplanAktiv} onClose={lukkJaktplan} maxHeightPercent={86}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <HuntPlanPanel
+                zone={huntPlanZone}
+                plan={huntPlan}
+                unavailableReason={huntPlanUnavailableReason}
+                targetDateTimeMs={huntPlanTargetMs}
+                onTargetTimeChange={setHuntPlanTargetMs}
+                onClose={lukkJaktplan}
+                userLocation={userLocation}
+                onFocusRecommendedPost={
+                  huntPlan
+                    ? () =>
+                        mapRef.current?.animateToRegion(
+                          {
+                            latitude: huntPlan.recommendedPosition.latitude,
+                            longitude: huntPlan.recommendedPosition.longitude,
+                            latitudeDelta: 0.05,
+                            longitudeDelta: 0.05,
+                          },
+                          500
+                        )
+                    : undefined
+                }
+              />
+            </ScrollView>
+          </ModalSheet>
         )}
       </View>
     </SafeAreaView>
@@ -2166,6 +2960,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase", letterSpacing: 1,
     marginTop: 10, marginBottom: 8,
   },
+  pinHint: { color: "#4D6858", fontSize: 12, lineHeight: 17, marginBottom: 8 },
   chipRow:  { flexDirection: "row", gap: 8, paddingRight: 16, flexWrap: "wrap" },
   pinChip: {
     backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
@@ -2235,9 +3030,48 @@ const styles = StyleSheet.create({
     width: minTouchTarget, height: minTouchTarget,
     alignItems: "center", justifyContent: "center",
   },
+  // Hunting-zones-oppdraget §1/§4: "#{rank} · {score}"-merkelapp for ALLE
+  // synlige hotspots (også #1, ikke bare sekundære) — se hotspotRingWrap-
+  // bruken over. Liten, diskret plassert i hjørnet av selve ringen — skal
+  // ALDRI konkurrere visuelt med heatmap-laget, kun bekrefte rangeringen.
+  hotspotScoreBadge: {
+    position: "absolute", top: -6, right: -8,
+    minWidth: 30, height: 16, borderRadius: 8, paddingHorizontal: 4,
+    backgroundColor: "rgba(8,14,10,0.9)",
+    borderWidth: 1, borderColor: uiColor.levelHøy,
+    alignItems: "center", justifyContent: "center",
+  },
+  hotspotScoreBadgeSecondary: {
+    borderColor: uiColor.levelHøy + "99",
+  },
+  hotspotScoreText: { color: uiColor.textPrimary, fontSize: 9, fontWeight: "800" },
+  // Kun rank 1 — liten grønn "ANBEFALT"-merkelapp under ringen, samme
+  // ViltIQ-grønn (uiColor.primary) som resten av appens primærhandlinger,
+  // ingen ny farge oppfunnet for dette formålet.
+  hotspotAnbefaltWrap: {
+    position: "absolute", top: minTouchTarget - 6, left: -26, right: -26,
+    alignItems: "center",
+  },
+  hotspotAnbefaltText: {
+    backgroundColor: uiColor.primary, color: uiColor.primaryText,
+    fontSize: 8, fontWeight: "900", letterSpacing: 0.5,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+    overflow: "hidden",
+  },
   cameraPinWrap:   { alignItems: "center" },
   cameraDirArrowWrap: {
     position: "absolute", top: -17, alignItems: "center", justifyContent: "center", zIndex: 1,
+  },
+
+  // HuntPlan-oppdraget §3.16: distinkt "sikte"-markør for det anbefalte
+  // punktet — bevisst ULIK sonens egen rangerings-ring (MarkerRing) og
+  // ULIK candidate-pinnen (MarkerBadge), slik at "anbefalt STÅSTED" aldri
+  // kan forveksles med "sonens senter" eller "et nytt punkt du registrerer".
+  huntPlanTargetWrap: {
+    width: minTouchTarget, height: minTouchTarget,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(8,14,10,0.55)", borderRadius: minTouchTarget / 2,
+    borderWidth: 2, borderColor: uiColor.primary,
   },
 
   bottomRow:    { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -2261,6 +3095,33 @@ const styles = StyleSheet.create({
     justifyContent: "center", gap: 4, marginTop: 10,
   },
   moreLinkText: { ...uiType.metadata, color: uiColor.primary },
+
+  // HuntPlan-oppdraget §3.1: primær CTA, samme visuelle vekt som andre
+  // primary-fylte handlingsknapper i appen (§39: minTouchTarget-høyde).
+  planKnapp: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: uiColor.primary, borderRadius: uiRadius.md,
+    paddingVertical: 12, marginTop: uiSpacing.md, minHeight: minTouchTarget,
+  },
+  planKnappText: { fontSize: 14, fontWeight: "800", color: uiColor.primaryText },
+
+  // V1.5 (§CTA "Analyser dette området"): flytende pille, bunnsentrert rett
+  // over den kollapsede bottom sheet-en (collapsedHeight=68, se
+  // <BottomSheet>) — samme "flytende instrument over kartet"-visuelle språk
+  // som resten av kartkontrollene (glass.controlBg), men i primary-farge for
+  // å skille den tydelig fra passive lagvalg: dette ER en handling.
+  reanalyserWrap: {
+    position: "absolute", left: 0, right: 0, bottom: 92,
+    alignItems: "center", zIndex: uiZ.panel,
+  },
+  reanalyserKnapp: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: uiColor.primary, borderRadius: uiRadius.pill,
+    paddingVertical: 10, paddingHorizontal: 18,
+    minHeight: minTouchTarget,
+    ...uiElevation.floating,
+  },
+  reanalyserKnappText: { fontSize: 13, fontWeight: "800", color: uiColor.primaryText },
 
   aktivLegend: {
     position: "absolute", left: 14, bottom: 130,

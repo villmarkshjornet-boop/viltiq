@@ -1,6 +1,33 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useEffect, useState, type ComponentProps } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { Marker as MapMarker } from "@/components/MapView";
 import { color } from "@/src/design/tokens";
+
+/**
+ * Diagnose-funn (se samtale): et kamera registrert MIDT i en aktiv økt (ikke
+ * del av det opprinnelige datasettet ved kart-mount) dukket aldri opp på
+ * kartet, selv om registreringen selv lyktes. Årsak: `tracksViewChanges={false}`
+ * satt til `false` FRA FØRSTE RENDER kan fange en native-markør i et blankt/
+ * 0×0-snapshot dersom SDK-en tar det aller første bildet før egendefinert
+ * View-innhold (MarkerBadge) faktisk har fått layoutet seg — og siden ingen
+ * ny snapshot noensinne skjer etterpå, blir markøren PERMANENT usynlig. Kjent
+ * react-native-maps/iOS-Fabric-kvirk (bekreftet i samtalens research).
+ * Erstatning for `<Marker tracksViewChanges={false}>`: start `true` (la SDK-en
+ * ta et korrekt bilde av det faktisk ferdiglayoutede innholdet), flipp til
+ * `false` en kort stund etterpå (stabil ytelse for markører som uansett ikke
+ * endrer utseende over tid — samme sluttilstand som før, bare trygg ankomst).
+ */
+const TRACKS_VIEW_CHANGES_SETTLE_MS = 600;
+
+export function StableMarker(props: ComponentProps<typeof MapMarker>) {
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setTracksViewChanges(false), TRACKS_VIEW_CHANGES_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, []);
+  return <MapMarker {...props} tracksViewChanges={tracksViewChanges} />;
+}
 
 /**
  * Redesign-oppdraget §22/§23: ÉN konsistent ViltIQ-markørspråk på kartet i

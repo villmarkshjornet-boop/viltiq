@@ -152,20 +152,95 @@ const defaultPinIcon = (color: string) =>
 
 // ─── MapBridge — kobler Leaflet sin imperative map-instans til ref/hendelser ─
 
+/** Leaflet map -> vårt felles Region-format (samme form react-native-maps allerede bruker). */
+function currentRegionOf(map: L.Map): Region {
+  const center = map.getCenter();
+  const bounds = map.getBounds();
+  return {
+    latitude: center.lat,
+    longitude: center.lng,
+    latitudeDelta: bounds.getNorth() - bounds.getSouth(),
+    longitudeDelta: bounds.getEast() - bounds.getWest(),
+  };
+}
+
 function MapBridge({
   onReady,
   onLongPress,
   onPress,
+  onRegionChangeComplete,
 }: {
   onReady: (map: L.Map) => void;
   onLongPress?: (e: LongPressEvent) => void;
   onPress?: () => void;
+  onRegionChangeComplete?: (region: Region) => void;
 }) {
   const map = useMap();
 
   useEffect(() => {
     onReady(map);
   }, [map, onReady]);
+
+  // Krasjfiks (getImageData "source width is 0"): Leaflet cacher sin egen
+  // map.getSize() (this._size, se leaflet-src.js) og invaliderer den KUN ved
+  // et window-nivå "resize"-event eller et eksplisitt invalidateSize()-kall
+  // — IKKE ved container-nivå layoutendringer (modal åpner/lukker seg over
+  // kartet, en ScrollView-seksjon som får reell høyde først etter mount,
+  // en hidden→visible-fane osv.). Uten dette forblir map._size det den var
+  // FØRSTE gang noe leste den — inkludert (0,0) dersom containeren
+  // tilfeldigvis ikke var lagt ut med reell størrelse akkurat da. Leaflet.heat
+  // sin L.HeatLayer setter canvas.width/height direkte fra map.getSize() ved
+  // laget-opprettelse (se Heatmap under) og kaller SIDEN getImageData på det
+  // — en cachet (0,0) her er eksakt kilden til
+  // "Failed to execute 'getImageData' ... source width is 0".
+  //
+  // ResizeObserver på selve kart-containeren er den korrekte, generelle
+  // fiksen (ikke en Heatmap-spesifikk lapp) — den fanger ENHVER reell
+  // størrelsesendring på containeren (uansett årsak) og ber Leaflet lese den
+  // på nytt via invalidateSize(), som i sin tur fyrer Leaflets "resize"-event
+  // (lyttet på av Heatmap under for å utsette laget-opprettelse til
+  // containeren faktisk har fått en reell størrelse). rAF-debounce unngår at
+  // vi kaller invalidateSize() flere ganger per layout-"tick" (f.eks. under
+  // en kontinuerlig ModalSheet-animasjon).
+  useEffect(() => {
+    const container = map.getContainer();
+    let frame: number | null = null;
+    // map.getContainer() forblir en (frakoblet) DOM-node selv ETTER
+    // map.remove() — Leaflet nuller den aldri ut (se leaflet-src.js sin
+    // Map.remove()), så den er IKKE en pålitelig "er kartet dødt?"-sjekk.
+    // Egen mounted-flagg er den robuste måten å hindre at en forsinket
+    // ResizeObserver/rAF-callback rører en fjernet map-instans etter unmount.
+    let mounted = true;
+
+    const observer = new ResizeObserver(() => {
+      if (frame != null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        if (!mounted) return;
+        // Krasjfiks (fortsettelse): sjekket TIDLIGERE map.getSize() (Leaflets
+        // EGEN cachede — og nettopp DERFOR potensielt utdaterte — verdi) for
+        // å avgjøre om invalidateSize() burde kalles. Det er sirkulært: i det
+        // ØYEBLIKKET en container går fra skjult (0×0) til synlig (reell
+        // størrelse) — akkurat når invalidateSize() faktisk trengs — har
+        // map.getSize() ENNÅ IKKE oppdatert seg (det er JO det kallet som
+        // oppdaterer den), så den gamle sjekken leste fortsatt (0,0) og
+        // hoppet over invalidateSize() nøyaktig når det telte. Container sin
+        // FAKTISKE DOM-størrelse (getBoundingClientRect, ikke Leaflets cache)
+        // er sannheten som skal styre dette kallet.
+        const rect = container.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          map.invalidateSize();
+        }
+      });
+    });
+    observer.observe(container);
+
+    return () => {
+      mounted = false;
+      observer.disconnect();
+      if (frame != null) cancelAnimationFrame(frame);
+    };
+  }, [map]);
 
   useMapEvents({
     click: () => onPress?.(),
@@ -179,6 +254,11 @@ function MapBridge({
         },
       });
     },
+    // V1.2.2: "moveend"/"zoomend" fyrer når panorering/zoom-gesten faktisk er
+    // FERDIG (ikke per frame under selve draget) — Leaflets egen ekvivalent
+    // til react-native-maps sin onRegionChangeComplete, se MapView.types.ts.
+    moveend: () => onRegionChangeComplete?.(currentRegionOf(map)),
+    zoomend: () => onRegionChangeComplete?.(currentRegionOf(map)),
   });
 
   return null;
@@ -206,6 +286,7 @@ export const LeafletMapView = forwardRef<MapViewHandle, MapViewProps>(function L
     showPropertyBoundaries,
     onLongPress,
     onPress,
+    onRegionChangeComplete,
     children,
   },
   ref
@@ -250,6 +331,7 @@ export const LeafletMapView = forwardRef<MapViewHandle, MapViewProps>(function L
           }}
           onLongPress={onLongPress}
           onPress={onPress}
+          onRegionChangeComplete={onRegionChangeComplete}
         />
 
         {mapType === "satellite" ? (
@@ -369,30 +451,95 @@ export function Polygon({ coordinates, strokeWidth, strokeColor, fillColor }: Po
 // ren Leaflet-plugin (L.heatLayer), så den kobles inn imperativt via
 // useMap() i stedet for en deklarativ react-leaflet-komponent, akkurat som
 // enhver annen "rå Leaflet"-utvidelse måtte vært gjort.
-const HEATMAP_GRADIENT_MAP: Record<number, string> = Object.fromEntries(
-  HEATMAP_GRADIENT.startPoints.map((stop, i) => [stop, HEATMAP_GRADIENT.colors[i]])
-);
+//
+// gradient-proppen leses her (ikke bare på native) slik at kallstedet i
+// app/kart.tsx sin gradient FAKTISK styrer web sin fargeskala også — uten
+// dette ville web stille bygget sin egen kopi fra HEATMAP_GRADIENT og
+// proppen ville vært død kode. Faller tilbake til HEATMAP_GRADIENT direkte
+// dersom ingen gradient sendes inn, slik at eksisterende kall uten proppen
+// fortsatt fungerer uendret.
+function buildGradientMap(gradient: HeatmapProps["gradient"]): Record<number, string> {
+  const g = gradient ?? HEATMAP_GRADIENT;
+  return Object.fromEntries(g.startPoints.map((stop, i) => [stop, g.colors[i]]));
+}
 
-export function Heatmap({ points, radius = 26 }: HeatmapProps) {
+// V1.3 (§K/§L): forholdet blur/radius løftet fra 0.7 til 0.9. Leaflet.heat
+// tegner hvert punkt som et radialt "stempel" ut til `radius` piksler, og
+// kjører DERETTER en boks-blur over hele resultat-canvaset med bredde
+// `blur` piksler — det er DENNE etter-blurren (ikke selve fargeskalaen i
+// HEATMAP_GRADIENT) som avgjør om to nærliggende punkters stempler smelter
+// visuelt sammen til én flate eller forblir to atskilte "prikker" med en
+// synlig kant. Med grid-cellene 150 m fra hverandre (config.ts sin
+// cellSizeMeters) og typiske skjerm-pikkel-tettheter ved zoom-nivåene
+// brukeren faktisk analyserer et område på, var 0.7×radius for lite til å
+// dekke gapet — se BLUR_RATIO-konstanten og radius-økningen i kart.tsx.
+const BLUR_RATIO = 0.9;
+
+export function Heatmap({ points, radius = 26, gradient, max = 1, maxZoom = 17 }: HeatmapProps) {
   const map = useMap();
   const layerRef = useRef<L.HeatLayer | null>(null);
+  const gradientMap = useMemo(() => buildGradientMap(gradient), [gradient]);
 
   useEffect(() => {
     const heatPoints: L.HeatLatLngTuple[] = points.map((p) => [p.latitude, p.longitude, p.weight]);
 
-    if (!layerRef.current) {
-      layerRef.current = L.heatLayer(heatPoints, {
-        radius,
-        blur: radius * 0.7,
-        maxZoom: 17,
-        minOpacity: 0,
-        gradient: HEATMAP_GRADIENT_MAP,
-      }).addTo(map);
-    } else {
-      layerRef.current.setLatLngs(heatPoints);
-      layerRef.current.setOptions({ radius, blur: radius * 0.7, gradient: HEATMAP_GRADIENT_MAP });
+    function applyToLayer() {
+      if (!layerRef.current) {
+        layerRef.current = L.heatLayer(heatPoints, {
+          radius,
+          // blur/minOpacity har ingen native-ekvivalent (react-native-maps sin
+          // Heatmap har ingen slike knapper) — Leaflet.heat og Google Maps sine
+          // heatmap-tiles er to ulike underliggende bibliotek, så dette er en
+          // tilsiktet, uunngåelig plattformforskjell, ikke en bug.
+          blur: radius * BLUR_RATIO,
+          maxZoom,
+          minOpacity: 0,
+          max,
+          gradient: gradientMap,
+        }).addTo(map);
+      } else {
+        layerRef.current.setLatLngs(heatPoints);
+        layerRef.current.setOptions({ radius, blur: radius * BLUR_RATIO, max, maxZoom, gradient: gradientMap });
+      }
     }
-  }, [points, radius, map]);
+
+    // Krasjfiks (getImageData "source width is 0" — se MapBridge over for
+    // full forklaring av HVORFOR containeren kan være 0×0 her): leaflet.heat
+    // sin L.HeatLayer.onAdd() -> _reset() -> _redraw() kaller getImageData()
+    // SYNKRONT OG UBETINGET (ingen "_animating"-vakt der, i motsetning til
+    // dens offentlige redraw()-metode) — og den setter canvas.width/height
+    // direkte fra map.getSize() ved laget-opprettelse. Er containeren 0×0
+    // akkurat NÅ (rett etter mount/route-bytte, eller rett etter at et
+    // modal/sheet har åpnet/lukket seg over kartet), IKKE opprett/oppdater
+    // laget ennå — vent på Leaflets eget "resize"-event (fyrt av MapBridge
+    // sin ResizeObserver->invalidateSize() så snart containeren FAKTISK får
+    // en reell størrelse) og prøv da på nytt.
+    //
+    // Bruker containerens FAKTISKE DOM-størrelse (getBoundingClientRect),
+    // IKKE map.getSize() — samme sirkularitets-fella som MapBridge sin
+    // ResizeObserver over: map.getSize() er Leaflets EGEN cache, som
+    // nettopp KAN være utdatert akkurat i det containeren har fått/mistet
+    // reell størrelse (den oppdateres først NÅR invalidateSize() kalles, så
+    // å stole på den HER for å avgjøre "er størrelsen reell nå" er å stole
+    // på svaret på spørsmålet man stiller). getBoundingClientRect() er
+    // alltid sannheten om hva nettleseren faktisk har lagt ut akkurat nå.
+    const rect = map.getContainer().getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      const onResize = () => {
+        const r = map.getContainer().getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          map.off("resize", onResize);
+          applyToLayer();
+        }
+      };
+      map.on("resize", onResize);
+      return () => {
+        map.off("resize", onResize);
+      };
+    }
+
+    applyToLayer();
+  }, [points, radius, max, maxZoom, map, gradientMap]);
 
   useEffect(() => {
     return () => {

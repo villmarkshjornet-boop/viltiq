@@ -22,8 +22,29 @@ function mapBeskrivelseToHabitatClass(beskrivelse: string): HabitatClass {
   return "ukjent";
 }
 
+/**
+ * V1.3 (§Q): utfallet av ETT nettverksforsøk — bevisst adskilt fra selve
+ * klassen, som er "ukjent" BÅDE ved feil OG ved et gyldig "AR5 har ikke
+ * klassifisert dette arealet"-svar (se HabitatClass sin doc-kommentar i
+ * types.ts). Se resolve.ts for hvordan dette aggregeres til én kildestatus.
+ */
+export type FetchAttemptStatus = "available" | "unavailable";
+
 /** Henter forenklet habitatklasse for ett punkt. Returnerer "ukjent" ved feil eller uklassifisert areal — kaster aldri. */
 export async function fetchHabitatClass(point: LatLng): Promise<HabitatClass> {
+  return (await fetchHabitatClassWithStatus(point)).value;
+}
+
+/**
+ * V1.3 (§Q): som fetchHabitatClass over, men eksponerer i tillegg om selve
+ * nettverksforsøket lyktes eller ikke — se elevation.ts sin
+ * fetchElevationMetersWithStatus for samme mønster/begrunnelse. Bevisst en
+ * EGEN, tilleggs-eksportert funksjon fremfor å endre fetchHabitatClass sin
+ * signatur.
+ */
+export async function fetchHabitatClassWithStatus(
+  point: LatLng
+): Promise<{ value: HabitatClass; status: FetchAttemptStatus }> {
   try {
     // Liten bbox (~200 m) rundt punktet, spør ut senterpikselen.
     const d = 0.001; // ~100 m i breddegrad ved norske breddegrader
@@ -38,13 +59,13 @@ export async function fetchHabitatClass(point: LatLng): Promise<HabitatClass> {
     const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
-    if (!res.ok) return "ukjent";
+    if (!res.ok) return { value: "ukjent", status: "unavailable" };
 
     const text = await res.text();
     const match = text.match(/<artype_beskrivelse>([^<]*)<\/artype_beskrivelse>/);
-    if (!match || !match[1]) return "ukjent";
-    return mapBeskrivelseToHabitatClass(match[1]);
+    if (!match || !match[1]) return { value: "ukjent", status: "available" };
+    return { value: mapBeskrivelseToHabitatClass(match[1]), status: "available" };
   } catch {
-    return "ukjent";
+    return { value: "ukjent", status: "unavailable" };
   }
 }

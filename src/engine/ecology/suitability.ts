@@ -98,6 +98,80 @@ function windExposureFactor(
   return 1 - factor.strength * (1 - shelterFactor) * 0.2; // svært svak, aldri under 80 %
 }
 
+/** Én av fire grove døgnperioder — se `classifyTimeOfDay` under. */
+type TimeOfDayCategory = "dawn" | "day" | "dusk" | "night";
+
+/** ± vindu rundt sol opp/ned som regnes som "dawn"/"dusk" — SAMME vindu som computeCrepuscularActivityMultiplier bruker, for konsistens mellom de to relaterte mekanismene. */
+const DAWN_DUSK_WINDOW_MS = 3600000;
+
+/**
+ * Kategoriserer "nå" relativt til dagens soloppgang/solnedgang. Ren
+ * kalender-/klokkeslettbasert plassering — INGEN påstand om dyreatferd i seg
+ * selv (det er `timeOfDayFactor` sin jobb, og kun for arter/vekter der
+ * `profile.timeOfDayActivity.strength > 0`).
+ *
+ * Kjent forenkling (samme type forenkling som `determineSeason` sine
+ * kalendermånedgrenser): sammenligner kun mot INNEVÆRENDE dags soloppgang/
+ * solnedgang, ikke midnattssol/polarnatt-spesialtilfeller lengst nord — et
+ * tidspunkt kort før midnatt på en dag med sen solnedgang vil da kunne
+ * klassifiseres feil som "night" i stedet for sent på "day". Akseptert som
+ * en praktisk begrensning, ikke rettet opp her (samme avveining som resten
+ * av filen: enkel og forklarbar fremfor astronomisk fullstendig).
+ */
+function classifyTimeOfDay(whenMs: number, sunriseMs: number, sunsetMs: number): TimeOfDayCategory {
+  if (Math.abs(whenMs - sunriseMs) <= DAWN_DUSK_WINDOW_MS) return "dawn";
+  if (Math.abs(whenMs - sunsetMs) <= DAWN_DUSK_WINDOW_MS) return "dusk";
+  if (whenMs > sunriseMs && whenMs < sunsetMs) return "day";
+  return "night";
+}
+
+/**
+ * Dag/natt-BASISNIVÅ (§F, V1.3) — et grovere, kategorisk supplement til den
+ * kontinuerlige skumrings-/demringsbonusen over (crepuscularActivity), IKKE
+ * en erstatning eller dobbelttelling av samme mekanisme:
+ * - "dawn"/"dusk" returnerer nøytral 1 her — den effekten er allerede dekket
+ *   (og bedre modellert, som en glatt avstandskurve) av
+ *   `computeCrepuscularActivityMultiplier`.
+ * - "day"/"night" er den NYE aksen: fanger opp at selve aktivitetsNIVÅET kan
+ *   ligge systematisk høyere/lavere om natten enn om dagen, UTOVER selve
+ *   soloppgang/solnedgang-overgangsvinduet.
+ * Unngår eksplisitt en deterministisk "dyret er ute om natten"-regel (§Y):
+ * dette er en svak, tak-begrenset SANNSYNLIGHETSJUSTERING, samme
+ * capping-disiplin som windExposureFactor/edgeAffinityFactor over.
+ */
+function timeOfDayFactor(
+  whenMs: number,
+  dynamic: DynamicEnvironmentalFeatures,
+  factor: SpeciesEcologyProfile["timeOfDayActivity"]
+): number {
+  if (factor.strength <= 0) return 1;
+  if (dynamic.sunriseMs == null || dynamic.sunsetMs == null) return 1;
+  const category = classifyTimeOfDay(whenMs, dynamic.sunriseMs, dynamic.sunsetMs);
+  if (category === "dawn" || category === "dusk") return 1;
+  if (category === "night") return 1 + factor.strength * 0.2; // svak nattbonus, aldri over 1.2×
+  return 1 - factor.strength * 0.15; // svak dagreduksjon, aldri under 85 %
+}
+
+/**
+ * Nedbør-relatert justering (§G, V1.3) — svak, REN FYSISK/ubehag-basert
+ * effekt, samme forsiktighetsprinsipp som windExposureFactor over: INGEN
+ * norsk, artsspesifikk primærkilde funnet for noen av de tre artene i denne
+ * research-runden (se hver arts `precipitationSensitivity`-kommentar),
+ * derfor identisk LOW-evidens-behandling som vind — aldri mer enn en svak,
+ * tak-begrenset straff. `precipitationMm` er ÉN enkelt (siste) måling fra
+ * Open-Meteo, ikke en trend (se dynamic.ts/cache.ts — ingen historikk
+ * lagres, kun siste hentede verdi med 30 min TTL), så dette er bevisst BARE
+ * "regner det nå", ikke "har det regnet mye siste døgnet".
+ */
+function precipitationFactor(
+  precipitationMm: number | null,
+  factor: SpeciesEcologyProfile["precipitationSensitivity"]
+): number {
+  if (factor.strength <= 0 || precipitationMm == null || precipitationMm <= 0) return 1;
+  const norm = Math.max(0, Math.min(1, precipitationMm / 5)); // metning ved ~5 mm — "kraftig" nedbør, mer gir ikke ytterligere straff
+  return 1 - factor.strength * norm * 0.15; // svært svak, aldri under 85 %
+}
+
 export type SuitabilityBreakdown = {
   habitat: number;
   winterSnowElevation: number;
@@ -105,6 +179,10 @@ export type SuitabilityBreakdown = {
   road: number;
   edge: number;
   windExposure: number;
+  /** V1.3 (§F): dag/natt-basisnivå — se `timeOfDayFactor` over. */
+  timeOfDay: number;
+  /** V1.3 (§G): nedbør-justering — se `precipitationFactor` over. */
+  precipitation: number;
 };
 
 export type SuitabilityResult = { suitability: number; breakdown: SuitabilityBreakdown };
@@ -135,10 +213,18 @@ export function computeSpatialSuitability(
   const road = roadDistanceFactor(staticFeatures.roadDistanceMeters, profile.roadSensitivity);
   const edge = edgeAffinityFactor(staticFeatures.nearHabitatEdge, profile.edgeAffinity);
   const windExposure = windExposureFactor(staticFeatures.aspectDeg, dynamic, profile.windExposureSensitivity);
+  const timeOfDay = timeOfDayFactor(whenMs, dynamic, profile.timeOfDayActivity);
+  const precipitation = precipitationFactor(dynamic.precipitationMm, profile.precipitationSensitivity);
 
-  const suitability = Math.max(0, Math.min(1, habitat * winterSnow * springGreenup * road * edge * windExposure));
+  const suitability = Math.max(
+    0,
+    Math.min(1, habitat * winterSnow * springGreenup * road * edge * windExposure * timeOfDay * precipitation)
+  );
 
-  return { suitability, breakdown: { habitat, winterSnowElevation: winterSnow, springGreenup, road, edge, windExposure } };
+  return {
+    suitability,
+    breakdown: { habitat, winterSnowElevation: winterSnow, springGreenup, road, edge, windExposure, timeOfDay, precipitation },
+  };
 }
 
 /** Temporal (ikke stedbunden) aktivitetsbonus nær soloppgang/solnedgang. Anvendes likt over hele analyseområdet. */

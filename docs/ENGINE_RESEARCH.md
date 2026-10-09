@@ -308,3 +308,127 @@ forskning:
 
 Disse kan legges til senere dersom fremtidig research gir bedre grunnlag —
 se sluttrapportens seksjon N (Neste signaler).
+
+---
+
+## V1.1-tillegg (2026-08-17): artskalibrering mot primærlitteratur
+
+Motor V1.1 (§11–§16 i motor-oppdraget) krevde en ny, dypere research-runde
+per art — denne gangen prioritert mot fagfellevurdert primærlitteratur
+(Mysterud/Meisingset/Rivrud/Loe-programmet for hjort, Bjørneraas/Rolandsen/
+Eldegard for elg, NINA for rådyr) fremfor forvaltnings-/sekundærkilder.
+Dette avsnittet oppsummerer HVA som endret seg i `ecology/hjort.ts` og
+`ecology/elg.ts` og HVORFOR — se hver fils egen kildekommentar for full
+sitatliste og BIOLOGISK GRUNNLAG / MOTOR-REPRESENTASJON / STATUS-oppdeling
+per faktor (§14-malen). Ingen ny biologi er "funnet på" — kun EVIDENCE-felt
+og enkelte STRENGTH-verdier er justert der en konkret ny kilde nå finnes.
+
+### Hjort — de viktigste endringene
+
+- **Vårtrekk/høyde** (`springGreenupElevation`): evidens hevet LOW → HIGH,
+  strength hevet 0.2 → 0.5. Forrige runde begrenset denne mekanismen til
+  elg alene; hjort er faktisk det BEST GPS-dokumenterte delvis-trekkende
+  hjorteviltet i Norge (Mysterud et al. 2011: 38–100 % trekkdyr i sju
+  regioner; Hjermann et al. 2025: kvantifisert grønnskudd→trekk-sammenheng
+  over 16 år). Dette var runde 1s klareste feilvurdering av evidensgrad.
+- **Vei** (`roadSensitivity`): evidens hevet MEDIUM → HIGH (nå en direkte
+  norsk primærkilde, Meisingset et al. 2013, ikke en sekundær oppsummering),
+  men strength SENKET 0.5 → 0.3 — kilden viser en klart svakere, kun
+  dagtidsavhengig unngåelse enn tidligere antatt (hjort krysser vei ~2
+  ganger/dag, mest nattetid).
+- **Vind** (`windExposureSensitivity`): strength senket 0.15 → 0.08. En
+  ANDRE, uavhengig research-runde fant fortsatt ingen støtte for
+  vindretning som atferdsfaktor — punkt 7 sin egen betingelse for nedvekting
+  ("hvis fremtidig research fortsatt ikke finner støtte") er nå oppfylt to
+  ganger. Beholdt som ren fysisk le/eksponering-faktor, ikke fjernet.
+- **Kantsone** (`edgeAffinity`): evidens hevet LOW → MEDIUM (Sigrist et al.
+  2022 gir nå en reell kvantifisert koeffisient, om enn ikke en meterskala).
+- **Brunst** (`rutBehavior`): evidens hevet MEDIUM → HIGH (Langvatn et al.
+  2004, 10 073 obduserte dyr; Mysterud et al. 2008) — samme tall (0.6,
+  sep–okt) som før, nå på et vesentlig sterkere kildegrunnlag.
+- **Ny, dokumentert (ikke implementert) begrensning**: habitatpreferansen er
+  reelt DØGNAVHENGIG hos hjort (skog om dagen, innmark/åpent om natten —
+  Godvik et al. 2009, 62 GPS-hjort i Norge). Dagens `habitatSuitability` har
+  ingen døgn-akse og representerer derfor best en dagtidsvurdering — en
+  strukturell utvidelse, bevisst utsatt til V1.2.
+
+### Elg — de viktigste endringene
+
+- **Vinter/snø** (`winterSnowElevation`): evidens hevet LOW → MEDIUM,
+  strength hevet 0.25 → 0.5. Forrige runmes begrunnelse ("elg tåler kulde
+  bedre enn hjort") forvekslet kuldetoleranse med SNØtoleranse — snødybde er
+  selve driveren bak elgens sesongtrekk (Rolandsen et al. 2011: dobling i
+  elg-påkjørsler mellom lav-/høysnø-år, kun i snørike fylker).
+- **Vei** (`roadSensitivity`): evidens hevet LOW → HIGH — Eldegard et al.
+  (2012) er en direkte norsk, elg-spesifikk kilde (forrige runde fant ingen
+  slik kilde i det hele tatt). Strength uendret (0.4).
+- **Habitat**: evidens hevet LOW → MEDIUM (Bjørneraas et al. 2011, norsk
+  GPS-studie) — samme døgnavhengighets-begrensning som hjort, samme
+  strukturelle utsettelse til V1.2.
+- **Vind**: strength senket 0.15 → 0.08, samme begrunnelse/kilder som hjort.
+- **Brunst** (`rutBehavior`): movementBoost hevet 0 → 0.3 (evidens LOW →
+  MEDIUM). Neumann et al. (2018), 172 GPS-elg i Sverige, dokumenterer økt
+  HANNmobilitet i brunstperioden — bevisst satt lavere enn hjortens 0.6
+  siden funnet er hannspesifikt og kjønn normalt ikke er kjent per
+  observasjon.
+
+### Rådyr — de viktigste endringene
+
+- **Vinter/snø** (`winterSnowElevation`): evidens hevet LOW → HIGH, strength
+  hevet 0.3 → 0.6 — den enkeltstående viktigste korrigeringen i hele V1.1-
+  revisjonen. Tidligere kommentar hevdet "ingen direkte rådyr-kilde funnet"
+  — det var faktisk feil: Mysterud, Bjørnsen & Østbye (1997), Telemark, er
+  en norsk, artsspesifikk, fagfellevurdert primærkilde (samme forfatter som
+  hjort-grunnlaget) som tallfester en kritisk snødybde på ~50 cm og
+  dokumenterer nedtrekk i høyde + økt gammelskogsbruk med økende snø.
+- **Vårtrekk/høyde** (`springGreenupElevation`): UENDRET (LOW/0.2) —
+  bevisst IKKE hevet "for konsistens" med hjort. Mysterud et al. (2012),
+  direkte sympatrisk sammenligning i Norge: kun 27 % av rådyr trekker mot
+  94 % av hjort i samme landskap, og grønnskudd-jaging ("forage maturation")
+  ble kun støttet for hjort. Dette er nå et BEKREFTET fravær av effekt for
+  rådyr, ikke lenger bare et ufunnet spørsmål.
+- **Vei** (`roadSensitivity`): evidens hevet MEDIUM → HIGH — Torres et al.
+  (2011, SØ-Norge) sammenligner rådyr og elg direkte i samme landskap:
+  bebyggelse innen 1000 m påvirker elg negativt, men ikke rådyr. Strength
+  uendret (0.15, lavest av de tre artene) — nå positivt dokumentert.
+- **Kantsone** (`edgeAffinity`): evidens hevet LOW → MEDIUM (tre norske
+  kilder: Mysterud et al. 1997, Torres et al. 2011, Kjøstvedt et al. 1998).
+  Strength uendret (0.35, høyest av de tre artene).
+- **Vind**: strength senket 0.1 → 0.08, samme begrunnelse som hjort/elg —
+  en TREDJE uavhengig research-runde fant fortsatt ingen støtte for
+  vindretning.
+- **Brunst** (`rutBehavior`): evidens hevet LOW → MEDIUM, months dokumentert
+  ([7,8]). Pagon et al. (2017) fant at rådyrbukkens aktivitet i brunst-
+  perioden (jul–aug) er LAVERE enn i territorieetableringen (mar–apr) —
+  stikk motsatt fortegn av hjort/elg, fordi rådyrbukken er ressurs-
+  territoriell (territoriet er allerede etablert) fremfor haremsamlende.
+  movementBoost forblir bevisst 0.
+- **Habitat**: evidens uendret HIGH, men samme døgn-mismatch som hjort/elg
+  er nå dokumentert — Bonnot et al. (2013, 94 rådyr, Frankrike): >80 %
+  sannsynlighet for at en skog-posisjon er registrert PÅ DAGTID; jordbruks-
+  arealet (`jordbruk: 0.85`) representerer i praksis et NATT-mønster.
+
+**Ikke endret i `ecology/radyr.ts`, men dokumentert som et sterkt
+kildebelagt funn** i `species/profiles.ts` sin kommentar: rådyrs
+`timeHalfLifeHours` (4 timer) er i dag KORTEST av de tre artene, begrunnet
+med at et lite hjemmeområde gjør en observasjon raskere "utdatert". Bjar et
+al. (1991, SØ-Norge) fant at 58 % av rådyr holdt seg året rundt innenfor
+2 km fra vinterområdet, med sterk flerårig territorietrofasthet — et
+STEDBUNDET dyr taler for at en observasjon forblir gyldig LENGER, ikke
+kortere. Dette er en kjerneparameter i observasjons-decayen (ikke det
+økologiske prior-laget), og bevisst IKKE endret i denne runden — en
+egen, målrettet kalibreringsrunde med egen testdekning anbefales.
+
+### Uendret / bevisst IKKE endret
+
+- **Tid på døgnet** (`crepuscularActivity`, alle tre arter): evidensgrad
+  UENDRET til tross for at nyere, mer artsspesifikke kilder ble funnet
+  (Ensing 2014, Bjørneraas 2011) — fordi samme kilder samtidig dokumenterer
+  at effekten er svak, lyshetsstyrt og sterkt undertrykt av jakttrykk i
+  nettopp jaktsesongen. En jaktsesong-avhengig modifikator er en strukturell
+  utvidelse, bevisst utsatt til V1.2 fremfor å styrke en statisk bonus som
+  forskningen selv sier blir MINDRE presis når den trengs mest.
+- **Sesonggrense/vintersnø-metning, elevasjonsgulv (300 m)**: uendret —
+  kvantifiseringsagentens tester (`ecology/quantification.test.ts`)
+  bekrefter at den eksisterende metnings-/gulv-oppførselen allerede er
+  forsiktig kalibrert, se der for tallene.

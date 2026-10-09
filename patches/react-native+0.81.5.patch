@@ -1,0 +1,20 @@
+diff --git a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+index 2a67797..08f3499 100644
+--- a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
++++ b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+@@ -435,7 +435,14 @@ void ObjCTurboModule::performVoidMethodInvocation(
+     @try {
+       [inv invokeWithTarget:strongModule];
+     } @catch (NSException *exception) {
+-      throw convertNSExceptionToJSError(runtime, exception, std::string{moduleName}, methodNameStr);
++      // ViltIQ patch (patches/react-native+0.81.5.patch): rethrowing here
++      // constructs a C++ exception on a background GCD queue
++      // (nativeMethodCallInvoker_->invokeAsync), which nothing catches —
++      // it terminates the whole process via SIGABRT instead of surfacing
++      // as a recoverable JS error. Void methods have no return value for
++      // JS to observe anyway, so log and swallow instead of crashing.
++      // Upstream tracking: facebook/react-native#53960, #54859.
++      NSLog(@"[TurboModule] Uncaught exception in void method -[%s %s]: %@", moduleName, methodName, exception);
+     } @finally {
+       [retainedObjectsForInvocation removeAllObjects];
+     }

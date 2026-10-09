@@ -48,8 +48,29 @@ export type SpeciesEcologyProfile = {
   crepuscularActivity: WeightedFactor;
 
   /**
+   * V1.3 (§F): grovt dag/natt-BASISNIVÅ, atskilt fra `crepuscularActivity`
+   * over — crepuscularActivity er en KONTINUERLIG bonus nær selve soloppgang/
+   * solnedgang-overgangen, mens dette er en kategorisk "generelt mer/mindre
+   * aktiv om natten enn om dagen"-justering. `strength` skalerer EN felles
+   * formel (se `timeOfDayFactor` i suitability.ts) — samme mønster som
+   * `windExposureSensitivity`/`edgeAffinity`, ikke fire frittstående tall,
+   * nettopp for å unngå at motoren "finner på" fire uavhengige artstall uten
+   * kildedekning. Se hver arts egen kommentar for hvorfor styrken er satt
+   * som den er.
+   */
+  timeOfDayActivity: WeightedFactor;
+
+  /**
    * Kun hjort har dokumentert brunstatferd (docs punkt 4). Andre arter har
    * movementBoost 0 — INGEN egen brunstprofil er gjettet inn for dem.
    */
   rutBehavior: { evidence: EvidenceStrength; movementBoost: number; months: readonly number[] };
+
+  /**
+   * V1.3 (§G): svak, REN FYSISK nedbør-effekt (samme forsiktighetsprinsipp
+   * som `windExposureSensitivity` — ingen artsspesifikk, norsk primærkilde
+   * funnet for noen av de tre artene i denne research-runden, se
+   * suitability.ts sin `precipitationFactor`-kommentar). 0 = ingen effekt.
+   */
+  precipitationSensitivity: WeightedFactor;
 };

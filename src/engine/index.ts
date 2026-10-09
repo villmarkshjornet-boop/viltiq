@@ -13,9 +13,11 @@ export type {
   PredictionZone,
   HeatmapPoint,
   EngineSignalBreakdown,
+  EnvironmentBreakdown,
   EngineDebugInfo,
   ConfidenceLevel,
   ActivityLevel,
+  PredictionMode,
   LatLng,
 } from "./types";
 
@@ -45,3 +47,21 @@ export type {
   PredictionSnapshotZone,
   BuildSnapshotContext,
 } from "./snapshot";
+
+// Utvikler-diagnostikk (§39 i V1.2-oppdraget) — IKKE brukerrettet, se debugLog.ts.
+export { buildIntelligenceDebugReport, logIntelligenceDebug } from "./debugLog";
+
+// Jaktplan (HuntPlan-oppdraget §3, re-eksportert her i Jaktplan-produktflyt-
+// oppdragets §7) — ren API-opprydding: buildHuntPlan() var tidligere kun
+// importert direkte fra ./huntPlan (se app/kart.tsx), ikke gjennom motorens
+// offentlige barrel som resten av API-et. INGEN atferdsendring — samme
+// funksjon, samme typer, kun nå tilgjengelig fra samme sted som alt annet.
+export { buildHuntPlan, stablePredictionSnapshotId } from "./huntPlan";
+export type {
+  HuntPlan,
+  HuntPlanZoneRef,
+  HuntPlanAlternative,
+  WindAssessment,
+  ExpectedMovement,
+  BuildHuntPlanOptions,
+} from "./huntPlan";

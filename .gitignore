@@ -52,3 +52,6 @@ app-example
 
 # Claude Code local state
 .claude/
+
+# ad-hoc Playwright verification scripts/screenshots (scratch, not shipped code)
+.e2e-scratch/

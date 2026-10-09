@@ -63,6 +63,27 @@ export function vindRetningLabel(grader: number): string {
   return dirs[Math.round(grader / 45) % 8];
 }
 
+const RETNING_FULLE_NAVN: Record<string, string> = {
+  N: "Nord", NØ: "Nordøst", Ø: "Øst", SØ: "Sørøst", S: "Sør", SV: "Sørvest", V: "Vest", NV: "Nordvest",
+};
+
+/**
+ * Fullt norsk retningsnavn ("Nordvest") fra en kompassgrad — samme mapping
+ * som Hjem-skjermens lokale RETNING_NAVN (app/index.tsx), delt hit slik at
+ * andre skjermer (Kart) kan gjenbruke samme "X for deg"-språk uten å
+ * duplisere tabellen. vindRetningLabel() over gir fortsatt kun forkortelsen,
+ * uendret, for eksisterende bruk (forklaringstekst, korridor-retning).
+ */
+export function retningNavn(grader: number): string {
+  return RETNING_FULLE_NAVN[vindRetningLabel(grader)];
+}
+
+/** "ca. 620 m" / "ca. 1,2 km" — delt avstandsformattering (samme mønster som Hjem-skjermens lokale avstandLabel). */
+export function avstandLabel(meter: number): string {
+  if (meter < 1000) return `ca. ${Math.round(meter / 10) * 10} m`;
+  return `ca. ${(meter / 1000).toFixed(1).replace(".", ",")} km`;
+}
+
 /**
  * Anonymiser en posisjon med et tilfeldig avvik innenfor en sirkel med gitt
  * radius i meter (jevnt fordelt over arealet, ikke bare langs aksene).
@@ -76,6 +97,191 @@ export function anonymiserPosisjon(
   const r = radiusM * Math.sqrt(Math.random());
   const theta = Math.random() * 2 * Math.PI;
   return movePoint(lat, lon, (theta * 180) / Math.PI, r);
+}
+
+/**
+ * Konveks skrog (Andrew's monotone chain) rundt et sett punkter — V1.3
+ * (§K/§L i motoroppdraget): brukt til å tegne den FAKTISKE geografiske
+ * utstrekningen til en sone (grid.ts sin extractZones()) i stedet for en
+ * kunstig sirkel rundt senteret. Projiserer til et lokalt meter-plan (rundt
+ * punktenes eget tyngdepunkt) før selve skroget beregnes, siden lat/lon
+ * IKKE er en jevn meter-skala (spesielt langs breddegrad ved norske
+ * breddegrader) — uten dette ville skroget vært svakt forvridd. Returnerer
+ * punktene i den ORIGINALE lat/lon-formen, klar for polygon-rendering.
+ * Under 3 punkter har intet meningsfullt "skrog" — returneres uendret.
+ */
+export function convexHull(points: readonly LatLng[]): LatLng[] {
+  if (points.length < 3) return [...points];
+
+  const metersPerDegLat = 111320;
+  const avgLat = points.reduce((sum, p) => sum + p.latitude, 0) / points.length;
+  const metersPerDegLon = metersPerDegLat * Math.cos((avgLat * Math.PI) / 180) || 1;
+  const avgLon = points.reduce((sum, p) => sum + p.longitude, 0) / points.length;
+
+  const xy = points.map((p) => ({
+    x: (p.longitude - avgLon) * metersPerDegLon,
+    y: (p.latitude - avgLat) * metersPerDegLat,
+    original: p,
+  }));
+
+  const sorted = [...xy].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+  const cross = (o: (typeof xy)[number], a: (typeof xy)[number], b: (typeof xy)[number]) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+  const lower: typeof xy = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: typeof xy = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return [...lower, ...upper].map((p) => p.original);
+}
+
+/**
+ * Konturspor rundt UNIONEN av kvadratiske rutenett-celler — V1.3 (§21/§22,
+ * zone-hull-audit): erstatter convexHull() som PRIMÆR footprint-algoritme
+ * for extractZones() sine soner (se grid.ts). Årsak (bekreftet med reelle
+ * tall, se .e2e-scratch/diag-zone-hull-audit.mjs): sonens KLYNGING (den
+ * kjede-relative flood-fillen i grid.ts) knytter kun genuint NÆRE celler
+ * sammen (verifisert: aldri lengre enn adjacencyThreshold), men resultatet
+ * kan likevel bli en reelt IKKE-KONVEKS form — to tette klynger forbundet av
+ * en smal "bro", en hesteskoform osv. Et EKTE konveks skrog fyller da igjen
+ * hele det konkave tomrommet, og kan visuelt påstå at vann/lav-score-terreng
+ * midt imellom er del av "anbefalt sone" — bekreftet empirisk: opptil 1,8×
+ * arealet til de faktisk krevde cellene, med snitt av titalls udiskutable
+ * vann-celler liggende inni skroget.
+ *
+ * Løsningen utnytter at cellene kommer fra et REGULÆRT rutenett
+ * (buildGridCells i grid.ts): hver celle avrundes til nærmeste rad/kolonne i
+ * et delt lokalt meter-plan (samme projeksjon som convexHull() under bruker),
+ * og konturen spores som ytterkantene til unionen av disse rutene — samme
+ * prinsipp som "marching squares"/rasterkontur-sporing i bildebehandling.
+ * Returnerer KUN den ytre randen (den løkken med størst areal) — en sone med
+ * et reelt "hull" midt inni (mulig, men uvanlig — krever et lavtscoret
+ * område helt omsluttet av høytscoret terreng) får ikke det hullet tegnet
+ * som en egen ring, men dette er en trygg forenkling: å IKKE tegne et
+ * indre hull kan i verste fall overselge noen få kvadratmeter, ALDRI
+ * kilometervis av terreng slik det opprinnelige konveks-skrog-problemet gjorde.
+ *
+ * Faller tilbake til convexHull() for under 3 celler (intet meningsfullt
+ * rutenett-polygon der — samme grense som convexHull() selv bruker) og som
+ * et rent sikkerhetsnett hvis konturen mot formodning skulle bli tom.
+ */
+export function gridBoundaryPolygon(points: readonly LatLng[], cellSizeMeters: number): LatLng[] {
+  if (points.length < 3 || cellSizeMeters <= 0) return convexHull(points);
+
+  const metersPerDegLat = 111320;
+  const avgLat = points.reduce((sum, p) => sum + p.latitude, 0) / points.length;
+  const metersPerDegLon = metersPerDegLat * Math.cos((avgLat * Math.PI) / 180) || 1;
+  const avgLon = points.reduce((sum, p) => sum + p.longitude, 0) / points.length;
+
+  // Rad/kolonne for hver celle i det DELTE lokale meter-planet (ikke
+  // per-punkt) — avgjørende for at to naboceller alltid beregner NØYAKTIG
+  // samme delte hjørne, uansett brøkdels-forskjeller i breddegrad.
+  const claimed = new Set<string>();
+  for (const p of points) {
+    const x = (p.longitude - avgLon) * metersPerDegLon;
+    const y = (p.latitude - avgLat) * metersPerDegLat;
+    claimed.add(`${Math.round(y / cellSizeMeters)},${Math.round(x / cellSizeMeters)}`);
+  }
+
+  // Hjørner som HALV-CELLE HELTALL (2×rad±1, 2×kolonne±1) — eksakt
+  // heltallsaritmetikk, ingen flyttallsavrunding, så to nabocellers delte
+  // hjørne alltid får identisk nøkkel (kritisk for sammensying under).
+  type Corner = readonly [number, number]; // [halvKolonne, halvRad]
+  type Edge = readonly [Corner, Corner];
+  const edges: Edge[] = [];
+  for (const key of claimed) {
+    const sep = key.indexOf(",");
+    const row = Number(key.slice(0, sep));
+    const col = Number(key.slice(sep + 1));
+    const NW: Corner = [2 * col - 1, 2 * row + 1];
+    const NE: Corner = [2 * col + 1, 2 * row + 1];
+    const SE: Corner = [2 * col + 1, 2 * row - 1];
+    const SW: Corner = [2 * col - 1, 2 * row - 1];
+    if (!claimed.has(`${row + 1},${col}`)) edges.push([NW, NE]); // nordkant
+    if (!claimed.has(`${row},${col + 1}`)) edges.push([NE, SE]); // østkant
+    if (!claimed.has(`${row - 1},${col}`)) edges.push([SE, SW]); // sørkant
+    if (!claimed.has(`${row},${col - 1}`)) edges.push([SW, NW]); // vestkant
+  }
+  if (edges.length === 0) return convexHull(points);
+
+  const cornerKey = (c: Corner) => `${c[0]},${c[1]}`;
+  const touching = new Map<string, number[]>();
+  edges.forEach((edge, idx) => {
+    for (const corner of edge) {
+      const key = cornerKey(corner);
+      const list = touching.get(key);
+      if (list) list.push(idx);
+      else touching.set(key, [idx]);
+    }
+  });
+
+  // Sy sammen kantene til lukkede løkker ved å følge delte hjørner — hvert
+  // rutenett-hjørne har alltid et PARTALL kanter (0, 2, eller unntaksvis 4
+  // ved en ren diagonal-celle-berøring), så denne grådige "første ledige
+  // kant"-fremgangsmåten går alltid i mål uten "blindveier".
+  const used = new Array(edges.length).fill(false);
+  const loops: Corner[][] = [];
+  for (let start = 0; start < edges.length; start++) {
+    if (used[start]) continue;
+    const loop: Corner[] = [];
+    let currentCorner = edges[start][0];
+    let currentEdge = start;
+    const startKey = cornerKey(currentCorner);
+    for (let steps = 0; steps <= edges.length; steps++) {
+      used[currentEdge] = true;
+      loop.push(currentCorner);
+      const edge = edges[currentEdge];
+      currentCorner = cornerKey(edge[0]) === cornerKey(currentCorner) ? edge[1] : edge[0];
+      if (cornerKey(currentCorner) === startKey) break;
+      const candidates = touching.get(cornerKey(currentCorner)) ?? [];
+      const nextEdge = candidates.find((idx) => !used[idx]);
+      if (nextEdge == null) break; // skal ikke skje, se kommentaren over — rent sikkerhetsnett
+      currentEdge = nextEdge;
+    }
+    if (loop.length >= 4) loops.push(loop);
+  }
+  if (loops.length === 0) return convexHull(points);
+
+  const shoelace = (loop: Corner[]): number => {
+    let area = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i];
+      const b = loop[(i + 1) % loop.length];
+      area += a[0] * b[1] - b[0] * a[1];
+    }
+    return Math.abs(area) / 2;
+  };
+  loops.sort((a, b) => shoelace(b) - shoelace(a));
+  const outer = loops[0];
+
+  // Fjern kollineære mellompunkter (f.eks. den midterste av tre naboceller
+  // langs samme rette kant) — ren FORENKLING (identisk geometrisk form,
+  // færre punkter), ikke en endring av selve konturen. Eksakt heltalls
+  // kryssprodukt, så ingen flyttallsusikkerhet i "rett linje"-sjekken.
+  const simplified: Corner[] = [];
+  const m = outer.length;
+  for (let i = 0; i < m; i++) {
+    const prev = outer[(i - 1 + m) % m];
+    const cur = outer[i];
+    const next = outer[(i + 1) % m];
+    const cross = (cur[0] - prev[0]) * (next[1] - prev[1]) - (cur[1] - prev[1]) * (next[0] - prev[0]);
+    if (cross !== 0) simplified.push(cur);
+  }
+  const finalLoop = simplified.length >= 3 ? simplified : outer;
+
+  return finalLoop.map(([halfCol, halfRow]) => ({
+    latitude: avgLat + ((halfRow / 2) * cellSizeMeters) / metersPerDegLat,
+    longitude: avgLon + ((halfCol / 2) * cellSizeMeters) / metersPerDegLon,
+  }));
 }
 
 /** Sektor (kakestykke) rundt et senterpunkt — brukt til å vise kamera-/dyreretning i kart. */

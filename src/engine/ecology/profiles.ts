@@ -18,7 +18,9 @@ const ECOLOGY_PROFILES: Record<Species, SpeciesEcologyProfile> = {
     edgeAffinity: { evidence: "LOW", strength: 0 },
     windExposureSensitivity: { evidence: "LOW", strength: 0 },
     crepuscularActivity: { evidence: "LOW", strength: 0 },
+    timeOfDayActivity: { evidence: "LOW", strength: 0 },
     rutBehavior: { evidence: "LOW", movementBoost: 0, months: [] },
+    precipitationSensitivity: { evidence: "LOW", strength: 0 },
   },
 };
 

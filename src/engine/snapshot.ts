@@ -17,12 +17,14 @@
 // snapshot ville gjort denne samlingen uforholdsmessig stor uten å gi noe
 // mer enn det sonene allerede oppsummerer. Et snapshot lagrer kun sonene.
 
+import { ECOLOGY_MODEL_VERSION, ENVIRONMENT_SCHEMA_VERSION, SPECIES_PROFILE_VERSION } from "./config";
 import { getSpeciesProfile } from "./species/profiles";
 import type {
   ActivityLevel,
   ConfidenceLevel,
   EngineResult,
   LatLng,
+  PredictionMode,
   Species,
 } from "./types";
 
@@ -35,6 +37,8 @@ export type PredictionSnapshotZone = {
   confidence: number;
   confidenceLevel: ConfidenceLevel;
   dominantSignals: string[];
+  /** Se PredictionMode i types.ts — avgjør senere om et snapshot kan brukes til å evaluere en RENT miljøbasert prediksjon vs. en lokalt underbygget en. */
+  predictionMode: PredictionMode;
 };
 
 export type PredictionSnapshot = {
@@ -44,6 +48,15 @@ export type PredictionSnapshot = {
   species: Species;
   engineVersion: string;
   configVersion: string;
+  /**
+   * V1.1 (§27): versjon av miljølaget som produserte dette snapshotet — se
+   * config.ts. Kun satt når motoren faktisk kjørte MED en miljøresolver
+   * (runEcologicalEngine); et snapshot fra ren runEngine (ingen miljødata)
+   * lar disse stå udefinert fremfor å late som en versjon som ikke gjaldt.
+   */
+  environmentSchemaVersion?: string;
+  ecologyModelVersion?: string;
+  speciesProfileVersion?: string;
   /** Epoketid (ms) da motoren genererte resultatet — kopiert fra EngineResult.generatedAt. */
   calculatedAt: number;
   /** = calculatedAt. Egen felt for symmetri med validUntil og for å gjøre "gyldig i intervallet [validFrom, validUntil]"-sjekker selvforklarende der de brukes. */
@@ -81,6 +94,8 @@ export type BuildSnapshotContext = {
   jaktlagId: string;
   areaCenter: LatLng;
   areaRadiusMeters: number;
+  /** Sett til true når `result` kom fra runEcologicalEngine (miljølag brukt) — styrer om environmentSchemaVersion/ecologyModelVersion/speciesProfileVersion stemples på snapshotet. */
+  ecologyUsed?: boolean;
 };
 
 /**
@@ -101,6 +116,13 @@ export function buildPredictionSnapshot(
     species: result.species,
     engineVersion: result.engineVersion,
     configVersion: result.configVersion,
+    ...(context.ecologyUsed
+      ? {
+          environmentSchemaVersion: ENVIRONMENT_SCHEMA_VERSION,
+          ecologyModelVersion: ECOLOGY_MODEL_VERSION,
+          speciesProfileVersion: SPECIES_PROFILE_VERSION,
+        }
+      : {}),
     calculatedAt,
     validFrom: calculatedAt,
     validUntil,
@@ -114,6 +136,7 @@ export function buildPredictionSnapshot(
       confidence: zone.confidence,
       confidenceLevel: zone.confidenceLevel,
       dominantSignals: zone.dominantSignals,
+      predictionMode: zone.predictionMode,
     })),
     observationsConsidered: result.observationsConsidered,
     summary: result.summary,

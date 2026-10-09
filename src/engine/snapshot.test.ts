@@ -30,6 +30,7 @@ function baseZone(overrides: Record<string, unknown> = {}) {
     distinctCameraCount: 1,
     newestObservationAgeMinutes: 30,
     dominantSignals: ["Fersk observasjon", "Kamera støtter"],
+    predictionMode: "local_dominant",
     explanation: "Fersk observasjon nær kamera A.",
     signalBreakdown: {
       recency: 1,
@@ -102,6 +103,7 @@ test("buildPredictionSnapshot: mapper felter korrekt fra EngineResult + kontekst
     confidence: 0.5,
     confidenceLevel: "middels",
     dominantSignals: ["Fersk observasjon", "Kamera støtter"],
+    predictionMode: "local_dominant",
   });
 });
 
@@ -125,9 +127,23 @@ test("buildPredictionSnapshot: kompakte soner inkluderer ALDRI heatmapPoints ell
     "confidenceLevel",
     "dominantSignals",
     "level",
+    "predictionMode",
     "radiusMeters",
     "score",
   ]);
+});
+
+test("buildPredictionSnapshot: stempler environmentSchemaVersion/ecologyModelVersion/speciesProfileVersion KUN når ecologyUsed er satt (§27)", () => {
+  const withEcology = buildPredictionSnapshot(baseEngineResult() as never, baseContext({ ecologyUsed: true }));
+  assert.equal(withEcology.environmentSchemaVersion, "1");
+  assert.equal(withEcology.ecologyModelVersion, "1");
+  assert.equal(withEcology.speciesProfileVersion, "2");
+
+  const withoutEcology = buildPredictionSnapshot(baseEngineResult() as never, baseContext());
+  assert.equal(withoutEcology.environmentSchemaVersion, undefined);
+  assert.equal(withoutEcology.ecologyModelVersion, undefined);
+  assert.equal(withoutEcology.speciesProfileVersion, undefined);
+  assert.ok(!("environmentSchemaVersion" in withoutEcology), "feltet skal ikke være til stede i det hele tatt, ikke bare undefined");
 });
 
 test("validityWindowHours: elg (lengre halveringstid) gir et lengre gyldighetsvindu enn rådyr", () => {

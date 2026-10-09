@@ -154,12 +154,25 @@ service cloud.firestore {
           uid == request.auth.uid ||
           get(/databases/$(database)/documents/jaktlag/$(jaktlagId)).data.lederUid == request.auth.uid
         );
-        allow update: if false;
+        // Et medlem kan oppdatere sine egne felt (f.eks. visningsnavn), men
+        // kan ikke endre sin egen rolle eller "late som" en annen uid.
+        allow update: if isAuth() && uid == request.auth.uid &&
+          request.resource.data.uid == resource.data.uid &&
+          request.resource.data.rolle == resource.data.rolle;
       }
 
       // Kvoter — kun jaktlag-medlemmer
       match /kvoter/{docId} {
         allow read, write: if isMember(jaktlagId);
+      }
+
+      // Chat — kun jaktlag-medlemmer. Meldinger er immutable (ingen redigering),
+      // men avsender kan slette sin egen melding.
+      match /messages/{messageId} {
+        allow read: if isMember(jaktlagId);
+        allow create: if isMember(jaktlagId) && request.resource.data.senderUid == request.auth.uid;
+        allow update: if false;
+        allow delete: if isAuth() && resource.data.senderUid == request.auth.uid;
       }
     }
 

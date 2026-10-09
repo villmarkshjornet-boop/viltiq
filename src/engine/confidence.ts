@@ -57,8 +57,18 @@ export function computeZoneConfidence(
   );
   const diversity = saturate(sourceKeys.size, cfg.confidence.sourceSaturationCount);
 
+  // KRITISK KORRIGERING (V1.2): tidligere falt dette tilbake til
+  // cameraDirectionDeg (kameraets FASTE monteringsretning) når dyrets egen
+  // bevegelsesretning var ukjent. Det er en kategorifeil — flere kamera
+  // PEKER bevisst ulike veier for å dekke ulike tilnærminger, så «kamera A
+  // peker nord, kamera B peker øst» ble feiltolket som spredte/uenige
+  // observasjoner og SENKET confidence desto flere uavhengige kamera som
+  // bekreftet samme sone (ikke-monoton: 8 ferske kamera ga lavere confidence
+  // enn 4). Kun dyrets FAKTISKE bevegelsesretning sier noe om hvor enige
+  // observasjonene er om en retning — ukjent retning skal verken styrke
+  // eller svekke enigheten, ikke erstattes med et urelatert signal.
   const directions = contributingObservations
-    .map((o) => o.movementDirectionDeg ?? o.cameraDirectionDeg)
+    .map((o) => o.movementDirectionDeg)
     .filter((d): d is number => d != null);
   const consistency = directionalConsistency(directions);
 

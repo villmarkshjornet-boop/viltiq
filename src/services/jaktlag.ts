@@ -14,6 +14,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import { utledNavnFraEpost } from "../lib/navn";
 
 const AKTIV_KEY = "aktiv_jaktlag_v1";
 
@@ -29,6 +30,8 @@ export type Medlem = {
   uid: string;
   epost: string;
   rolle: "leder" | "jeger";
+  /** Denormalisert kopi av users/{uid}.displayName — se src/services/profile.ts. Valgfri: eldre medlemsdokumenter fra før dette feltet fantes mangler det. */
+  navn?: string;
 };
 
 function genKode(): string {
@@ -65,7 +68,7 @@ export async function opprettJaktlag(navn: string): Promise<Jaktlag> {
   });
 
   await setDoc(doc(db, "jaktlag", ref.id, "members", uid), {
-    uid, epost, rolle: "leder", blagtTil: serverTimestamp(),
+    uid, epost, rolle: "leder", navn: utledNavnFraEpost(epost), blagtTil: serverTimestamp(),
   });
 
   const jaktlag: Jaktlag = { id: ref.id, navn, invitKode, lederUid: uid, opprettet: new Date().toISOString() };
@@ -99,7 +102,7 @@ export async function bliMedIJaktlag(kode: string): Promise<Jaktlag> {
   // verdien) — uten dette kunne enhver innlogget bruker meldt seg inn i et
   // hvilket som helst jaktlag uten å kjenne koden.
   await setDoc(doc(db, "jaktlag", d.id, "members", uid), {
-    uid, epost, rolle: "jeger", blagtTil: serverTimestamp(), invitKode: data.invitKode,
+    uid, epost, rolle: "jeger", navn: utledNavnFraEpost(epost), blagtTil: serverTimestamp(), invitKode: data.invitKode,
   });
 
   await setAktivtJaktlagId(d.id);

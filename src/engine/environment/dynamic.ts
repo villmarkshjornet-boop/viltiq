@@ -15,7 +15,28 @@ import { UKJENT_DYNAMIC_FEATURES, type DynamicEnvironmentalFeatures } from "./ty
 
 const OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast";
 
+/**
+ * V1.3 (§Q): utfallet av ETT nettverksforsøk — bevisst adskilt fra selve
+ * værtrekkene, som er UKJENT_DYNAMIC_FEATURES BÅDE ved feil OG (i praksis
+ * aldri, men prinsipielt) ved et gyldig tomt svar. Se resolve.ts for hvordan
+ * dette kombineres med cache-alder til "stale" for værkilden spesifikt.
+ */
+export type FetchAttemptStatus = "available" | "unavailable";
+
 export async function fetchDynamicEnvironment(center: LatLng): Promise<DynamicEnvironmentalFeatures> {
+  return (await fetchDynamicEnvironmentWithStatus(center)).value;
+}
+
+/**
+ * V1.3 (§Q): som fetchDynamicEnvironment over, men eksponerer i tillegg om
+ * selve nettverksforsøket lyktes eller ikke — se elevation.ts sin
+ * fetchElevationMetersWithStatus for samme mønster/begrunnelse. Bevisst en
+ * EGEN, tilleggs-eksportert funksjon fremfor å endre fetchDynamicEnvironment
+ * sin signatur.
+ */
+export async function fetchDynamicEnvironmentWithStatus(
+  center: LatLng
+): Promise<{ value: DynamicEnvironmentalFeatures; status: FetchAttemptStatus }> {
   try {
     const url =
       `${OPEN_METEO_URL}?latitude=${center.latitude.toFixed(3)}&longitude=${center.longitude.toFixed(3)}` +
@@ -26,7 +47,7 @@ export async function fetchDynamicEnvironment(center: LatLng): Promise<DynamicEn
     const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
-    if (!res.ok) return UKJENT_DYNAMIC_FEATURES;
+    if (!res.ok) return { value: UKJENT_DYNAMIC_FEATURES, status: "unavailable" };
 
     const data = await res.json();
     const current = data?.current ?? {};
@@ -35,15 +56,18 @@ export async function fetchDynamicEnvironment(center: LatLng): Promise<DynamicEn
     const sunsetIso: string | undefined = daily?.sunset?.[0];
 
     return {
-      temperatureC: typeof current.temperature_2m === "number" ? current.temperature_2m : null,
-      windSpeedMs: typeof current.wind_speed_10m === "number" ? current.wind_speed_10m / 3.6 : null, // km/h -> m/s
-      windDirectionDeg: typeof current.wind_direction_10m === "number" ? current.wind_direction_10m : null,
-      snowDepthMeters: typeof current.snow_depth === "number" ? current.snow_depth : null,
-      precipitationMm: typeof current.precipitation === "number" ? current.precipitation : null,
-      sunriseMs: sunriseIso ? new Date(sunriseIso).getTime() : null,
-      sunsetMs: sunsetIso ? new Date(sunsetIso).getTime() : null,
+      value: {
+        temperatureC: typeof current.temperature_2m === "number" ? current.temperature_2m : null,
+        windSpeedMs: typeof current.wind_speed_10m === "number" ? current.wind_speed_10m / 3.6 : null, // km/h -> m/s
+        windDirectionDeg: typeof current.wind_direction_10m === "number" ? current.wind_direction_10m : null,
+        snowDepthMeters: typeof current.snow_depth === "number" ? current.snow_depth : null,
+        precipitationMm: typeof current.precipitation === "number" ? current.precipitation : null,
+        sunriseMs: sunriseIso ? new Date(sunriseIso).getTime() : null,
+        sunsetMs: sunsetIso ? new Date(sunsetIso).getTime() : null,
+      },
+      status: "available",
     };
   } catch {
-    return UKJENT_DYNAMIC_FEATURES;
+    return { value: UKJENT_DYNAMIC_FEATURES, status: "unavailable" };
   }
 }

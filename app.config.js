@@ -39,6 +39,17 @@ module.exports = ({ config }) => {
           color: "#2CC36B",
         },
       ],
+      // react-native-maps 1.23+ krever sin EGEN config-plugin for å koble
+      // inn Google Maps på iOS (skriver `pod 'react-native-maps/Google'` inn
+      // i Podfile + GMSApiKey i Info.plist + AppDelegate-oppsett). Det gamle
+      // Expo-innebygde feltet `ios.config.googleMapsApiKey` (fjernet under)
+      // brukte fortsatt den utdaterte podspec-antakelsen `react-native-google-maps`,
+      // som IKKE lenger finnes i biblioteket — ga "No podspec found"-krasj i
+      // pod install. Se samtalens research (react-native-maps#5710).
+      [
+        "react-native-maps",
+        iosMapsApiKey ? { iosGoogleMapsApiKey: iosMapsApiKey } : {},
+      ],
     ],
     android: {
       ...config.android,
@@ -52,10 +63,6 @@ module.exports = ({ config }) => {
     },
     ios: {
       ...config.ios,
-      config: {
-        ...config.ios?.config,
-        ...(iosMapsApiKey ? { googleMapsApiKey: iosMapsApiKey } : {}),
-      },
       infoPlist: {
         ...config.ios?.infoPlist,
         NSLocationWhenInUseUsageDescription:

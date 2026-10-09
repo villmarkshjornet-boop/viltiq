@@ -24,6 +24,10 @@
       },
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "RCT_USE_PREBUILT_RNCORE": "0",
+        "RCT_USE_RN_DEP": "0"
       }
     },
     "production": {
@@ -33,6 +37,10 @@
       },
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "RCT_USE_PREBUILT_RNCORE": "0",
+        "RCT_USE_RN_DEP": "0"
       }
     }
   },

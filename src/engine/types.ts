@@ -66,6 +66,17 @@ export type ConfidenceLevel = "lav" | "middels" | "høy";
 export type ActivityLevel = "Lav" | "Moderat" | "Høy" | "Svært høy";
 
 /**
+ * Hva slags grunnlag sonens score/forklaring faktisk hviler på (V1.1 §31) —
+ * skiller "generell/miljøbasert vurdering" fra "lokal evidens" for UI og
+ * forklaring. Utledet DETERMINISTISK fra signalBreakdown, ikke en egen
+ * separat beregning:
+ * - "environment_only": ingen bidragsytende observasjoner i sonen.
+ * - "local_dominant": lokale signaler utgjør klart mesteparten av rå-scoren.
+ * - "environment_plus_local": begge bidrar merkbart.
+ */
+export type PredictionMode = "environment_only" | "environment_plus_local" | "local_dominant";
+
+/**
  * Navngitt oppdeling av hva som bidro til en sones score — grunnlaget for
  * både den deterministiske forklaringen (explain.ts) og debug-inspektøren.
  * Alle verdier er rå, ikke-normaliserte bidrag (samme enhet som zone.score).
@@ -81,10 +92,137 @@ export type EngineSignalBreakdown = {
   movementDirection: number;
   /** Bonus for at flere UAVHENGIGE kamera støtter samme område. */
   cameraDiversity: number;
-  /** Bonus fra en registrert bevegelseskorridor (spatiotemporal reinforcement). */
+  /** Bonus fra en registrert bevegelseskorridor (spatiotemporal reinforcement, FLERE observasjoner). */
   corridor: number;
   /** Bidrag fra økologisk suitability (høyde/snø/habitat/vei/kant/vind) — 0 når motoren kjøres uten miljødata. */
   ecology: number;
+  /**
+   * V1.3 (§H): additiv "forventet posisjon"-bidrag fra ÉN observasjons egen
+   * `movementDirectionDeg` + alder, projisert et artsavhengig stykke FORAN
+   * observasjonen (bredere/svakere jo eldre observasjonen er) — BEVISST
+   * SEPARAT fra `movementDirection` over (som kun er en retnings-VEKTING av
+   * det symmetriske fotavtrykket rundt selve observasjonspunktet, ikke en
+   * forskjøvet forventet posisjon). 0/fraværende når retning mangler — se
+   * movement.ts. Valgfri (ikke i eldre, allerede eksisterende breakdown-
+   * literaler/tester) — les alltid som `?? 0`.
+   */
+  movementProjection?: number;
+  /**
+   * V1.3 (§J): eksplisitt bonus når FLERE observasjoner gjensidig støtter
+   * samme område (f.eks. én observasjon peker mot et sted en SENERE
+   * observasjon faktisk ligger) — en NAVNGITT versjon av et signal som før
+   * V1.3 var usynlig "bakt inn" i den vanlige summeringen av bidrag. Sier
+   * ALDRI noe om at det er samme individ, kun at uavhengige signaler peker
+   * samme vei — se evidenceFusion.ts. Valgfri, les alltid som `?? 0`.
+   */
+  evidenceDensity?: number;
+};
+
+/**
+ * V1.2 §25: per-faktor økologisk nedbrytning for en sone — eksponert for
+ * explainability/debug-formål, IKKE bare det aggregerte
+ * `signalBreakdown.ecology`-tallet (som er summen, uten å si HVILKE
+ * faktorer som faktisk bidro). Strukturelt lik ecology/suitability.ts sin
+ * SuitabilityBreakdown (bevisst IKKE importert derfra — denne filen skal
+ * forbli fri for interne motor-avhengigheter, se filkommentaren øverst),
+ * men samme faktiske tall fra samme beregning — ingen egen UI-versjon med
+ * andre regler. `undefined` når motoren kjørte uten miljødata (ren
+ * runEngine, ikke runEcologicalEngine).
+ */
+export type EnvironmentBreakdown = {
+  habitat: number;
+  winterSnowElevation: number;
+  springGreenup: number;
+  road: number;
+  edge: number;
+  windExposure: number;
+  /** V1.3 (§F): dag/natt-basisnivå UTOVER den eksisterende skumring/demring-bonusen (crepuscularActivity) — se ecology/suitability.ts. Valgfri, les som `?? 1` (multiplikativ, nøytral=1). */
+  timeOfDay?: number;
+  /** V1.3 (§G): nedbør-relatert justering, atskilt fra den eksisterende vindeksponerings-faktoren. Valgfri, les som `?? 1`. */
+  precipitation?: number;
+};
+
+/**
+ * V1.3 (§Q i motoroppdraget): status for ÉN ekstern miljødatakilde for
+ * DENNE motorkjøringen. BEVISST forskjellig fra en manglende/null VERDI —
+ * `signal = 0` og `signal unavailable` er ikke det samme (§Q: en feilet
+ * vei-oppslag skal ALDRI tolkes som "ingen vei i nærheten"). Se
+ * environment/resolve.ts for hvordan hver kilde faktisk rapporterer dette.
+ * - "available": hentet vellykket, fersk.
+ * - "unavailable": forsøkt hentet, men mislyktes (nettverksfeil, tomt svar).
+ * - "stale": hentet fra cache utover normal fersk-levetid (kun dynamiske
+ *   kilder som vær har en meningsfull "stale" — statiske kilder som høyde
+ *   endrer seg ikke, og bruker derfor aldri denne verdien).
+ * - "fallback": ingen resolver i det hele tatt ble brukt (ren `runEngine`).
+ */
+export type DataSourceStatus = "available" | "unavailable" | "stale" | "fallback";
+
+/** V1.3 (§Q): samlet datakvalitetsstatus for ÉN motorkjøring — én status per ekstern miljøkilde. */
+export type EngineDataQuality = {
+  elevation: DataSourceStatus;
+  habitat: DataSourceStatus;
+  roads: DataSourceStatus;
+  water: DataSourceStatus;
+  weather: DataSourceStatus;
+};
+
+/**
+ * V1.3 (§K/§L): den FAKTISKE, sammenhengende geografiske utstrekningen til
+ * en sone — cellene extractZones() faktisk klassifiserte som del av denne
+ * sonen (se grid.ts sin claimedZoneIndex, innført i V1.2.2s fragmenterings-
+ * fiks og nå gjenbrukt her i stedet for en ny, parallell utregning), IKKE en
+ * kunstig sirkel rundt `center`. `hull` er et forenklet konvekst skrog av
+ * `cells`, egnet for polygon-rendering — presentasjonslaget skal bruke
+ * `hull`, ikke regne ut sitt eget.
+ */
+export type ZoneFootprint = {
+  cells: LatLng[];
+  hull: LatLng[];
+};
+
+/**
+ * V1.3 (§O): en deterministisk, strukturert anbefaling for ÉN sone — bygget
+ * FRA de samme tallene explain.ts sin buildZoneExplanation() allerede
+ * regner ut (samme Støtter/Begrenser-klassifisering, se explain.ts), kun i
+ * strukturert (ikke ferdig-sammenslått streng-)form for UI-et. Se explain.ts
+ * sin buildZoneRecommendation().
+ */
+/**
+ * V1.3: ETT sammenhengende klokkeslett-vindu med reelt forhøyet skumrings-/
+ * demringsaktivitet for én art, utledet fra ekte sunrise/sunsetMs (se
+ * environment/dynamic.ts) og artens EGEN crepuscularActivity.strength
+ * (ecology/profiles.ts) — se explain.ts sin computeRecommendedTimeWindow().
+ * "dawn" = vindu rundt soloppgang, "dusk" = vindu rundt solnedgang.
+ */
+export type RecommendedTimeWindow = {
+  type: "dawn" | "dusk";
+  startMs: number;
+  endMs: number;
+};
+
+export type ZoneRecommendation = {
+  zoneId: string;
+  species: Species;
+  /** 1-basert rangering blant sonene i SAMME EngineResult (1 = best). */
+  rank: number;
+  score: number;
+  confidence: number;
+  /** §P: ALDRI en prosent-sannsynlighet — samme etikett som ActivityLevel. */
+  probabilityLabel: ActivityLevel;
+  positiveReasons: string[];
+  negativeReasons: string[];
+  summary: string;
+  /** §R: "Datagrunnlag: Lavt/Middels/Godt" — utledet fra confidence + observasjonsalder + evt. dataQuality, IKKE en ny separat måling. */
+  dataFreshness: "lav" | "middels" | "god";
+  evidenceCount: number;
+  /**
+   * V1.3: "Beste tidspunkt"-vinduer for DENNE sonens art — se
+   * RecommendedTimeWindow over. TOMT array (aldri oppdiktet) når arten
+   * ikke har noen dokumentert skumringseffekt (f.eks. "annet"/Rev) eller
+   * motoren kjørte uten værdata — UI skal da vise en nøytral
+   * "Ingen tydelig tidsvindu"-tekst i stedet for et fabrikkert klokkeslett.
+   */
+  recommendedTimeWindows: RecommendedTimeWindow[];
 };
 
 export type PredictionZone = {
@@ -107,12 +245,24 @@ export type PredictionZone = {
   /** Én kort, menneskelig setning bygget deterministisk fra signalene. */
   explanation: string;
   signalBreakdown: EngineSignalBreakdown;
+  /** Se PredictionMode — "environment_only" når observationCount er 0. */
+  predictionMode: PredictionMode;
+  /** Se EnvironmentBreakdown — undefined når motoren kjørte uten miljødata. */
+  environmentBreakdown?: EnvironmentBreakdown;
+  /** V1.3 §K/§L — se ZoneFootprint. Undefined kun hvis sonen av en eller annen grunn ikke har noen klargjorte celler (bør ikke skje i praksis). */
+  footprint?: ZoneFootprint;
+  /** V1.3 §M/§N — 1-basert rangering blant sonene i SAMME EngineResult (settes av engine.ts ETTER sortering, samme rekkefølge som zones[]). */
+  rank?: number;
+  /** V1.3 §N/§O — se ZoneRecommendation. Bygget av engine.ts fra SAMME Støtter/Begrenser-grunner som explanation/dominantSignals over, ikke en ny beregning. */
+  recommendation?: ZoneRecommendation;
 };
 
 export type EngineDebugCell = {
   center: LatLng;
   score: number;
   breakdown: EngineSignalBreakdown;
+  /** "unknown" når motoren kjørte uten miljødata — se environment/types.ts sin SpatialValidity. */
+  validity: "valid_land" | "water" | "invalid" | "unknown";
 };
 
 export type EngineDebugCorridor = {
@@ -122,11 +272,27 @@ export type EngineDebugCorridor = {
   contributingIds: string[];
 };
 
+/** Persentiler over RÅ (ikke skalert 0–100) celle-score for hele gridet — V1.2.1 §21-instrumentering. */
+export type EngineDebugScoreStats = {
+  min: number;
+  p25: number;
+  median: number;
+  p75: number;
+  p90: number;
+  max: number;
+};
+
 export type EngineDebugInfo = {
   totalObservationsInput: number;
   totalObservationsAfterNormalize: number;
   gridCellCount: number;
   cellSizeMeters: number;
+  /** Antall gridceller per SpatialValidity — V1.2.1 §21. "water"/"invalid" telles sammen med resten, men kan aldri bli en sone-topp/heatmap-kandidat (se grid.ts). */
+  validLandCells: number;
+  waterCells: number;
+  unknownValidityCells: number;
+  /** undefined kun dersom gridet er tomt (ingen celler i det hele tatt). */
+  scoreStats?: EngineDebugScoreStats;
   /** De 10 høyest scorede rutene, uavhengig av om de ble til en sone. */
   topCells: EngineDebugCell[];
   corridors: EngineDebugCorridor[];
@@ -159,4 +325,6 @@ export type EngineResult = {
    */
   heatmapPoints: HeatmapPoint[];
   debug?: EngineDebugInfo;
+  /** V1.3 §Q — undefined for ren runEngine (ingen miljøresolver i det hele tatt ble brukt, se DataSourceStatus sin "fallback"). */
+  dataQuality?: EngineDataQuality;
 };

@@ -4,7 +4,7 @@ import { register } from "node:module";
 
 register("../testSupport/nodeEsmTestLoader.mjs", import.meta.url);
 
-const { runEngine } = await import("./engine");
+const { runEngine, selectHeatmapPoints } = await import("./engine");
 const { scoreCell } = await import("./grid");
 const { getSpeciesProfile } = await import("./species/profiles");
 const { DEFAULT_ENGINE_CONFIG } = await import("./config");
@@ -70,6 +70,39 @@ test("Scenario 1: én fersk observasjon gir en sone nær observasjonen, uten hø
   assert.ok(distanceMeters(zone.center, camPos) < 400, "sonen bør ligge nær observasjonen");
   assert.notEqual(zone.confidenceLevel, "høy", "én enkelt observasjon bør ikke alene gi høy confidence");
   // Retningsbias (foran vs. bak kamera) testes presist og isolert i Scenario 6.
+});
+
+// ===========================================================================
+// V1.3 §N/§O — end-to-end integrasjonstest: engine.ts skal ha koblet
+// buildZoneRecommendation() til HVER sone automatisk (ikke noe kart.tsx må
+// konstruere selv), med rank/id/score/probabilityLabel som faktisk stemmer
+// overens med selve PredictionZone-en den er bygget fra.
+// ===========================================================================
+
+test("V1.3: hver sone får en PredictionZone.recommendation som stemmer med sonens egne felt, uten prosent noe sted", () => {
+  const camPos = { latitude: 60.0, longitude: 10.0 };
+  const observations = [
+    obs({ observationSource: "camera", cameraId: "camA", latitude: camPos.latitude, longitude: camPos.longitude, tid: hoursAgoIso(0) }),
+  ];
+  const result = runEngine(observations as never, "hjort", { now: NOW });
+
+  assert.ok(result.zones.length >= 1);
+  for (const zone of result.zones) {
+    const rec = zone.recommendation;
+    assert.ok(rec, `forventet at sone ${zone.id} har en recommendation`);
+    assert.equal(rec!.zoneId, zone.id);
+    assert.equal(rec!.species, zone.species);
+    assert.equal(rec!.rank, zone.rank);
+    assert.equal(rec!.score, zone.score);
+    assert.equal(rec!.confidence, zone.confidence);
+    assert.equal(rec!.probabilityLabel, zone.level);
+    assert.ok(Array.isArray(rec!.positiveReasons));
+    assert.ok(Array.isArray(rec!.negativeReasons));
+    assert.ok(["lav", "middels", "god"].includes(rec!.dataFreshness));
+    // §P: aldri en prosent-sannsynlighet noe sted i det strukturerte objektet.
+    const serialized = JSON.stringify(rec);
+    assert.ok(!/%/.test(serialized), `recommendation skal aldri inneholde et %-tegn, fikk: ${serialized}`);
+  }
 });
 
 // ===========================================================================
@@ -503,4 +536,67 @@ test("heatmapPoints: sortert synkende på vekt og aldri flere enn det dokumenter
       "heatmapPoints skal være sortert synkende på vekt"
     );
   }
+});
+
+// ===========================================================================
+// selectHeatmapPoints — V1.2 §6 kritisk korrigering: geografisk rettferdig
+// kapping, ikke array-rekkefølge-skjevhet fra stabil sortering på like vekter.
+// ===========================================================================
+
+test("selectHeatmapPoints: en HELT FLAT scoreflate (alle identisk vekt) kappes GEOGRAFISK BALANSERT, ikke til én sammenhengende blokk", () => {
+  // Konstruer 1000 kandidater i rad-major rekkefølge (som grid.ts faktisk
+  // bygger cellene) over et 10x100-rutenett, ALLE med nøyaktig samme vekt —
+  // nøyaktig scenarioet som tidligere kuttet bort halve kartet.
+  const rows = 10;
+  const cols = 100;
+  const candidates = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      candidates.push({ latitude: r, longitude: c, weight: 0.5, originalIndex: r * cols + c });
+    }
+  }
+  const maxPoints = 300;
+  const selected = selectHeatmapPoints(candidates, maxPoints);
+  assert.equal(selected.length, maxPoints);
+
+  // Geografisk balanse: hver av de 10 "radene" (breddegradsbånd) skal være
+  // representert i utvalget — IKKE bare de første ~3 radene (som en
+  // rekkefølge-vilkårlig prefiks-kutt ville gitt: 300/1000 = 30% av
+  // punktene ville alle kommet fra rad 0-2).
+  const latitudesRepresented = new Set(selected.map((p) => p.latitude));
+  assert.equal(
+    latitudesRepresented.size,
+    rows,
+    `forventet at alle ${rows} breddegradsbånd er representert i utvalget, fikk kun ${latitudesRepresented.size} — tegn på geografisk skjevhet`
+  );
+
+  // Ingen enkelt rad skal dominere utvalget uforholdsmessig — med perfekt
+  // jevn fordeling forventes ~30 punkter per rad (300/10); tillat noe slark
+  // for avrunding, men aldri en rad med under halvparten av forventet andel.
+  const perRadCount = new Map<number, number>();
+  for (const p of selected) perRadCount.set(p.latitude, (perRadCount.get(p.latitude) ?? 0) + 1);
+  for (const [rad, count] of perRadCount) {
+    assert.ok(count >= 10, `rad ${rad} har kun ${count} punkter av ${maxPoints} totalt — for skjevt fordelt`);
+  }
+});
+
+test("selectHeatmapPoints: celler med FAKTISK høyere vekt beholdes alltid fullt ut foran likeverdige celler", () => {
+  const highWeight = Array.from({ length: 10 }, (_, i) => ({ latitude: 0, longitude: i, weight: 0.9, originalIndex: i }));
+  const tiedLowWeight = Array.from({ length: 100 }, (_, i) => ({
+    latitude: 1,
+    longitude: i,
+    weight: 0.3,
+    originalIndex: 10 + i,
+  }));
+  const selected = selectHeatmapPoints([...tiedLowWeight, ...highWeight], 20);
+  const highWeightCount = selected.filter((p) => p.weight === 0.9).length;
+  assert.equal(highWeightCount, 10, "alle 10 høyverdi-celler skal beholdes uansett hvor mange lavere-verdi-celler som konkurrerer om plassen");
+  assert.equal(selected.length, 20);
+});
+
+test("selectHeatmapPoints: ingen endring i oppførsel når antall kandidater allerede er under taket", () => {
+  const candidates = Array.from({ length: 5 }, (_, i) => ({ latitude: 0, longitude: i, weight: i / 10, originalIndex: i }));
+  const selected = selectHeatmapPoints(candidates, 600);
+  assert.equal(selected.length, 5);
+  assert.equal(selected[0].weight, 0.4, "skal fortsatt være sortert synkende på vekt");
 });

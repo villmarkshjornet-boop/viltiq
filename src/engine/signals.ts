@@ -46,6 +46,23 @@ export function distanceWeight(distanceMeters: number, effectiveRadius: number):
   return Math.exp(-0.5 * ratio * ratio);
 }
 
+/**
+ * Eksplisitt, dokumentert hardt tak (m) på hvor langt UNNA observasjonen én
+ * enkelt observasjon i det hele tatt kan bidra til en rutes score — se
+ * config.ts sin `distance.maxInfluenceRadiusMultiplier`-dokumentasjon for
+ * forskningsgrunnlaget. `distanceWeight` alene faller allerede mot ~0 lenge
+ * før dette, men grensen skal være en EKSPLISITT garanti, ikke bare en
+ * implisitt konsekvens av en eksponentiell kurve — "begrenset lokal
+ * sannsynlighetsforskyvning, ikke en beregnet sluttposisjon".
+ */
+export function maxInfluenceMeters(
+  baseRadiusMeters: number,
+  ageHours: number,
+  cfg: EngineConfig["distance"]
+): number {
+  return effectiveRadiusMeters(baseRadiusMeters, ageHours, cfg) * cfg.maxInfluenceRadiusMultiplier;
+}
+
 /** Antall dyr → vekt via sqrt-skalering (tak på maxCountPerObservation) — hindrer at én feilregistrering med et urealistisk høyt antall dominerer scoren alene. */
 export function countWeight(count: number, maxCountPerObservation: number): number {
   const capped = Math.min(Math.max(count, 1), maxCountPerObservation);

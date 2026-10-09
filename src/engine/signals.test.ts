@@ -8,6 +8,7 @@ const {
   timeWeight,
   distanceWeight,
   effectiveRadiusMeters,
+  maxInfluenceMeters,
   countWeight,
   sourceWeight,
   angularDifferenceDeg,
@@ -16,7 +17,7 @@ const {
 } = await import("./signals");
 
 const TIME_CFG = { halfLifeHours: 5, backgroundFloor: 0.05 };
-const DIST_CFG = { ageRadiusGrowthPerHour: 0.01, maxAgeRadiusMultiplier: 1.5 };
+const DIST_CFG = { ageRadiusGrowthPerHour: 0.01, maxAgeRadiusMultiplier: 1.5, maxInfluenceRadiusMultiplier: 4 };
 
 // ---------------------------------------------------------------------------
 // timeWeight
@@ -74,6 +75,39 @@ test("effectiveRadiusMeters: vokser med alder, men er tak-begrenset til maxAgeRa
   const rOld = effectiveRadiusMeters(base, 100000, DIST_CFG);
   assert.equal(r0, base);
   assert.ok(Math.abs(rOld - base * DIST_CFG.maxAgeRadiusMultiplier) < 1e-9);
+});
+
+// ---------------------------------------------------------------------------
+// maxInfluenceMeters (§ kritisk korrigering: eksplisitt avstandsbegrensning)
+// ---------------------------------------------------------------------------
+
+test("maxInfluenceMeters: er alltid effectiveRadiusMeters × maxInfluenceRadiusMultiplier", () => {
+  const base = 300;
+  for (const age of [0, 5, 50, 100000]) {
+    const forventet = effectiveRadiusMeters(base, age, DIST_CFG) * DIST_CFG.maxInfluenceRadiusMultiplier;
+    assert.equal(maxInfluenceMeters(base, age, DIST_CFG), forventet);
+  }
+});
+
+test("maxInfluenceMeters: gir en konkret, begrenset meterverdi for hjort/rådyr/elg — aldri kilometervis uten grense", () => {
+  // baseRadiusMeters for de tre artene (species/profiles.ts): hjort 300, rådyr 200, elg 450.
+  const hjort = maxInfluenceMeters(300, 100000, DIST_CFG); // eldst mulig observasjon
+  const radyr = maxInfluenceMeters(200, 100000, DIST_CFG);
+  const elg = maxInfluenceMeters(450, 100000, DIST_CFG);
+  assert.equal(hjort, 300 * 1.5 * 4); // 1800
+  assert.equal(radyr, 200 * 1.5 * 4); // 1200
+  assert.equal(elg, 450 * 1.5 * 4); // 2700
+  // Ingen av dem skal noensinne nærme seg en "kilometervis ukontrollert projeksjon".
+  for (const v of [hjort, radyr, elg]) assert.ok(v < 3000, `forventet et begrenset tak, fikk ${v} m`);
+});
+
+test("maxInfluenceMeters: distanceWeight er allerede forsvinnende lite akkurat ved denne grensen (grensen er en eksplisitt garanti, ikke en atferdsendring)", () => {
+  const base = 300;
+  const age = 0;
+  const radius = effectiveRadiusMeters(base, age, DIST_CFG);
+  const grense = maxInfluenceMeters(base, age, DIST_CFG);
+  const vektVedGrensen = distanceWeight(grense, radius);
+  assert.ok(vektVedGrensen < 0.001, `forventet neglisjerbar vekt akkurat ved grensen, fikk ${vektVedGrensen}`);
 });
 
 // ---------------------------------------------------------------------------

@@ -35,6 +35,7 @@ import {
   type Kvoter,
 } from "../src/services/kvoter";
 import { runEngine, PRIORITERTE_ARTER, type PredictionZone, type Species } from "../src/engine";
+import { getCachedIntelligenceResult } from "../src/engine/resultCache";
 import { color as uiColor, spacing as uiSpacing, radius as uiRadius, typography as uiType } from "../src/design/tokens";
 import { beregnKvoteRader, fellingerUtenGyldigKategori } from "../src/lib/kvoteBeregning";
 import { visAlert } from "../src/lib/confirmAlert";
@@ -83,11 +84,13 @@ export default function JaktScreen() {
   const [kvoteModal,  setKvoteModal]  = useState(false);
   const [lagrer,      setLagrer]      = useState(false);
 
-  // ── Dagens jakt (§17A): gjenbruker ViltIQ Engine (ren observasjonsbasert
-  // runEngine — samme motor som kartet, ikke en egen vurdering) for å
-  // anbefale ett område/en art akkurat nå. Bevisst KUN den synkrone
-  // observasjonsmotoren her (ikke den økologiske varianten med miljøoppslag)
-  // for å holde Jakt-siden rask og alltid tilgjengelig uten nettverkskall.
+  // ── Dagens jakt (§17A): gjenbruker ViltIQ Engine (samme motor som kartet,
+  // ikke en egen vurdering) for å anbefale ett område/en art akkurat nå.
+  // Foretrekker Kart sitt ferske, cachede resultat (resultCache.ts —
+  // inkluderer miljølaget) slik at Jakt og Kart aldri viser ulikt nivå for
+  // samme data. Faller tilbake til den rene, synkrone observasjonsmotoren
+  // (ikke den økologiske varianten med miljøoppslag) når ingenting ferskt
+  // er cachet ennå — Jakt-siden skal fortsatt aldri vente på nettverk.
   const [observasjoner, setObservasjoner] = useState<Observasjon[]>([]);
   const [userLocation,  setUserLocation]  = useState<UserPosition | null>(null);
 
@@ -141,8 +144,8 @@ export default function JaktScreen() {
   const dagensJakt = useMemo(() => {
     let beste: { species: Species; zone: PredictionZone } | null = null;
     for (const species of PRIORITERTE_ARTER) {
-      const resultat = runEngine(observasjoner, species);
-      const sone = resultat.zones[0];
+      const cached = getCachedIntelligenceResult(species);
+      const sone = cached ? cached.result.zones[0] : runEngine(observasjoner, species).zones[0];
       if (sone && (!beste || sone.score > beste.zone.score)) {
         beste = { species, zone: sone };
       }
@@ -348,7 +351,38 @@ export default function JaktScreen() {
           <Text style={s.dagensEyebrow}>Dagens jakt</Text>
           {dagensJakt ? (
             <>
-              <EngineStatusPanel zone={dagensJakt.zone} />
+              <EngineStatusPanel zone={dagensJakt.zone} recommendation={dagensJakt.zone.recommendation} />
+              {/* Jaktplan-produktflyt-oppdraget §1/§9: "Planlegg jakten" er nå
+                  den PRIMÆRE handlingen på dette kortet — ett trykk fra
+                  anbefaling til ferdig jaktplan, i stedet for at brukeren selv
+                  må finne frem til riktig sone på kartet og trykke "Planlegg
+                  jakt her" der. `openPlan=1` er nytt (se app/kart.tsx sin
+                  auto-åpne-effekt) — resten av parameterne er UENDRET, samme
+                  dyplenke-mønster som knappen under alltid har brukt. Bygger
+                  IKKE en egen Jaktplan-visning her — kart.tsx sin eksisterende
+                  apneJaktplan()/HuntPlanPanel er fortsatt eneste sannhetskilde. */}
+              <Link
+                href={{
+                  pathname: "/kart",
+                  params: {
+                    focusLat: String(dagensJakt.zone.center.latitude),
+                    focusLng: String(dagensJakt.zone.center.longitude),
+                    filter: NORSK_ART[dagensJakt.species],
+                    heatmap: "1",
+                    openPlan: "1",
+                  },
+                }}
+                asChild
+              >
+                <Pressable style={s.dagensBtn}>
+                  <Ionicons name="compass-outline" size={15} color={uiColor.primaryText} />
+                  <Text style={s.dagensBtnTxt}>Planlegg jakten</Text>
+                </Pressable>
+              </Link>
+              {/* Kartet forblir en fullverdig inngang på egen hånd (§2) — denne
+                  sekundære lenken er UENDRET bortsett fra selve teksten/stilen,
+                  samme href-mønster (kun uten openPlan), fortsatt ren
+                  "se på kart"-navigasjon uten å åpne jaktplan-arket automatisk. */}
               <Link
                 href={{
                   pathname: "/kart",
@@ -361,9 +395,9 @@ export default function JaktScreen() {
                 }}
                 asChild
               >
-                <Pressable style={s.dagensBtn}>
-                  <Ionicons name="map-outline" size={15} color={uiColor.primaryText} />
-                  <Text style={s.dagensBtnTxt}>Åpne i kart</Text>
+                <Pressable style={s.dagensBtnSecondary}>
+                  <Ionicons name="map-outline" size={15} color={uiColor.textSecondary} />
+                  <Text style={s.dagensBtnSecondaryTxt}>Se på kart</Text>
                 </Pressable>
               </Link>
             </>
@@ -684,6 +718,15 @@ const s = StyleSheet.create({
     marginTop: uiSpacing.lg,
   },
   dagensBtnTxt: { color: uiColor.primaryText, fontSize: 13, fontWeight: "900" },
+  // Jaktplan-produktflyt-oppdraget §1/§9: sekundær variant av dagensBtn —
+  // samme form/størrelse, dempet (outline) i stedet for fylt, siden
+  // "Planlegg jakten" nå er den primære handlingen på kortet.
+  dagensBtnSecondary: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: "transparent", borderRadius: uiRadius.md, paddingVertical: 12,
+    marginTop: uiSpacing.sm, borderWidth: 1, borderColor: uiColor.border,
+  },
+  dagensBtnSecondaryTxt: { color: uiColor.textSecondary, fontSize: 13, fontWeight: "800" },
 
   // Kvoter
   kvoteKort:       { marginHorizontal: uiSpacing.xl, marginBottom: uiSpacing.lg, padding: uiSpacing.lg },

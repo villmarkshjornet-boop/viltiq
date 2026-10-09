@@ -209,6 +209,10 @@ export default function KameraDetaljScreen() {
   const [obsAlder, setObsAlder] = useState<(typeof OBS_ALDER)[number]>("Ukjent");
   const [obsKommentar, setObsKommentar] = useState("");
   const [obsLagrer, setObsLagrer] = useState(false);
+  // Hvilken vei DYRET gikk — separat fra kamera.directionDegrees (kameraets
+  // faste retning). Valgfritt, samme mønster som app/kart.tsx.
+  const [obsRetningKjent, setObsRetningKjent] = useState(false);
+  const [obsRetning, setObsRetning] = useState(0);
 
   const initialisertForId = useRef<string | null>(null);
 
@@ -573,6 +577,8 @@ export default function KameraDetaljScreen() {
     setObsAntall("1");
     setObsKjønn("Ukjent");
     setObsAlder("Ukjent");
+    setObsRetningKjent(false);
+    setObsRetning(0);
     setObsKommentar("");
     setObsModal(true);
   }
@@ -593,7 +599,7 @@ export default function KameraDetaljScreen() {
         tid: new Date().toISOString(),
         latitude: kamera.latitude,
         longitude: kamera.longitude,
-        retning: null,
+        retning: obsRetningKjent ? obsRetning : null,
         antall,
         observationSource: "camera",
         cameraId: kamera.id,
@@ -1227,6 +1233,27 @@ export default function KameraDetaljScreen() {
               ))}
             </View>
 
+            <Text style={styles.label}>Retning dyret gikk (valgfritt)</Text>
+            <Text style={styles.hint}>
+              Kameraets retning ({kamera?.directionDegrees ?? 0}°) endres ikke — dette er hvilken
+              vei DYRET beveget seg, ikke hvor kameraet peker.
+            </Text>
+            <View style={styles.chipRow}>
+              <Pressable
+                style={[styles.chip, !obsRetningKjent && styles.chipActive]}
+                onPress={() => setObsRetningKjent((p) => !p)}
+              >
+                <Text style={[styles.chipText, !obsRetningKjent && styles.chipTextActive]}>
+                  Ukjent retning
+                </Text>
+              </Pressable>
+            </View>
+            {obsRetningKjent && (
+              <View style={{ marginTop: 16, alignItems: "center" }}>
+                <RetningVelger value={obsRetning} onChange={setObsRetning} label="Dyrets retning" />
+              </View>
+            )}
+
             <Text style={styles.label}>Kommentar</Text>
             <TextInput
               placeholder="Valgfritt"
@@ -1371,6 +1398,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: "uppercase",
     marginTop: uiSpacing.md,
+    marginBottom: uiSpacing.xs,
+  },
+  hint: {
+    color: uiColor.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
     marginBottom: uiSpacing.xs,
   },
   value: { color: uiColor.textPrimary, fontSize: 15, lineHeight: 22 },

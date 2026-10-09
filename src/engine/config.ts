@@ -18,6 +18,20 @@ export const ENGINE_VERSION = "ViltIQ Engine v1";
  */
 export const CONFIG_VERSION = "1";
 
+/**
+ * V1.1 (§27): tre SEPARATE versjonsfelt for det økologiske laget, slik at et
+ * lagret prediction snapshot senere kan spores til NØYAKTIG hvilken
+ * modell/data som produserte det, uavhengig av ENGINE_VERSION/CONFIG_VERSION
+ * (som dekker observasjons-scoringen, ikke miljølaget). Bump ÉN av dem —
+ * ikke automatisk alle tre — når den tilhørende delen faktisk endrer seg:
+ */
+/** Formen på EnvironmentalContext/StaticEnvironmentalFeatures/DynamicEnvironmentalFeatures (environment/types.ts). Bump ved feltendringer, ikke ved kalibrering. */
+export const ENVIRONMENT_SCHEMA_VERSION = "1";
+/** Selve suitability-FORMLENE i ecology/suitability.ts (hvordan faktorer kombineres). Bump ved endret matematikk/struktur, ikke ved reine tallendringer. */
+export const ECOLOGY_MODEL_VERSION = "1";
+/** De artsspesifikke KONSTANTENE i ecology/hjort.ts, elg.ts, radyr.ts (strength/evidence/habitatSuitability-verdier). Bump ved kalibreringsendringer som V1.1-forskningsrevisjonen. */
+export const SPECIES_PROFILE_VERSION = "2";
+
 export type EngineConfig = {
   /** Rutestørrelse i det interne scoring-gridet. */
   cellSizeMeters: number;
@@ -50,6 +64,28 @@ export type EngineConfig = {
     ageRadiusGrowthPerHour: number;
     /** Tak på hvor mye alder kan vokse radiusen (multiplikator). */
     maxAgeRadiusMultiplier: number;
+    /**
+     * KRITISK KORRIGERING (v1.2): eksplisitt, dokumentert hardt tak på hvor
+     * langt (i multipler av observasjonens effektive radius) ÉN observasjon
+     * i det hele tatt kan bidra til en rutes score — uavhengig av at den
+     * Gaussiske avstandsvekten (distanceWeight) allerede faller mot ~0 lenge
+     * før dette. Poenget er ikke å ENDRE scoringen (den var allerede trygg,
+     * se signals.test.ts), men å gjøre grensen EKSPLISITT, testbar og
+     * dokumentert i stedet for en implisitt konsekvens av en eksponentiell
+     * kurve — jf. prinsippet "begrenset lokal sannsynlighetsforskyvning,
+     * ikke en beregnet sluttposisjon".
+     *
+     * Kalibrert mot kortsiktig (timer) forflytning/flukt-distanse etter en
+     * observasjon/forstyrrelse: rådyr ~250 m (maks ~1 km, Sveits), hjort
+     * medianforflytning ~1450 m for dyr som flyktet (Frankrike, drivjakt),
+     * elg ~140 m umiddelbar flukt + forhøyet aktivitet i ~2t (~80–185 m/t
+     * udisturbet bevegelseshastighet). Multiplikatoren 4× gir, kombinert med
+     * artenes egen baseRadiusMeters og maxAgeRadiusMultiplier: rådyr ≈1200 m,
+     * hjort ≈1800 m, elg ≈2700 m — samme størrelsesorden som forskningen,
+     * bevisst i den forsiktige (høye) enden fremfor å risikere å kutte bort
+     * reelt relevante celler.
+     */
+    maxInfluenceRadiusMultiplier: number;
   };
 
   direction: {
@@ -126,6 +162,22 @@ export type EngineConfig = {
      */
     weight: number;
   };
+
+  movementProjection: {
+    /**
+     * V1.3 (§H/§I): eksplisitt, dokumentert hardt tak — som MULTIPLIKATOR på
+     * projeksjonens egen (artsavhengige, aldersvoksende) usikkerhetsradius,
+     * se species/profiles.ts — der ÉN observasjons fremover-projiserte
+     * bevegelsesbidrag (movement.ts) garantert kuttes til nøyaktig 0. Samme
+     * filosofi som `distance.maxInfluenceRadiusMultiplier` over ("begrenset
+     * lokal sannsynlighetsforskyvning, ikke en beregnet sluttposisjon"), men
+     * for det NYE, asymmetriske projeksjonsbidraget, ikke det eksisterende
+     * symmetriske fotavtrykket. Den Gaussiske spredningen alene faller
+     * allerede mot ~0 lenge før dette — grensen gjør garantien EKSPLISITT og
+     * testbar, uavhengig av kurvens eksponentielle form.
+     */
+    hardCutoffUncertaintyMultiplier: number;
+  };
 };
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
@@ -147,6 +199,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   distance: {
     ageRadiusGrowthPerHour: 0.01, // +1 % radius per time
     maxAgeRadiusMultiplier: 1.5,
+    maxInfluenceRadiusMultiplier: 4,
   },
 
   direction: {
@@ -181,5 +234,9 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
 
   ecology: {
     weight: 3,
+  },
+
+  movementProjection: {
+    hardCutoffUncertaintyMultiplier: 4,
   },
 };
