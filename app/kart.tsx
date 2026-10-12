@@ -484,6 +484,12 @@ export default function KartScreen() {
   const [sporpunktLaster, setSporpunktLaster] = useState(false);
   const [errorText,    setErrorText]    = useState("");
   const [mapMode,      setMapMode]      = useState<"terrain" | "satellite">("terrain");
+  // §bugrapport V1.3: brukeren ba om et kompass — kartet tillater rotasjon
+  // (ingen eksisterende atferd endres her), så "nord" er ikke alltid opp.
+  // `mapHeading` speiler kartets FAKTISKE kompassretning (0 = nord-opp),
+  // lest via mapRef.getCamera() etter hver fullførte region-endring — selve
+  // kompass-nålen tegnes med MOTSATT rotasjon av denne, se compassWrap under.
+  const [mapHeading,   setMapHeading]    = useState(0);
   const [radiusKm,     setRadiusKm]     = useState<10 | 25 | 50>(50);
   const [userLocation, setUserLocation] = useState<UserPosition | null>(null);
   // V1.2.2 KORRIGERING: motoren analyserte tidligere ALLTID området rundt
@@ -713,6 +719,13 @@ export default function KartScreen() {
     regionDebounceRef.current = setTimeout(() => {
       setKartRegion(region);
     }, 500);
+    // Kompasset (se mapHeading) må holdes i sync med kartets faktiske
+    // rotasjon — `getCamera()` finnes kun på den native react-native-maps-
+    // instansen (ikke web-stubben), derfor try/catch i stedet for en egen
+    // platform-sjekk: et evt. manglende kompass på web er helt greit.
+    mapRef.current?.getCamera?.()
+      .then((cam) => setMapHeading(cam.heading ?? 0))
+      .catch(() => {});
   }
 
   function handleMapLongPress(e: LongPressEvent) {
@@ -2098,6 +2111,25 @@ export default function KartScreen() {
             knapp til én forutsigbar kolonne (§8 Overlay management). */}
         {!selectedPin && !selectedCamera && (
           <View style={styles.controlColumn}>
+            {/* §bugrapport V1.3: kompass — kartet tillater rotasjon, så "opp"
+                er ikke alltid nord. Nåla roterer MOTSATT av kartets faktiske
+                kompassretning (mapHeading, holdt i sync i
+                handleMapRegionChangeComplete) slik at den alltid peker mot
+                ekte nord uansett hvordan kartet er dreid. Trykk nullstiller
+                rotasjonen (samme konvensjon som Google/Apple Maps sin egen
+                kompass-knapp) — samme controlBtn-stil som resten av kolonnen,
+                ingen ny visuell stil oppfunnet for dette. */}
+            <Pressable
+              style={styles.controlBtn}
+              hitSlop={4}
+              onPress={() => mapRef.current?.animateCamera?.({ heading: 0 }, { duration: 300 })}
+            >
+              <View style={{ alignItems: "center", transform: [{ rotate: `${-mapHeading}deg` }] }}>
+                <Text style={styles.compassN}>N</Text>
+                <Ionicons name="navigate" size={18} color={uiColor.primary} />
+              </View>
+            </Pressable>
+
             <Pressable
               style={[styles.controlBtn, lagmenyÅpen && styles.controlBtnActive]}
               onPress={() => setLagmenyÅpen((v) => !v)}
@@ -2895,6 +2927,7 @@ const styles = StyleSheet.create({
   },
   controlBtnActive:   { backgroundColor: uiColor.primary + uiAlpha.soft, borderColor: uiColor.primary },
   controlBtnDisabled: { opacity: 0.5 },
+  compassN: { fontSize: 9, fontWeight: "900", color: uiColor.primary, marginBottom: -2 },
 
   // Kartlag-panel
   layersPanel: {
@@ -3116,9 +3149,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
     overflow: "hidden",
   },
-  cameraPinWrap:   { alignItems: "center" },
+  // Feltrapport (fysisk enhet, V1.3): kameramarkøren viste ALDRI noe ikon,
+  // selv etter StableMarker sin to-forsøks timing-fiks — diagnosen endte på
+  // selve STRUKTUREN, ikke timingen. `cameraPinWrap` hadde INGEN eksplisitt
+  // bredde/høyde (i motsetning til f.eks. hotspotRingWrap/huntPlanTargetWrap,
+  // som begge er eksplisitt `minTouchTarget`-store) — størrelsen måtte
+  // utledes fra et flyt-barn (MarkerBadge) ved siden av et ABSOLUTT
+  // posisjonert søsken (retningspilen, `top: -17`, altså UTENFOR egne
+  // grenser) pluss en `zIndex` som tvinger iOS til å kompositere pilen som et
+  // eget lag. react-native-maps sitt iOS-snapshot av egendefinert
+  // markør-innhold har kjente problemer nettopp med denne kombinasjonen
+  // (ustabil egen-størrelse + innhold som stikker utenfor + separat
+  // kompositert lag) — løsningen er å fjerne alle tre risikofaktorene på
+  // samme måte som de ALLEREDE velfungerende markørene i denne filen: en
+  // eksplisitt, fast størrelse, og retningspilen som et VANLIG (ikke
+  // absolutt, ikke zIndex) barn innenfor de samme grensene.
+  cameraPinWrap: {
+    width: minTouchTarget, height: minTouchTarget + 18,
+    alignItems: "center", justifyContent: "flex-end",
+  },
   cameraDirArrowWrap: {
-    position: "absolute", top: -17, alignItems: "center", justifyContent: "center", zIndex: 1,
+    height: 18, alignItems: "center", justifyContent: "center",
   },
 
   // HuntPlan-oppdraget §3.16: distinkt "sikte"-markør for det anbefalte
