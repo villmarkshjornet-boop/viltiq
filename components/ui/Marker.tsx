@@ -17,14 +17,31 @@ import { color } from "@/src/design/tokens";
  * ta et korrekt bilde av det faktisk ferdiglayoutede innholdet), flipp til
  * `false` en kort stund etterpå (stabil ytelse for markører som uansett ikke
  * endrer utseende over tid — samme sluttilstand som før, bare trygg ankomst).
+ *
+ * Feltrapport (fysisk iOS-enhet, V1.3): et kamera satt ned midt i en økt
+ * manglet FORTSATT ikonet med et enkelt 600ms-vindu — sannsynlig fordi
+ * `closePinPanel()` (skjemaet lukkes idet lagringen går gjennom) utløser en
+ * egen layout-omveltning SAMTIDIG som markøren mountes, som i verste fall kan
+ * skyve selve layout-ferdigstillelsen forbi ett enkelt tidsvindu. Løsningen
+ * er IKKE bare å gjette et enda lengre tall (samme race, bare sjeldnere) —
+ * i stedet gis SDK-en to uavhengige sjanser til å ta et korrekt bilde: en
+ * kort første stabilisering, og en ny, kort re-arming litt senere som fanger
+ * opp tilfeller der det aller første vinduet likevel var for tidlig.
  */
-const TRACKS_VIEW_CHANGES_SETTLE_MS = 600;
+// Eksplisitt, lineær tidslinje (ikke utledet/beregnet) nettopp for å holde
+// rekkefølgen lett å verifisere ved øyemål: false (1. forsøk) → true
+// (re-arm) → false (2. og siste forsøk — her den skal lande for godt).
+const SETTLE_SCHEDULE: readonly { ms: number; value: boolean }[] = [
+  { ms: 600,  value: false },
+  { ms: 650,  value: true },
+  { ms: 1500, value: false },
+];
 
 export function StableMarker(props: ComponentProps<typeof MapMarker>) {
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
   useEffect(() => {
-    const t = setTimeout(() => setTracksViewChanges(false), TRACKS_VIEW_CHANGES_SETTLE_MS);
-    return () => clearTimeout(t);
+    const timers = SETTLE_SCHEDULE.map(({ ms, value }) => setTimeout(() => setTracksViewChanges(value), ms));
+    return () => timers.forEach(clearTimeout);
   }, []);
   return <MapMarker {...props} tracksViewChanges={tracksViewChanges} />;
 }

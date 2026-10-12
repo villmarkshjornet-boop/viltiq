@@ -24,18 +24,38 @@ export type MedlemPosisjon = {
   updatedAt?: any;
 };
 
+/**
+ * Feltrapport (fysisk enhet, V1.3): "Planlegg jakt"/observasjoner ga verken
+ * feilmelding eller resultat — sporet til at `Location.getCurrentPositionAsync`
+ * IKKE har noen innebygd timeout. Ved et kaldt GPS-fix (f.eks. innendørs, eller
+ * første posisjonsoppslag etter appstart) kan kallet henge i svært lang tid —
+ * UI-et som venter på det (Hjem/Jakt/Kart) blir da stående i "laster"-tilstand
+ * på ubestemt tid, ikke en synlig feil, nøyaktig det brukeren beskrev.
+ */
+const POSITION_TIMEOUT_MS = 12000;
+
+function timeoutAfter(ms: number): Promise<never> {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error("Posisjon tok for lang tid")), ms));
+}
+
 export async function getUserPosition(): Promise<UserPosition | null> {
   const permission = await Location.requestForegroundPermissionsAsync();
   if (permission.status !== "granted") return null;
 
-  const location = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Balanced,
-  });
-
-  return {
-    latitude: location.coords.latitude,
-    longitude: location.coords.longitude,
-  };
+  try {
+    const location = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      timeoutAfter(POSITION_TIMEOUT_MS),
+    ]);
+    return { latitude: location.coords.latitude, longitude: location.coords.longitude };
+  } catch {
+    // Fersk GPS-måling tok for lang tid — prøv SISTE KJENTE posisjon
+    // (øyeblikkelig, ingen ny måling) i stedet for å gi brukeren ingenting.
+    // Fortsatt `null` (samme, allerede håndterte "ingen posisjon"-tilstand
+    // nedstrøms) hvis heller ingen slik finnes.
+    const last = await Location.getLastKnownPositionAsync().catch(() => null);
+    return last ? { latitude: last.coords.latitude, longitude: last.coords.longitude } : null;
+  }
 }
 
 export async function syncUserLocation(input: UserPosition): Promise<void> {

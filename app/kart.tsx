@@ -632,10 +632,24 @@ export default function KartScreen() {
           return;
         }
 
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        // Feltrapport (fysisk enhet, V1.3): kartet ble stående i "Laster..."
+        // på ubestemt tid uten noen feilmelding — `getCurrentPositionAsync`
+        // har ingen innebygd timeout, og et kaldt GPS-fix (innendørs, første
+        // oppslag etter appstart) kan henge svært lenge. Samme
+        // timeout+siste-kjente-posisjon-mønster som src/services/location.ts
+        // sin getUserPosition() nå bruker.
+        const pos = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Posisjon tok for lang tid")), 12000)
+          ),
+        ]).catch(() => Location.getLastKnownPositionAsync());
         if (!aktiv) return;
+        if (!pos) {
+          setErrorText("Fant ikke posisjonen din — sjekk GPS/stedstjenester og prøv igjen.");
+          setLoading(false);
+          return;
+        }
         const center = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         setUserLocation(center);
         await syncUserLocation(center);
@@ -749,7 +763,7 @@ export default function KartScreen() {
     if (!selectedPin || savingPin) return;
     try {
       setSavingPin(true);
-      await saveObservation({
+      const { offline } = await saveObservation({
         dyr:      valgtDyr,
         type:     "Sett dyr",
         kommentar: "Lagt inn fra kart",
@@ -761,7 +775,19 @@ export default function KartScreen() {
         observationSource: "manual",
       });
       closePinPanel();
-      visAlert("Lagret", "Observasjonen er lagret.");
+      // Feltrapport (fysisk enhet, V1.3): "ingen rapport" på en observasjon
+      // brukeren nettopp registrerte — saveObservation() faller STILLE
+      // tilbake til en lokal offline-kø ved nettverks-/Firestore-feil (se
+      // src/services/observations.ts) og ga FØR denne endringen akkurat samme
+      // "Lagret"-melding uansett, så brukeren hadde ingen måte å vite at
+      // observasjonen ikke faktisk nådde serveren (og dermed ikke dukker opp
+      // i Logg/kartet før den har synkronisert).
+      visAlert(
+        "Lagret",
+        offline
+          ? "Observasjonen er lagret lokalt og synkroniseres neste gang du har nett."
+          : "Observasjonen er lagret."
+      );
     } catch (e: any) {
       visAlert("Feil", e?.message || "Klarte ikke lagre observasjon.");
     } finally {
@@ -773,7 +799,7 @@ export default function KartScreen() {
     if (!selectedPin || savingPin) return;
     try {
       setSavingPin(true);
-      await saveObservation({
+      const { offline } = await saveObservation({
         dyr:      sporDyr ?? "Ukjent",
         type:     "Spor",
         kommentar: sporKommentar.trim() || "Spor registrert fra kart",
@@ -785,7 +811,12 @@ export default function KartScreen() {
         sporType: sporTypeValgt,
       });
       closePinPanel();
-      visAlert("Spor lagret", "Sporet er registrert på kartet.");
+      visAlert(
+        "Spor lagret",
+        offline
+          ? "Sporet er lagret lokalt og synkroniseres neste gang du har nett."
+          : "Sporet er registrert på kartet."
+      );
     } catch (e: any) {
       visAlert("Feil", e?.message || "Klarte ikke lagre spor.");
     } finally {
@@ -819,7 +850,7 @@ export default function KartScreen() {
     if (!selectedCamera || savingCameraAction) return;
     try {
       setSavingCameraAction(true);
-      await saveObservation({
+      const { offline } = await saveObservation({
         dyr:      regDyr,
         type:     "Sett dyr",
         kommentar: regKommentar.trim() || "Registrert fra viltkamera",
@@ -834,7 +865,12 @@ export default function KartScreen() {
         alder:    regAlder,
       });
       setCameraView("info");
-      visAlert("Lagret", "Observasjonen er registrert på kameraet.");
+      visAlert(
+        "Lagret",
+        offline
+          ? "Observasjonen er lagret lokalt og synkroniseres neste gang du har nett."
+          : "Observasjonen er registrert på kameraet."
+      );
     } catch (e: any) {
       visAlert("Feil", e?.message || "Klarte ikke lagre observasjon.");
     } finally {
@@ -1462,6 +1498,28 @@ export default function KartScreen() {
     autoOpenedPlanRef.current = true;
     apneJaktplan(hotspotSone);
   }, [params.openPlan, hotspotSone]);
+
+  // Feltrapport (fysisk enhet, V1.3): "Planlegg jakten" ga verken feilmelding
+  // eller noe merket på kartet — ingen indikasjon på HVORFOR (f.eks. manglende
+  // posisjon/miljødata gjør at `hotspotSone` aldri blir noe, se visteHotspots/
+  // besteMotorSone over). Stille ingenting er alltid en dårlig sluttilstand,
+  // uansett underliggende årsak — denne varsler ÆRLIG (ikke en oppdiktet
+  // forklaring) hvis ingen sone dukket opp innen rimelig tid, i stedet for at
+  // brukeren står igjen uten noe å gå videre på. Varsler maks ÉN gang per
+  // navigasjon hit, og ALDRI hvis planen faktisk åpnet seg i mellomtiden.
+  const openPlanTimeoutWarnedRef = useRef(false);
+  useEffect(() => {
+    if (params.openPlan !== "1") return;
+    const t = setTimeout(() => {
+      if (autoOpenedPlanRef.current || openPlanTimeoutWarnedRef.current) return;
+      openPlanTimeoutWarnedRef.current = true;
+      visAlert(
+        "Fant ingen sone ennå",
+        "ViltIQ har ikke nok grunnlag (posisjon/miljødata/observasjoner) til å foreslå en jaktplan for området akkurat nå. Sjekk at posisjon er aktivert, og prøv «Analyser dette området» på kartet."
+      );
+    }, 10000);
+    return () => clearTimeout(t);
+  }, [params.openPlan]);
 
   // FJERNET (V1.2, arkitekturbeslutning): en tidligere "hotspot-sektor" som
   // pekte "hvilken vei" rundt hotspot-sonen, beregnet fra en egen sirkulær
