@@ -4,7 +4,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -98,7 +97,7 @@ import { savePredictionSnapshot } from "@/src/services/predictions";
 import { buildHuntPlan, stablePredictionSnapshotId, type HuntPlan } from "@/src/engine/huntPlan";
 import { color as uiColor, radius as uiRadius, spacing as uiSpacing, zIndex as uiZ, elevation as uiElevation, minTouchTarget, glass as uiGlass, alpha as uiAlpha, typography as uiType } from "@/src/design/tokens";
 import Surface from "@/components/ui/Surface";
-import Toggle from "@/components/ui/Toggle";
+import MapLayersPanel, { type Tidsvindu } from "@/components/ui/MapLayersPanel";
 import BottomSheet, { type SheetSnap } from "@/components/ui/BottomSheet";
 import ModalSheet from "@/components/ui/ModalSheet";
 import EngineStatusPanel from "@/components/ui/EngineStatusPanel";
@@ -522,7 +521,7 @@ export default function KartScreen() {
   // ferske signaler dominerer); "6t"/"24t" filtrerer bort observasjoner
   // eldre enn vinduet FØR de sendes til motoren, som en hard, forståelig
   // grense brukeren selv velger — ikke en endring i selve decay-matematikken.
-  const [tidsvindu, setTidsvindu] = useState<"nå" | "6t" | "24t">("nå");
+  const [tidsvindu, setTidsvindu] = useState<Tidsvindu>("nå");
   const [visKameraer,    setVisKameraer]    = useState(true);
   const [visAktiveSoner, setVisAktiveSoner] = useState(false);
   const [visSporAnnet,   setVisSporAnnet]   = useState(true);
@@ -2207,65 +2206,26 @@ export default function KartScreen() {
             slik at det er tydelig hva som er en prediksjon og hva som er en
             faktisk observasjon. */}
         {lagmenyÅpen && !selectedPin && !selectedCamera && (
-          <Surface variant="elevated" style={[styles.layersPanel, uiElevation.panel]}>
-            {/* Feltrapport (fysisk enhet, V1.3): "ingen måte å minimere den
-                på igjen" — panelet hadde KUN layers-knappen i kontroll-
-                kolonnen som lukke-mekanisme, ikke noe synlig på selve
-                kortet. Samme X-mønster som HuntPlanPanel/ModalSheet sine
-                andre paneler, ikke en ny lukke-stil. */}
-            <View style={styles.layersPanelHeader}>
-              <Text style={styles.layersPanelTitle}>Kartlag</Text>
-              <Pressable onPress={() => setLagmenyÅpen(false)} hitSlop={10}>
-                <Ionicons name="close" size={18} color={uiColor.textSecondary} />
-              </Pressable>
-            </View>
-
-            <Text style={styles.layersGroupTitle}>ViltIQ</Text>
-            {/* Feltrapport (fysisk enhet, V1.3): tallene i parentes er et
-                bevisst, midlertidig diagnosevindu — de skiller "data kom
-                aldri frem" (0) fra "data finnes, men vises ikke" (>0 uten
-                noe synlig på kartet), uten at brukeren trenger konsoll/Mac.
-                Fjernes når kamera-/heatmap-rapportene er bekreftet løst. */}
-            <Toggle label={`Motor (heatmap) · ${heatmapRenderPoints.length} pkt`} icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor={uiColor.layerMotor} />
-            {/* Motor-tidsvindu (§18) — hvor langt tilbake motoren ser etter
-                signaler. Kompakt 3-valgs segmentkontroll, samme visuelle
-                mønster som Topo/Satellitt-bryteren i navBar. */}
-            <View style={styles.tidsvinduRad}>
-              {(["nå", "6t", "24t"] as const).map((v) => (
-                <Pressable
-                  key={v}
-                  onPress={() => setTidsvindu(v)}
-                  style={[styles.tidsvinduBtn, tidsvindu === v && styles.tidsvinduBtnActive]}
-                >
-                  <Text style={[styles.tidsvinduTxt, tidsvindu === v && styles.tidsvinduTxtActive]}>
-                    {v === "nå" ? "Nå" : `Siste ${v}`}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor={uiColor.layerAktiveSoner} />
-
-            <Text style={styles.layersGroupTitle}>Registreringer</Text>
-            <Toggle label={`Observasjoner · ${observasjoner.length}`} icon="eye-outline" active={visObservasjoner} onToggle={() => setVisObservasjoner((v) => !v)} accentColor={uiColor.layerObservasjoner} />
-            <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
-            <Toggle label={`Kamera · ${kameraer.length}`} icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
-            {/* Feltrapport (fysisk enhet, V1.3): "eiendomsgrenser fungerer
-                ikke, kommer ingenting der" — stemmer, men ikke en bug: dette
-                laget (Kartverket/Geonorge-matrikkelkart) er KUN implementert
-                for web (se MapView.web.tsx) — components/MapView.tsx (native)
-                stripper `showPropertyBoundaries` stille, med vilje, fordi
-                react-native-maps aldri fikk en tilsvarende native
-                implementasjon. Å la bryteren stå synlig og ikke-fungerende
-                på native er verre enn å skjule den — en bryter som ikke gjør
-                noe er akkurat den typen "stille ingenting" som har vært
-                kjernen i flere av de andre feltrapportene. Ekte native
-                eiendomsgrenser er et eget, ikke-trivielt arbeid (ny
-                datakilde/rendering for react-native-maps), ikke noe som
-                løses som en del av denne opprydningen. */}
-            {Platform.OS === "web" && (
-              <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor={uiColor.levelHøy} />
-            )}
-          </Surface>
+          <MapLayersPanel
+            onClose={() => setLagmenyÅpen(false)}
+            visPrediksjon={visPrediksjon}
+            onToggleVisPrediksjon={() => setVisPrediksjon((v) => !v)}
+            heatmapPointCount={heatmapRenderPoints.length}
+            tidsvindu={tidsvindu}
+            onChangeTidsvindu={setTidsvindu}
+            visAktiveSoner={visAktiveSoner}
+            onToggleVisAktiveSoner={() => setVisAktiveSoner((v) => !v)}
+            visObservasjoner={visObservasjoner}
+            onToggleVisObservasjoner={() => setVisObservasjoner((v) => !v)}
+            observasjonCount={observasjoner.length}
+            visSporAnnet={visSporAnnet}
+            onToggleVisSporAnnet={() => setVisSporAnnet((v) => !v)}
+            visKameraer={visKameraer}
+            onToggleVisKameraer={() => setVisKameraer((v) => !v)}
+            kameraCount={kameraer.length}
+            visEiendomsgrenser={visEiendomsgrenser}
+            onToggleVisEiendomsgrenser={() => setVisEiendomsgrenser((v) => !v)}
+          />
         )}
 
         {/* ── Aktive soner — kort legend, plassert til venstre for å aldri kollidere med engine-panelet/høyre-kolonnen ── */}
@@ -3019,38 +2979,8 @@ const styles = StyleSheet.create({
     borderTopColor: uiColor.textMuted,
   },
 
-  // Kartlag-panel
-  layersPanel: {
-    position: "absolute", right: 14, top: 114,
-    width: 240, padding: uiSpacing.lg,
-    zIndex: uiZ.panel,
-  },
-  layersPanelHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginBottom: uiSpacing.sm,
-  },
-  layersPanelTitle: {
-    color: uiColor.textPrimary, fontSize: 13, fontWeight: "900",
-    textTransform: "uppercase", letterSpacing: 1,
-  },
-  layersGroupTitle: {
-    color: uiColor.textFaint, fontSize: 10, fontWeight: "800",
-    textTransform: "uppercase", letterSpacing: 0.6,
-    marginTop: uiSpacing.sm, marginBottom: 2,
-  },
-
-  // Motor-tidsvindu — kompakt 3-valgs segmentkontroll (samme visuelle
-  // mønster som Topo/Satellitt-toggleItem over).
-  tidsvinduRad: {
-    flexDirection: "row", backgroundColor: uiColor.surface,
-    borderRadius: uiRadius.md, padding: 3, gap: 2,
-    borderWidth: 1, borderColor: uiColor.border,
-    marginTop: uiSpacing.xs, marginBottom: uiSpacing.sm,
-  },
-  tidsvinduBtn: { flex: 1, paddingVertical: 6, borderRadius: 9, alignItems: "center" },
-  tidsvinduBtnActive: { backgroundColor: uiColor.primary },
-  tidsvinduTxt: { color: uiColor.textMuted, fontSize: 11, fontWeight: "700" },
-  tidsvinduTxtActive: { color: uiColor.primaryText, fontWeight: "900" },
+  // Kartlag-panel (§rapport-anbefaling 6): flyttet til egen komponent,
+  // components/ui/MapLayersPanel.tsx — se den filen for styling.
 
   // Desktop engine-panel — starter UNDER artsfilter-raden (top: 64 + rad-
   // høyde), aldri på samme høyde, for å unngå at panelet dekker filtrene.
