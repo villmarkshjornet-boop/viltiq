@@ -507,7 +507,16 @@ export default function KartScreen() {
   const [mapPoints,    setMapPoints]    = useState<MapPoint[]>([]);
   const [filterOpen,   filterOpenSet]   = useState(false);
   const [aktivtFilter,   setAktivtFilter]   = useState(params.filter || "Alle");
-  const [visPrediksjon,  setVisPrediksjon]  = useState(params.heatmap === "1");
+  // Feltrapport (fysisk enhet, V1.3): "analyserer jeg område for jakt ... får
+  // jeg ingen heatmap" — sporet til at dette laget stod AV som standard med
+  // mindre Kart ble åpnet via en dyplenke med `?heatmap=1` (fra "Planlegg
+  // jakten"/"Se på kart"). Åpner brukeren Kart-fanen direkte (den vanlige
+  // veien, ingen dyplenke), fikk de aldri se motorens heatmap i det hele tatt
+  // — uansett hvor mange ganger de trykket "Analyser dette området" — uten
+  // noen indikasjon på at det bare var et skjult lag-valg. Dette ER appens
+  // kjernefunksjon ("Intelligence Layer"), så den skal være PÅ som standard;
+  // `?heatmap=1` fra dyplenker er nå bare en no-op (laget er uansett på).
+  const [visPrediksjon,  setVisPrediksjon]  = useState(true);
   // Motor-tidsvindu (§18 i motor-oppdraget) — "nå" = ingen ekstra filter
   // (motorens egen tidsvekting, se signals.ts timeWeight, gjør allerede at
   // ferske signaler dominerer); "6t"/"24t" filtrerer bort observasjoner
@@ -1913,7 +1922,17 @@ export default function KartScreen() {
                   setSelectedPin(null);
                 }}
               >
-                <View style={styles.cameraPinWrap}>
+                {/* `collapsable={false}`: tvinger RN til ALLTID å lage en
+                    ekte native view for dette treet, i stedet for å
+                    "flate det ut" (view-flattening-optimalisering) når det
+                    ikke selv har synlige stiler. Et velkjent, dokumentert
+                    behov for react-native-maps sin egendefinerte markør-
+                    snapshot (uten dette kan selve viewen SDK-en prøver å ta
+                    bilde av rett og slett ikke eksistere som egen native
+                    node ennå) — kombinert med StableMarker sin timing-fiks
+                    OG forrige runde sin eksplisitte størrelse, i stedet for
+                    nok et gjetning på egen hånd. */}
+                <View style={styles.cameraPinWrap} collapsable={false}>
                   <View style={styles.cameraDirArrowWrap} pointerEvents="none">
                     <Ionicons
                       name="navigate"
@@ -2176,7 +2195,12 @@ export default function KartScreen() {
             <Text style={styles.layersPanelTitle}>Kartlag</Text>
 
             <Text style={styles.layersGroupTitle}>ViltIQ</Text>
-            <Toggle label="Motor (heatmap)" icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
+            {/* Feltrapport (fysisk enhet, V1.3): tallene i parentes er et
+                bevisst, midlertidig diagnosevindu — de skiller "data kom
+                aldri frem" (0) fra "data finnes, men vises ikke" (>0 uten
+                noe synlig på kartet), uten at brukeren trenger konsoll/Mac.
+                Fjernes når kamera-/heatmap-rapportene er bekreftet løst. */}
+            <Toggle label={`Motor (heatmap) · ${heatmapRenderPoints.length} pkt`} icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
             {/* Motor-tidsvindu (§18) — hvor langt tilbake motoren ser etter
                 signaler. Kompakt 3-valgs segmentkontroll, samme visuelle
                 mønster som Topo/Satellitt-bryteren i navBar. */}
@@ -2196,9 +2220,9 @@ export default function KartScreen() {
             <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor="#22D3EE" />
 
             <Text style={styles.layersGroupTitle}>Registreringer</Text>
-            <Toggle label="Observasjoner" icon="eye-outline" active={visObservasjoner} onToggle={() => setVisObservasjoner((v) => !v)} accentColor="#34D399" />
+            <Toggle label={`Observasjoner · ${observasjoner.length}`} icon="eye-outline" active={visObservasjoner} onToggle={() => setVisObservasjoner((v) => !v)} accentColor="#34D399" />
             <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
-            <Toggle label="Kamera" icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
+            <Toggle label={`Kamera · ${kameraer.length}`} icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
             <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
           </Surface>
         )}

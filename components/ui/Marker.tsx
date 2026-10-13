@@ -100,7 +100,14 @@ export function MarkerBadge({ kind, size = "md", icon, emoji, accentColor }: Mar
   const tailSize = Math.round(px * 0.24);
 
   return (
-    <View style={styles.wrap}>
+    // `collapsable={false}`: samme react-native-maps-snapshot-hardening som
+    // app/kart.tsx sin kameramarkør nå bruker — `wrap` har ingen egen synlig
+    // stil (kun alignItems), og RN sin view-flattening-optimalisering kan i
+    // prinsippet fjerne den som egen native node før react-native-maps får
+    // tatt et bilde av den. Sentralt her (ikke bare på kamera-markøren)
+    // fordi ALLE markørtyper i appen (observasjon/spor/annet/party/
+    // best-zone/candidate) bruker nettopp denne komponenten.
+    <View style={styles.wrap} collapsable={false}>
       <View
         style={[
           styles.bubble,
