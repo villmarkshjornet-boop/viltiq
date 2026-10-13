@@ -2018,37 +2018,39 @@ export default function KartScreen() {
           </View>
         )}
 
-        {/* ── Navigasjonsbar ──
-            Én rad: tilbake, tittel, kartbunn-toggle. Ingen andre kontroller
-            her — kartlag/handlinger flyttet til den konsoliderte høyre-
-            kolonnen under (§21: "kartlag skal samles i én ryddig kontroll",
-            §7: ingen overlappende UI). */}
-        <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
-            <Ionicons name="chevron-back" size={20} color={uiColor.textPrimary} />
-            <Text style={styles.backText}>Tilbake</Text>
+        {/* ── Premium-oppdraget: den gamle navBar-en (solid, full bredde,
+            med "Tilbake"-tekst + "Dyrekart"-tittel + innfelt toggle) brøt
+            med resten av skjermens allerede etablerte flytende glass-språk
+            (controlBtn/filterChip) — en tung, tradisjonell "app bar" midt i
+            et ellers luftig kart. Erstattet med to UAVHENGIGE, flytende
+            elementer i samme glass-stil som kontrollkolonnen: en liten
+            sirkulær ikon-knapp (ingen tekst — samme konvensjon som
+            Google/Apple Maps sin egen tilbake-knapp) og toggle-pillen,
+            nå flytende i stedet for innrammet i en bar. Tittelen
+            ("Dyrekart") er fjernet helt — redundant når brukeren allerede
+            er på kartet, og fjerning av den var selve kjernen i "rotete"-
+            tilbakemeldingen. */}
+        <Pressable onPress={() => router.back()} style={styles.floatingBackBtn} hitSlop={8}>
+          <Ionicons name="chevron-back" size={22} color={uiColor.textPrimary} />
+        </Pressable>
+
+        <View style={[styles.mapToggle, styles.mapToggleFloating]}>
+          <Pressable
+            onPress={() => setMapMode("terrain")}
+            style={[styles.toggleItem, mapMode === "terrain" && styles.toggleItemActive]}
+          >
+            <Text style={[styles.toggleText, mapMode === "terrain" && styles.toggleTextActive]}>
+              Topo
+            </Text>
           </Pressable>
-
-          <Text style={styles.navTitle}>Dyrekart</Text>
-
-          <View style={styles.mapToggle}>
-            <Pressable
-              onPress={() => setMapMode("terrain")}
-              style={[styles.toggleItem, mapMode === "terrain" && styles.toggleItemActive]}
-            >
-              <Text style={[styles.toggleText, mapMode === "terrain" && styles.toggleTextActive]}>
-                Topo
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setMapMode("satellite")}
-              style={[styles.toggleItem, mapMode === "satellite" && styles.toggleItemActive]}
-            >
-              <Text style={[styles.toggleText, mapMode === "satellite" && styles.toggleTextActive]}>
-                Satellitt
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => setMapMode("satellite")}
+            style={[styles.toggleItem, mapMode === "satellite" && styles.toggleItemActive]}
+          >
+            <Text style={[styles.toggleText, mapMode === "satellite" && styles.toggleTextActive]}>
+              Satellitt
+            </Text>
+          </Pressable>
         </View>
 
         {/* ── "Analyser dette området" — DEN ENESTE knappen i hele kartet som
@@ -2874,22 +2876,29 @@ const styles = StyleSheet.create({
   container:   { flex: 1 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#060E08" },
 
-  navBar: {
-    position: "absolute", top: 0, left: 0, right: 0,
-    backgroundColor: uiGlass.controlBgStrong,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 14, paddingVertical: 11,
-    borderBottomWidth: 1, borderBottomColor: uiGlass.controlBorder,
-    zIndex: uiZ.navigation,
-    minHeight: 52,
+  // Premium-oppdraget: erstatter den gamle solide navBar-en. Samme
+  // "flytende glass-sirkel"-oppskrift som controlColumn sin controlBtn
+  // under (minTouchTarget, uiGlass-farger, samme skygge) — bevisst
+  // gjenbrukt helt likt, ikke en ny stil, slik at tilbake-knappen leses som
+  // samme familie som resten av kartets flytende kontroller.
+  floatingBackBtn: {
+    position: "absolute", top: 10, left: 14, zIndex: uiZ.navigation,
+    width: minTouchTarget, height: minTouchTarget, borderRadius: uiRadius.md,
+    backgroundColor: uiGlass.controlBg,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: uiGlass.controlBorder,
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 8, elevation: 6,
   },
-  backBtn:  { flexDirection: "row", alignItems: "center", gap: 2, minWidth: 86, minHeight: minTouchTarget },
-  backText: { color: uiColor.textPrimary, fontSize: 16, fontWeight: "700" },
-  navTitle: { color: uiColor.textPrimary, fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center" },
   mapToggle: {
     flexDirection: "row", backgroundColor: uiColor.surface,
     borderRadius: uiRadius.md, padding: 3,
     borderWidth: 1, borderColor: uiColor.border,
+  },
+  // Toggle-pillen flyter nå fritt (samme rad som floatingBackBtn, speilvendt
+  // til høyre) i stedet for å ligge innrammet i den gamle baren.
+  mapToggleFloating: {
+    position: "absolute", top: 10, right: 14, zIndex: uiZ.navigation,
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 8, elevation: 6,
   },
   toggleItem:       { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 9 },
   toggleItemActive: { backgroundColor: uiColor.primary },
@@ -2900,7 +2909,7 @@ const styles = StyleSheet.create({
   // stopper FØR kontrollkolonnen (right: 128 = kolonnens bredde + luft) slik
   // at chips aldri kan gjengis bak lag-/spor-/posisjon-knappene (§7).
   filterBar: {
-    position: "absolute", top: 60, left: 0, right: 128,
+    position: "absolute", top: 64, left: 0, right: 128,
     zIndex: uiZ.mapControls,
   },
   filterBarContent: { paddingHorizontal: 14, gap: 8, paddingRight: 8 },
@@ -2915,7 +2924,7 @@ const styles = StyleSheet.create({
 
   // Konsolidert høyre kontrollkolonne (§8/§21) — kartlag, spor-registrering, min posisjon
   controlColumn: {
-    position: "absolute", right: 14, top: 60,
+    position: "absolute", right: 14, top: 64,
     gap: 10, zIndex: uiZ.mapControls,
   },
   controlBtn: {
@@ -2958,10 +2967,10 @@ const styles = StyleSheet.create({
   tidsvinduTxt: { color: uiColor.textMuted, fontSize: 11, fontWeight: "700" },
   tidsvinduTxtActive: { color: uiColor.primaryText, fontWeight: "900" },
 
-  // Desktop engine-panel — starter UNDER artsfilter-raden (top: 60 + rad-
+  // Desktop engine-panel — starter UNDER artsfilter-raden (top: 64 + rad-
   // høyde), aldri på samme høyde, for å unngå at panelet dekker filtrene.
   enginePanelDesktop: {
-    position: "absolute", left: 14, top: 114,
+    position: "absolute", left: 14, top: 118,
     width: 300, padding: uiSpacing.xl,
     zIndex: uiZ.panel,
   },
