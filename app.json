@@ -56,6 +56,12 @@
         "projectId": "da877a4b-b2a4-4b2e-8b60-3a1a68fc0a13"
       }
     },
-    "owner": "glennkarlsen"
+    "owner": "glennkarlsen",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/da877a4b-b2a4-4b2e-8b60-3a1a68fc0a13"
+    }
   }
 }

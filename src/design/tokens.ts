@@ -44,6 +44,17 @@ export const color = {
   confidenceLav: "#5C7568",
   confidenceMiddels: "#60A5FA",
   confidenceHøy: "#2CC36B",
+
+  // Lag-identitet (Designrapport §02/§anbefaling-2): kart.tsx sine
+  // kartlag-knapper/legend-prikker brukte allerede disse fargene
+  // KONSEKVENT (samme lilla for motor/heatmap over hele filen, samme cyan
+  // for aktive soner osv.) — de manglet bare et navn her. Ingen nye
+  // fargevalg, kun en registrering av det som allerede var i praktisk bruk.
+  layerMotor: "#A78BFA",
+  layerAktiveSoner: "#22D3EE",
+  layerAktiveSonerAlt: "#A855F7",
+  layerObservasjoner: "#34D399",
+  layerSpor: "#FCD34D",
 } as const;
 
 /** Aktivitetsnivå → farge. Matcher src/engine sin ActivityLevel-type. */

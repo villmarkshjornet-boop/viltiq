@@ -422,11 +422,11 @@ function AntallStepper({ value, onChange }: { value: number; onChange: (v: numbe
   return (
     <View style={styles.stepperRow}>
       <Pressable onPress={() => onChange(Math.max(1, value - 1))} style={styles.stepperBtn}>
-        <Ionicons name="remove" size={16} color="#CFE7DB" />
+        <Ionicons name="remove" size={16} color={uiColor.textSecondary} />
       </Pressable>
       <Text style={styles.stepperValue}>{value}</Text>
       <Pressable onPress={() => onChange(value + 1)} style={styles.stepperBtn}>
-        <Ionicons name="add" size={16} color="#CFE7DB" />
+        <Ionicons name="add" size={16} color={uiColor.textSecondary} />
       </Pressable>
     </View>
   );
@@ -441,7 +441,7 @@ function FormHeader({
       <View style={styles.pinHeaderLeft}>
         {onBack && (
           <Pressable onPress={onBack} style={styles.backStepBtn}>
-            <Ionicons name="chevron-back" size={18} color="#CFE7DB" />
+            <Ionicons name="chevron-back" size={18} color={uiColor.textSecondary} />
           </Pressable>
         )}
         <View>
@@ -450,7 +450,7 @@ function FormHeader({
         </View>
       </View>
       <Pressable onPress={onClose} style={styles.closeBtn}>
-        <Ionicons name="close" size={18} color="#9CA3AF" />
+        <Ionicons name="close" size={18} color={uiColor.textMuted} />
       </Pressable>
     </View>
   );
@@ -1915,22 +1915,20 @@ export default function KartScreen() {
             ))}
 
             {/* Kameramarkører */}
-            {/* Feltrapport (fysisk enhet, V1.3): bekreftet via lag-panelets
-                "Kamera · N"-telling at dataen FAKTISK ankommer (N ≥ 1) —
-                likevel ingenting synlig, selv med eksplisitt størrelse OG
-                collapsable={false}. To uavhengige, begrunnede gjetninger på
-                selve TIMINGEN (StableMarker sin forsinkede flipp) har IKKE
-                løst det. I stedet for en tredje gjetning: fjerner hele
-                timing-variabelen. `tracksViewChanges` er HELE TIDEN `true`
-                her (ikke StableMarker) — SDK-en tar da et nytt native
-                snapshot på HVER re-render i stedet for å stole på ett
-                bestemt tidsvindu. Dyrere (flere snapshots over tid), men for
-                et fåtall viltkamera-markører er kostnaden ubetydelig
-                sammenlignet med at de rett og slett ikke vises. Hvis
-                markøren FORTSATT ikke dukker opp med dette, er det et
-                endelig, ugjendrivelig bevis på at årsaken IKKE er
-                snapshot-timing i det hele tatt (se egen kommentar ved
-                MarkerBadge sin rotasjon under for neste steg i så fall). */}
+            {/* Feltrapport (fysisk enhet, V1.3), forsøk 4: tre uavhengige,
+                begrunnede fikser (StableMarker-timing, eksplisitt størrelse +
+                collapsable, permanent tracksViewChanges) løste det IKKE.
+                Alle tre delte én antakelse jeg aldri testet: at en EGEN
+                wrapping <View> rundt markørinnholdet er trygt. Den antakelsen
+                er nå forkastet — hotspot-markøren rett over (bevist
+                FUNGERENDE, ingen rapportert feil der) sender flere SØSKEN
+                direkte som Marker sine barn, UTEN noen egen omsluttende View.
+                react-native-maps oppretter sin EGEN native beholder for
+                markør-barna; en ekstra, selvlaget wrapper utenpå det er
+                nettopp den ekstra usikkerhetsfaktoren som skiller kamera fra
+                hotspot. Strukturen under er nå BOKSTAVELIG identisk mønster
+                som hotspot-markøren: én vanlig (flyt-)View etablerer formen,
+                én absolutt-posisjonert søsken-View legges oppå. */}
             {visKameraer && !erJaktplanAktiv && kameraer.map((k) => (
               <Marker
                 key={k.id}
@@ -1943,16 +1941,14 @@ export default function KartScreen() {
                   setSelectedPin(null);
                 }}
               >
-                <View style={styles.cameraPinWrap} collapsable={false}>
-                  <View style={styles.cameraDirArrowWrap} pointerEvents="none">
-                    <Ionicons
-                      name="navigate"
-                      size={14}
-                      color={uiColor.info}
-                      style={{ transform: [{ rotate: `${k.directionDegrees}deg` }] }}
-                    />
-                  </View>
-                  <MarkerBadge kind="kamera" size="md" icon="camera" />
+                <MarkerBadge kind="kamera" size="md" icon="camera" />
+                <View style={styles.cameraDirArrowWrap} pointerEvents="none">
+                  <Ionicons
+                    name="navigate"
+                    size={14}
+                    color={uiColor.info}
+                    style={{ transform: [{ rotate: `${k.directionDegrees}deg` }] }}
+                  />
                 </View>
               </Marker>
             ))}
@@ -2044,7 +2040,7 @@ export default function KartScreen() {
           </MapView>
         ) : (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator size="large" color="#2CC36B" />
+            <ActivityIndicator size="large" color={uiColor.primary} />
           </View>
         )}
 
@@ -2230,7 +2226,7 @@ export default function KartScreen() {
                 aldri frem" (0) fra "data finnes, men vises ikke" (>0 uten
                 noe synlig på kartet), uten at brukeren trenger konsoll/Mac.
                 Fjernes når kamera-/heatmap-rapportene er bekreftet løst. */}
-            <Toggle label={`Motor (heatmap) · ${heatmapRenderPoints.length} pkt`} icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor="#A78BFA" />
+            <Toggle label={`Motor (heatmap) · ${heatmapRenderPoints.length} pkt`} icon="analytics-outline" active={visPrediksjon} onToggle={() => setVisPrediksjon((v) => !v)} accentColor={uiColor.layerMotor} />
             {/* Motor-tidsvindu (§18) — hvor langt tilbake motoren ser etter
                 signaler. Kompakt 3-valgs segmentkontroll, samme visuelle
                 mønster som Topo/Satellitt-bryteren i navBar. */}
@@ -2247,10 +2243,10 @@ export default function KartScreen() {
                 </Pressable>
               ))}
             </View>
-            <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor="#22D3EE" />
+            <Toggle label="Aktive soner" icon="time-outline" active={visAktiveSoner} onToggle={() => setVisAktiveSoner((v) => !v)} accentColor={uiColor.layerAktiveSoner} />
 
             <Text style={styles.layersGroupTitle}>Registreringer</Text>
-            <Toggle label={`Observasjoner · ${observasjoner.length}`} icon="eye-outline" active={visObservasjoner} onToggle={() => setVisObservasjoner((v) => !v)} accentColor="#34D399" />
+            <Toggle label={`Observasjoner · ${observasjoner.length}`} icon="eye-outline" active={visObservasjoner} onToggle={() => setVisObservasjoner((v) => !v)} accentColor={uiColor.layerObservasjoner} />
             <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
             <Toggle label={`Kamera · ${kameraer.length}`} icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
             {/* Feltrapport (fysisk enhet, V1.3): "eiendomsgrenser fungerer
@@ -2267,7 +2263,7 @@ export default function KartScreen() {
                 datakilde/rendering for react-native-maps), ikke noe som
                 løses som en del av denne opprydningen. */}
             {Platform.OS === "web" && (
-              <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
+              <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor={uiColor.levelHøy} />
             )}
           </Surface>
         )}
@@ -2278,7 +2274,7 @@ export default function KartScreen() {
             {aktiveSoner.slice(0, 4).map((s) => (
               <View key={s.id} style={styles.predLegendRad}>
                 <View style={[styles.predLegendDot, {
-                  backgroundColor: s.type === "nå" ? "#22D3EE" : "#A855F7",
+                  backgroundColor: s.type === "nå" ? uiColor.layerAktiveSoner : uiColor.layerAktiveSonerAlt,
                 }]} />
                 <Text style={styles.predLegendTxt}>
                   {dyrEmoji(s.dyr)} {s.dyr} · {s.tidLabel}
@@ -2310,7 +2306,7 @@ export default function KartScreen() {
                 <View style={styles.cameraPanelHeader}>
                   <View style={styles.cameraPanelLeft}>
                     <View style={styles.cameraIconBadge}>
-                      <Ionicons name="camera" size={18} color="#60A5FA" />
+                      <Ionicons name="camera" size={18} color={uiColor.info} />
                     </View>
                     <View>
                       <Text style={styles.cameraPanelTitle}>{selectedCamera.name}</Text>
@@ -2320,7 +2316,7 @@ export default function KartScreen() {
                     </View>
                   </View>
                   <Pressable onPress={() => setSelectedCamera(null)} style={styles.closeBtn}>
-                    <Ionicons name="close" size={18} color="#6B8A76" />
+                    <Ionicons name="close" size={18} color={uiColor.textMuted} />
                   </Pressable>
                 </View>
 
@@ -2392,7 +2388,7 @@ export default function KartScreen() {
                     }}
                     style={styles.cameraActionBtn}
                   >
-                    <Ionicons name="paw-outline" size={16} color="#2CC36B" />
+                    <Ionicons name="paw-outline" size={16} color={uiColor.primary} />
                     <Text style={styles.cameraActionBtnText}>Registrer observasjon</Text>
                   </Pressable>
 
@@ -2400,7 +2396,7 @@ export default function KartScreen() {
                     onPress={() => router.push(`/kamera/${selectedCamera.id}`)}
                     style={styles.cameraActionBtn}
                   >
-                    <Ionicons name="stats-chart-outline" size={16} color="#60A5FA" />
+                    <Ionicons name="stats-chart-outline" size={16} color={uiColor.info} />
                     <Text style={styles.cameraActionBtnText}>Se statistikk</Text>
                   </Pressable>
 
@@ -2413,7 +2409,7 @@ export default function KartScreen() {
                     }}
                     style={styles.cameraActionBtn}
                   >
-                    <Ionicons name="create-outline" size={16} color="#FCD34D" />
+                    <Ionicons name="create-outline" size={16} color={uiColor.layerSpor} />
                     <Text style={styles.cameraActionBtnText}>Rediger kamera</Text>
                   </Pressable>
 
@@ -2421,7 +2417,7 @@ export default function KartScreen() {
                     onPress={bekreftFjernKamera}
                     style={[styles.cameraActionBtn, styles.cameraActionBtnDanger]}
                   >
-                    <Ionicons name="trash-outline" size={16} color="#F87171" />
+                    <Ionicons name="trash-outline" size={16} color={uiColor.danger} />
                     <Text style={styles.cameraActionBtnTextDanger}>Fjern kamera</Text>
                   </Pressable>
                 </View>
@@ -2509,7 +2505,7 @@ export default function KartScreen() {
                   style={[styles.textInput, styles.textInputMultiline]}
                   multiline
                   placeholder="Notat om observasjonen"
-                  placeholderTextColor="#4D6858"
+                  placeholderTextColor={uiColor.textMuted}
                   value={regKommentar}
                   onChangeText={setRegKommentar}
                 />
@@ -2520,7 +2516,7 @@ export default function KartScreen() {
                     disabled={savingCameraAction}
                     style={[styles.pinPrimaryBtn, savingCameraAction && styles.disabled]}
                   >
-                    <Ionicons name="paw-outline" size={16} color="#060E08" />
+                    <Ionicons name="paw-outline" size={16} color={uiColor.primaryText} />
                     <Text style={styles.pinPrimaryText}>
                       {savingCameraAction ? "Lagrer..." : "Lagre observasjon"}
                     </Text>
@@ -2544,7 +2540,7 @@ export default function KartScreen() {
                   value={editNavn}
                   onChangeText={setEditNavn}
                   placeholder="Navn på kamera"
-                  placeholderTextColor="#4D6858"
+                  placeholderTextColor={uiColor.textMuted}
                 />
 
                 <View style={{ marginTop: 16, alignItems: "center" }}>
@@ -2558,7 +2554,7 @@ export default function KartScreen() {
                   value={editNotat}
                   onChangeText={setEditNotat}
                   placeholder="Notater om kameraet"
-                  placeholderTextColor="#4D6858"
+                  placeholderTextColor={uiColor.textMuted}
                 />
 
                 <View style={styles.pinActions}>
@@ -2567,7 +2563,7 @@ export default function KartScreen() {
                     disabled={savingCameraAction}
                     style={[styles.pinPrimaryBtn, savingCameraAction && styles.disabled]}
                   >
-                    <Ionicons name="checkmark" size={16} color="#060E08" />
+                    <Ionicons name="checkmark" size={16} color={uiColor.primaryText} />
                     <Text style={styles.pinPrimaryText}>
                       {savingCameraAction ? "Lagrer..." : "Lagre endringer"}
                     </Text>
@@ -2593,40 +2589,40 @@ export default function KartScreen() {
                 </Text>
               </View>
               <Pressable onPress={closePinPanel} style={styles.closeBtn}>
-                <Ionicons name="close" size={18} color="#9CA3AF" />
+                <Ionicons name="close" size={18} color={uiColor.textMuted} />
               </Pressable>
             </View>
 
             <Pressable style={styles.pinMenuBtn} onPress={() => setPinAction("kamera")}>
               <View style={styles.pinMenuIconBadge}>
-                <Ionicons name="camera-outline" size={18} color="#60A5FA" />
+                <Ionicons name="camera-outline" size={18} color={uiColor.info} />
               </View>
               <Text style={styles.pinMenuText}>Sett ned viltkamera</Text>
-              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+              <Ionicons name="chevron-forward" size={16} color={uiColor.textMuted} />
             </Pressable>
 
             <Pressable style={styles.pinMenuBtn} onPress={() => setPinAction("dyr")}>
               <View style={styles.pinMenuIconBadge}>
-                <Ionicons name="paw-outline" size={18} color="#2CC36B" />
+                <Ionicons name="paw-outline" size={18} color={uiColor.primary} />
               </View>
               <Text style={styles.pinMenuText}>Registrer dyr</Text>
-              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+              <Ionicons name="chevron-forward" size={16} color={uiColor.textMuted} />
             </Pressable>
 
             <Pressable style={styles.pinMenuBtn} onPress={() => setPinAction("spor")}>
               <View style={styles.pinMenuIconBadge}>
-                <Ionicons name="footsteps-outline" size={18} color="#FCD34D" />
+                <Ionicons name="footsteps-outline" size={18} color={uiColor.layerSpor} />
               </View>
               <Text style={styles.pinMenuText}>Registrer spor</Text>
-              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+              <Ionicons name="chevron-forward" size={16} color={uiColor.textMuted} />
             </Pressable>
 
             <Pressable style={[styles.pinMenuBtn, { marginBottom: 0 }]} onPress={() => setPinAction("annet")}>
               <View style={styles.pinMenuIconBadge}>
-                <Ionicons name="pricetag-outline" size={18} color="#A78BFA" />
+                <Ionicons name="pricetag-outline" size={18} color={uiColor.layerMotor} />
               </View>
               <Text style={styles.pinMenuText}>Annet</Text>
-              <Ionicons name="chevron-forward" size={16} color="#4D6858" />
+              <Ionicons name="chevron-forward" size={16} color={uiColor.textMuted} />
             </Pressable>
           </ScrollView>
         )}
@@ -2650,7 +2646,7 @@ export default function KartScreen() {
             <TextInput
               style={styles.textInput}
               placeholder={`Viltkamera ${kameraer.length + 1}`}
-              placeholderTextColor="#4D6858"
+              placeholderTextColor={uiColor.textMuted}
               value={kameraNavn}
               onChangeText={setKameraNavn}
             />
@@ -2665,7 +2661,7 @@ export default function KartScreen() {
                 disabled={savingPin}
                 style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
               >
-                <Ionicons name="camera" size={16} color="#060E08" />
+                <Ionicons name="camera" size={16} color={uiColor.primaryText} />
                 <Text style={styles.pinPrimaryText}>{savingPin ? "Lagrer..." : "Lagre kamera"}</Text>
               </Pressable>
             </View>
@@ -2729,7 +2725,7 @@ export default function KartScreen() {
                     onPress={() => setRetningPin(null)}
                     style={styles.pinChipRetningClear}
                   >
-                    <Ionicons name="close" size={13} color="#F87171" />
+                    <Ionicons name="close" size={13} color={uiColor.danger} />
                   </Pressable>
                 )}
               </View>
@@ -2741,7 +2737,7 @@ export default function KartScreen() {
                 disabled={savingPin}
                 style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
               >
-                <Ionicons name="paw-outline" size={16} color="#060E08" />
+                <Ionicons name="paw-outline" size={16} color={uiColor.primaryText} />
                 <Text style={styles.pinPrimaryText}>
                   {savingPin ? "Lagrer..." : "Lagre observasjon"}
                 </Text>
@@ -2802,7 +2798,7 @@ export default function KartScreen() {
               style={[styles.textInput, styles.textInputMultiline]}
               multiline
               placeholder="Beskriv sporet"
-              placeholderTextColor="#4D6858"
+              placeholderTextColor={uiColor.textMuted}
               value={sporKommentar}
               onChangeText={setSporKommentar}
             />
@@ -2813,7 +2809,7 @@ export default function KartScreen() {
                 disabled={savingPin}
                 style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
               >
-                <Ionicons name="paw-outline" size={16} color="#060E08" />
+                <Ionicons name="paw-outline" size={16} color={uiColor.primaryText} />
                 <Text style={styles.pinPrimaryText}>{savingPin ? "Lagrer..." : "Lagre spor"}</Text>
               </Pressable>
             </View>
@@ -2854,7 +2850,7 @@ export default function KartScreen() {
             <TextInput
               style={styles.textInput}
               placeholder="F.eks. Saltstein ved bekken"
-              placeholderTextColor="#4D6858"
+              placeholderTextColor={uiColor.textMuted}
               value={annetNavn}
               onChangeText={setAnnetNavn}
             />
@@ -2864,7 +2860,7 @@ export default function KartScreen() {
               style={[styles.textInput, styles.textInputMultiline]}
               multiline
               placeholder="Notat"
-              placeholderTextColor="#4D6858"
+              placeholderTextColor={uiColor.textMuted}
               value={annetKommentar}
               onChangeText={setAnnetKommentar}
             />
@@ -2875,7 +2871,7 @@ export default function KartScreen() {
                 disabled={savingPin}
                 style={[styles.pinPrimaryBtn, savingPin && styles.disabled]}
               >
-                <Ionicons name="pricetag-outline" size={16} color="#060E08" />
+                <Ionicons name="pricetag-outline" size={16} color={uiColor.primaryText} />
                 <Text style={styles.pinPrimaryText}>{savingPin ? "Lagrer..." : "Lagre punkt"}</Text>
               </Pressable>
             </View>
@@ -2941,9 +2937,9 @@ export default function KartScreen() {
 // ─── Stiler ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe:        { flex: 1, backgroundColor: "#060E08" },
+  safe:        { flex: 1, backgroundColor: uiColor.background },
   container:   { flex: 1 },
-  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#060E08" },
+  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: uiColor.background },
 
   // Premium-oppdraget: erstatter den gamle solide navBar-en. Samme
   // "flytende glass-sirkel"-oppskrift som controlColumn sin controlBtn
@@ -3064,28 +3060,34 @@ const styles = StyleSheet.create({
     zIndex: uiZ.panel,
   },
 
+  // Designrapport §04: dette panelet (og pin-panelene under) hadde sitt EGET
+  // blå/cyan-fargesystem, aldri migrert til tokens.ts — nøyaktig det
+  // rapporten pekte på som appens tetteste enkeltstående inkonsistens-sone.
+  // Erstattet her med de samme tokene resten av appens paneler (ModalSheet,
+  // layersPanel, Surface) allerede bruker — ingen ny stil, bare samme
+  // mørk-overflate/grense/tekst-hierarki konsekvent brukt.
   cameraPanel: {
     position: "absolute", left: 14, right: 14, bottom: 20,
-    backgroundColor: "rgba(8,12,10,0.97)",
+    backgroundColor: uiColor.surfaceElevated,
     borderRadius: 24, padding: 16,
-    borderWidth: 1, borderColor: "#224A60",
+    borderWidth: 1, borderColor: uiColor.borderStrong,
     maxHeight: "82%",
   },
   cameraPanelContent: { paddingBottom: 8 },
   cameraPanelHeader:  { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   cameraPanelLeft:    { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  cameraPanelTitle:   { color: "#FFFFFF", fontSize: 17, fontWeight: "900" },
-  cameraPanelCoord:   { color: "#6B8A76", fontSize: 12, marginTop: 2 },
+  cameraPanelTitle:   { color: uiColor.textPrimary, fontSize: 17, fontWeight: "900" },
+  cameraPanelCoord:   { color: uiColor.textMuted, fontSize: 12, marginTop: 2 },
   cameraPanelStats:   { flexDirection: "row", gap: 10, marginBottom: 12 },
   cameraStat: {
-    flex: 1, backgroundColor: "#0E1A14", borderRadius: 12,
+    flex: 1, backgroundColor: uiColor.surface, borderRadius: 12,
     padding: 10, alignItems: "center",
   },
-  cameraStatLabel: { color: "#6B8A76", fontSize: 11, fontWeight: "700", marginBottom: 4 },
-  cameraStatValue: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
+  cameraStatLabel: { color: uiColor.textMuted, fontSize: 11, fontWeight: "700", marginBottom: 4 },
+  cameraStatValue: { color: uiColor.textPrimary, fontSize: 13, fontWeight: "800" },
   cameraIconBadge: {
     width: 38, height: 38, borderRadius: 12,
-    backgroundColor: "rgba(96,165,250,0.12)",
+    backgroundColor: uiColor.info + uiAlpha.soft,
     alignItems: "center", justifyContent: "center",
   },
 
@@ -3094,44 +3096,44 @@ const styles = StyleSheet.create({
     flexBasis: "47%", flexGrow: 1,
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 6, paddingVertical: 12, paddingHorizontal: 8,
-    borderWidth: 1, borderColor: "rgba(96,165,250,0.25)", borderRadius: 14,
-    backgroundColor: "rgba(96,165,250,0.08)",
+    borderWidth: 1, borderColor: uiColor.info + uiAlpha.medium, borderRadius: 14,
+    backgroundColor: uiColor.info + uiAlpha.soft,
   },
-  cameraActionBtnText: { color: "#CFE7DB", fontSize: 13, fontWeight: "800", textAlign: "center" },
+  cameraActionBtnText: { color: uiColor.textSecondary, fontSize: 13, fontWeight: "800", textAlign: "center" },
   cameraActionBtnDanger: {
-    borderColor: "#3B1A1A", backgroundColor: "rgba(239,68,68,0.08)",
+    borderColor: uiColor.danger + uiAlpha.medium, backgroundColor: uiColor.danger + uiAlpha.soft,
   },
-  cameraActionBtnTextDanger: { color: "#F87171", fontSize: 13, fontWeight: "800", textAlign: "center" },
+  cameraActionBtnTextDanger: { color: uiColor.danger, fontSize: 13, fontWeight: "800", textAlign: "center" },
 
   cameraHistSection: {
-    borderTopWidth: 1, borderTopColor: "#1A2B20",
+    borderTopWidth: 1, borderTopColor: uiColor.border,
     paddingTop: 14, marginTop: 4, marginBottom: 16,
   },
   cameraHistHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
-  cameraHistTitle:  { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
+  cameraHistTitle:  { color: uiColor.textPrimary, fontSize: 14, fontWeight: "800" },
   cameraHistBadge:  {
-    backgroundColor: "rgba(44,195,107,0.12)",
+    backgroundColor: uiColor.primary + uiAlpha.soft,
     borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3,
-    borderWidth: 1, borderColor: "rgba(44,195,107,0.20)",
+    borderWidth: 1, borderColor: uiColor.primary + uiAlpha.medium,
   },
-  cameraHistBadgeText: { color: "#2CC36B", fontSize: 12, fontWeight: "900" },
-  cameraHistEmpty:     { color: "#3D5446", fontSize: 13, lineHeight: 20, fontStyle: "italic" },
+  cameraHistBadgeText: { color: uiColor.primary, fontSize: 12, fontWeight: "900" },
+  cameraHistEmpty:     { color: uiColor.textFaint, fontSize: 13, lineHeight: 20, fontStyle: "italic" },
   cameraHistRow: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingVertical: 9,
-    borderBottomWidth: 1, borderBottomColor: "#111C14",
+    borderBottomWidth: 1, borderBottomColor: uiColor.border,
   },
   cameraHistEmoji:  { fontSize: 18 },
   cameraHistBody:   { flex: 1 },
-  cameraHistAnimal: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  cameraHistType:   { color: "#4D6858", fontWeight: "600" },
-  cameraHistTime:   { color: "#3D5446", fontSize: 12, marginTop: 2 },
+  cameraHistAnimal: { color: uiColor.textPrimary, fontSize: 14, fontWeight: "700" },
+  cameraHistType:   { color: uiColor.textMuted, fontWeight: "600" },
+  cameraHistTime:   { color: uiColor.textFaint, fontSize: 12, marginTop: 2 },
 
   pinPanel: {
     position: "absolute", left: 14, right: 14, bottom: 20,
-    backgroundColor: "rgba(8,12,10,0.98)",
+    backgroundColor: uiColor.surfaceElevated,
     borderRadius: 26, padding: 16,
-    borderWidth: 1, borderColor: "#243620",
+    borderWidth: 1, borderColor: uiColor.borderStrong,
     maxHeight: "82%",
   },
   pinPanelContent: { paddingBottom: 8 },
@@ -3139,75 +3141,75 @@ const styles = StyleSheet.create({
   pinHeaderLeft: { flexDirection: "row", alignItems: "center", flex: 1 },
   backStepBtn: {
     width: 34, height: 34, borderRadius: 17,
-    backgroundColor: "#111827", alignItems: "center", justifyContent: "center",
+    backgroundColor: uiColor.surfaceHover, alignItems: "center", justifyContent: "center",
     marginRight: 10,
   },
-  pinTitle:  { color: "#FFFFFF", fontSize: 17, fontWeight: "900" },
-  pinSub:    { color: "#6B8A76", fontSize: 12, marginTop: 3 },
+  pinTitle:  { color: uiColor.textPrimary, fontSize: 17, fontWeight: "900" },
+  pinSub:    { color: uiColor.textMuted, fontSize: 12, marginTop: 3 },
   pinLabel: {
-    color: "#6B8A76", fontSize: 11, fontWeight: "800",
+    color: uiColor.textMuted, fontSize: 11, fontWeight: "800",
     textTransform: "uppercase", letterSpacing: 1,
     marginTop: 10, marginBottom: 8,
   },
-  pinHint: { color: "#4D6858", fontSize: 12, lineHeight: 17, marginBottom: 8 },
+  pinHint: { color: uiColor.textMuted, fontSize: 12, lineHeight: 17, marginBottom: 8 },
   chipRow:  { flexDirection: "row", gap: 8, paddingRight: 16, flexWrap: "wrap" },
   pinChip: {
-    backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
+    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
     borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10,
   },
-  pinChipActive:    { backgroundColor: "#163222", borderColor: "#2CC36B" },
+  pinChipActive:    { backgroundColor: uiColor.primary + uiAlpha.soft, borderColor: uiColor.primary },
   pinChipRetning: {
-    backgroundColor: "#0E1618", borderWidth: 1, borderColor: "#1A2B30",
+    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
     borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, minWidth: 42, alignItems: "center",
   },
-  pinChipRetningActive: { backgroundColor: "#0E2430", borderColor: "#22D3EE" },
+  pinChipRetningActive: { backgroundColor: uiColor.layerAktiveSoner + uiAlpha.soft, borderColor: uiColor.layerAktiveSoner },
   pinChipRetningClear:  {
-    backgroundColor: "rgba(248,113,113,0.08)", borderWidth: 1, borderColor: "rgba(248,113,113,0.2)",
+    backgroundColor: uiColor.danger + uiAlpha.soft, borderWidth: 1, borderColor: uiColor.danger + uiAlpha.medium,
     borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9,
     alignItems: "center", justifyContent: "center",
   },
-  pinChipText:          { color: "#C8D8D0", fontSize: 13, fontWeight: "700" },
-  pinChipTextActive:    { color: "#A9F2BF" },
+  pinChipText:          { color: uiColor.textSecondary, fontSize: 13, fontWeight: "700" },
+  pinChipTextActive:    { color: uiColor.primarySoft },
   pinActions:      { flexDirection: "row", gap: 10, marginTop: 16 },
   pinPrimaryBtn: {
-    flex: 1, backgroundColor: "#2CC36B", borderRadius: 18,
+    flex: 1, backgroundColor: uiColor.primary, borderRadius: 18,
     paddingVertical: 13, alignItems: "center",
     flexDirection: "row", justifyContent: "center", gap: 7,
   },
-  pinPrimaryText:  { color: "#060E08", fontSize: 14, fontWeight: "900" },
+  pinPrimaryText:  { color: uiColor.primaryText, fontSize: 14, fontWeight: "900" },
   closeBtn: {
     width: 34, height: 34, borderRadius: 17,
-    backgroundColor: "#111827", alignItems: "center", justifyContent: "center",
+    backgroundColor: uiColor.surfaceHover, alignItems: "center", justifyContent: "center",
   },
   disabled: { opacity: 0.55 },
 
   stepperRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   stepperBtn: {
     width: 36, height: 36, borderRadius: 12,
-    backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
+    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
     alignItems: "center", justifyContent: "center",
   },
-  stepperValue: { color: "#FFFFFF", fontSize: 17, fontWeight: "900", minWidth: 24, textAlign: "center" },
+  stepperValue: { color: uiColor.textPrimary, fontSize: 17, fontWeight: "900", minWidth: 24, textAlign: "center" },
 
   textInput: {
-    backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
+    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
     borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
-    color: "#FFFFFF", fontSize: 14,
+    color: uiColor.textPrimary, fontSize: 14,
   },
   textInputMultiline: { minHeight: 70, textAlignVertical: "top", marginTop: 4 },
 
   pinMenuBtn: {
     flexDirection: "row", alignItems: "center", gap: 12,
-    backgroundColor: "#101E14", borderWidth: 1, borderColor: "#1F3027",
+    backgroundColor: uiColor.surface, borderWidth: 1, borderColor: uiColor.border,
     borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14,
     marginBottom: 10,
   },
   pinMenuIconBadge: {
     width: 36, height: 36, borderRadius: 12,
-    backgroundColor: "rgba(44,195,107,0.10)",
+    backgroundColor: uiColor.primary + uiAlpha.soft,
     alignItems: "center", justifyContent: "center",
   },
-  pinMenuText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", flex: 1 },
+  pinMenuText: { color: uiColor.textPrimary, fontSize: 15, fontWeight: "800", flex: 1 },
 
   // Redesign-oppdraget §22/§23: pin-formede markører (beste-sone/obs/spor/
   // annet/kamera/party) kommer nå fra components/ui/Marker.tsx sin
@@ -3262,12 +3264,13 @@ const styles = StyleSheet.create({
   // samme måte som de ALLEREDE velfungerende markørene i denne filen: en
   // eksplisitt, fast størrelse, og retningspilen som et VANLIG (ikke
   // absolutt, ikke zIndex) barn innenfor de samme grensene.
-  cameraPinWrap: {
-    width: minTouchTarget, height: minTouchTarget + 18,
-    alignItems: "center", justifyContent: "flex-end",
-  },
+  // Samme "bred usynlig boks, sentrer innholdet"-triks som
+  // hotspotAnbefaltWrap under bruker for sin merkelapp — absolutt
+  // posisjonert OVER MarkerBadge (søsken, ikke barn), samme mønster som
+  // hotspotScoreBadge er absolutt posisjonert i forhold til hotspotRingWrap.
   cameraDirArrowWrap: {
-    height: 18, alignItems: "center", justifyContent: "center",
+    position: "absolute", top: -18, left: -20, right: -20,
+    alignItems: "center", justifyContent: "center",
   },
 
   // HuntPlan-oppdraget §3.16: distinkt "sikte"-markør for det anbefalte
@@ -3339,5 +3342,5 @@ const styles = StyleSheet.create({
   },
   predLegendRad: { flexDirection: "row", alignItems: "center", gap: 8 },
   predLegendDot: { width: 10, height: 10, borderRadius: 5 },
-  predLegendTxt: { color: "#C8D8D0", fontSize: 12, fontWeight: "700" },
+  predLegendTxt: { color: uiColor.textSecondary, fontSize: 12, fontWeight: "700" },
 });

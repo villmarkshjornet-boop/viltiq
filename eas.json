@@ -9,13 +9,15 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
-      }
+      },
+      "channel": "development"
     },
     "development-device": {
       "extends": "development",
       "ios": {
         "simulator": false
-      }
+      },
+      "channel": "development-device"
     },
     "preview": {
       "distribution": "internal",
@@ -28,7 +30,8 @@
       "env": {
         "RCT_USE_PREBUILT_RNCORE": "0",
         "RCT_USE_RN_DEP": "0"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
@@ -41,7 +44,8 @@
       "env": {
         "RCT_USE_PREBUILT_RNCORE": "0",
         "RCT_USE_RN_DEP": "0"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {
