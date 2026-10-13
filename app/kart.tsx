@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -481,7 +482,6 @@ export default function KartScreen() {
 
   const [loading,      setLoading]      = useState(true);
   const [savingPin,    setSavingPin]    = useState(false);
-  const [sporpunktLaster, setSporpunktLaster] = useState(false);
   const [errorText,    setErrorText]    = useState("");
   const [mapMode,      setMapMode]      = useState<"terrain" | "satellite">("terrain");
   // §bugrapport V1.3: brukeren ba om et kompass — kartet tillater rotasjon
@@ -946,28 +946,22 @@ export default function KartScreen() {
 
   // ─── Sporpunkt (rask spor-registrering ved GPS-posisjon) ───────────────────
 
-  async function lagreSporpunkt() {
-    if (!userLocation || sporpunktLaster) return;
-    try {
-      setSporpunktLaster(true);
-      const p = anonymiserPosisjon(userLocation.latitude, userLocation.longitude);
-      await saveObservation({
-        dyr:      valgtDyr,
-        type:     "Spor",
-        kommentar: "Sporpunkt fra kart",
-        tid:      new Date().toISOString(),
-        latitude:  p.latitude,
-        longitude: p.longitude,
-        retning:  null,
-        observationSource: "track",
-        sporType: "Fotspor",
-      });
-      visAlert("Sporpunkt lagret", `${dyrEmoji(valgtDyr)} ${valgtDyr} · Spor registrert her.`);
-    } catch (e: any) {
-      visAlert("Feil", e?.message || "Klarte ikke lagre sporpunkt.");
-    } finally {
-      setSporpunktLaster(false);
-    }
+  // Feltrapport (fysisk enhet, V1.3): "sporpunkt-knappen fungerer ikke, den
+  // lagrer ett rådyr spor. bare tull, jeg må kunne bestemme hvilket spor jeg
+  // ser" — knappen lagret FØR umiddelbart med `valgtDyr` sin daværende
+  // (ofte forlatte/standard) verdi, uten å spørre. Åpner nå i stedet den
+  // ALLEREDE eksisterende "Spor"-panelet (samme art-/sportype-velger som
+  // langtrykk-menyen bruker) forhåndsutfylt med brukerens egen (anonymiserte,
+  // samme personvern som før) posisjon — ingen ny UI, bare samme
+  // bekreftelses-steg manuell sporregistrering allerede har.
+  function åpneSporpunktValg() {
+    if (!userLocation) return;
+    const p = anonymiserPosisjon(userLocation.latitude, userLocation.longitude);
+    setSelectedPin(p);
+    setPinAction("spor");
+    setSporDyr(null);
+    setSporTypeValgt("Fotspor");
+    setSporKommentar("");
   }
 
   // Global sletting (§14 i STEG 4-oppdraget): brukeren skal kunne slette en
@@ -1518,7 +1512,17 @@ export default function KartScreen() {
     if (autoOpenedPlanRef.current) return;
     if (!hotspotSone) return;
     autoOpenedPlanRef.current = true;
-    apneJaktplan(hotspotSone);
+    // Feltrapport (fysisk enhet, V1.3): "Planlegg jakten stenger med en
+    // gang" — arket blinket opp og lukket seg selv momentant. Mistenkt
+    // årsak: samme trykk som navigerte HIT (fra "Planlegg jakten"-knappen
+    // på forrige skjerm) kan rekke å bli levert en gang til idet
+    // ModalSheet sin fullskjerm-bakgrunn (`onPress={onClose}`, se
+    // ModalSheet.tsx) monteres rett oppå samme skjermposisjon — en kjent
+    // kategori "touch bleed-through"-feil ved navigasjon+auto-åpnet modal i
+    // samme gest. En kort forsinkelse før selve åpningen lar det opprinnelige
+    // trykket rekke å avslutte før bakgrunnen blir trykkbar.
+    const t = setTimeout(() => apneJaktplan(hotspotSone), 400);
+    return () => clearTimeout(t);
   }, [params.openPlan, hotspotSone]);
 
   // Feltrapport (fysisk enhet, V1.3): "Planlegg jakten" ga verken feilmelding
@@ -1911,27 +1915,34 @@ export default function KartScreen() {
             ))}
 
             {/* Kameramarkører */}
+            {/* Feltrapport (fysisk enhet, V1.3): bekreftet via lag-panelets
+                "Kamera · N"-telling at dataen FAKTISK ankommer (N ≥ 1) —
+                likevel ingenting synlig, selv med eksplisitt størrelse OG
+                collapsable={false}. To uavhengige, begrunnede gjetninger på
+                selve TIMINGEN (StableMarker sin forsinkede flipp) har IKKE
+                løst det. I stedet for en tredje gjetning: fjerner hele
+                timing-variabelen. `tracksViewChanges` er HELE TIDEN `true`
+                her (ikke StableMarker) — SDK-en tar da et nytt native
+                snapshot på HVER re-render i stedet for å stole på ett
+                bestemt tidsvindu. Dyrere (flere snapshots over tid), men for
+                et fåtall viltkamera-markører er kostnaden ubetydelig
+                sammenlignet med at de rett og slett ikke vises. Hvis
+                markøren FORTSATT ikke dukker opp med dette, er det et
+                endelig, ugjendrivelig bevis på at årsaken IKKE er
+                snapshot-timing i det hele tatt (se egen kommentar ved
+                MarkerBadge sin rotasjon under for neste steg i så fall). */}
             {visKameraer && !erJaktplanAktiv && kameraer.map((k) => (
-              <StableMarker
+              <Marker
                 key={k.id}
                 coordinate={{ latitude: k.latitude, longitude: k.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
+                tracksViewChanges
                 onPress={() => {
                   setSelectedCamera(k);
                   setCameraView("info");
                   setSelectedPin(null);
                 }}
               >
-                {/* `collapsable={false}`: tvinger RN til ALLTID å lage en
-                    ekte native view for dette treet, i stedet for å
-                    "flate det ut" (view-flattening-optimalisering) når det
-                    ikke selv har synlige stiler. Et velkjent, dokumentert
-                    behov for react-native-maps sin egendefinerte markør-
-                    snapshot (uten dette kan selve viewen SDK-en prøver å ta
-                    bilde av rett og slett ikke eksistere som egen native
-                    node ennå) — kombinert med StableMarker sin timing-fiks
-                    OG forrige runde sin eksplisitte størrelse, i stedet for
-                    nok et gjetning på egen hånd. */}
                 <View style={styles.cameraPinWrap} collapsable={false}>
                   <View style={styles.cameraDirArrowWrap} pointerEvents="none">
                     <Ionicons
@@ -1943,7 +1954,7 @@ export default function KartScreen() {
                   </View>
                   <MarkerBadge kind="kamera" size="md" icon="camera" />
                 </View>
-              </StableMarker>
+              </Marker>
             ))}
 
             {/* Jaktlag-medlemmers live-posisjoner */}
@@ -2145,9 +2156,18 @@ export default function KartScreen() {
               hitSlop={4}
               onPress={() => mapRef.current?.animateCamera?.({ heading: 0 }, { duration: 300 })}
             >
+              {/* Feltrapport V1.3: "kompasset må være synlig" — et generisk
+                  Ionicons-ikon + en 9px-bokstav leste tydeligvis ikke som et
+                  kompass blant tre andre sirkulære ikon-knapper. Erstattet
+                  med en EKTE to-tonet kompassnål (samme CSS-trekant-mønster
+                  som MarkerBadge sin "tail" allerede bruker i denne filen,
+                  ikke et nytt visuelt triks) — grønn N-halvdel/dempet
+                  S-halvdel er den universelle kompass-konvensjonen
+                  (Google/Apple Maps bruker nøyaktig samme to-tone-prinsipp),
+                  umulig å forveksle med et vanlig ikon. */}
               <View style={{ alignItems: "center", transform: [{ rotate: `${-mapHeading}deg` }] }}>
-                <Text style={styles.compassN}>N</Text>
-                <Ionicons name="navigate" size={18} color={uiColor.primary} />
+                <View style={styles.compassNeedleNorth} />
+                <View style={styles.compassNeedleSouth} />
               </View>
             </Pressable>
 
@@ -2160,9 +2180,9 @@ export default function KartScreen() {
             </Pressable>
 
             <Pressable
-              style={[styles.controlBtn, sporpunktLaster && styles.controlBtnDisabled]}
-              onPress={lagreSporpunkt}
-              disabled={sporpunktLaster || !userLocation}
+              style={[styles.controlBtn, !userLocation && styles.controlBtnDisabled]}
+              onPress={åpneSporpunktValg}
+              disabled={!userLocation}
               hitSlop={4}
             >
               <Ionicons name="footsteps-outline" size={20} color={uiColor.textSecondary} />
@@ -2192,7 +2212,17 @@ export default function KartScreen() {
             faktisk observasjon. */}
         {lagmenyÅpen && !selectedPin && !selectedCamera && (
           <Surface variant="elevated" style={[styles.layersPanel, uiElevation.panel]}>
-            <Text style={styles.layersPanelTitle}>Kartlag</Text>
+            {/* Feltrapport (fysisk enhet, V1.3): "ingen måte å minimere den
+                på igjen" — panelet hadde KUN layers-knappen i kontroll-
+                kolonnen som lukke-mekanisme, ikke noe synlig på selve
+                kortet. Samme X-mønster som HuntPlanPanel/ModalSheet sine
+                andre paneler, ikke en ny lukke-stil. */}
+            <View style={styles.layersPanelHeader}>
+              <Text style={styles.layersPanelTitle}>Kartlag</Text>
+              <Pressable onPress={() => setLagmenyÅpen(false)} hitSlop={10}>
+                <Ionicons name="close" size={18} color={uiColor.textSecondary} />
+              </Pressable>
+            </View>
 
             <Text style={styles.layersGroupTitle}>ViltIQ</Text>
             {/* Feltrapport (fysisk enhet, V1.3): tallene i parentes er et
@@ -2223,7 +2253,22 @@ export default function KartScreen() {
             <Toggle label={`Observasjoner · ${observasjoner.length}`} icon="eye-outline" active={visObservasjoner} onToggle={() => setVisObservasjoner((v) => !v)} accentColor="#34D399" />
             <Toggle label="Spor og andre punkter" icon="footsteps-outline" active={visSporAnnet} onToggle={() => setVisSporAnnet((v) => !v)} accentColor={uiColor.warning} />
             <Toggle label={`Kamera · ${kameraer.length}`} icon="camera" active={visKameraer} onToggle={() => setVisKameraer((v) => !v)} accentColor={uiColor.info} />
-            <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
+            {/* Feltrapport (fysisk enhet, V1.3): "eiendomsgrenser fungerer
+                ikke, kommer ingenting der" — stemmer, men ikke en bug: dette
+                laget (Kartverket/Geonorge-matrikkelkart) er KUN implementert
+                for web (se MapView.web.tsx) — components/MapView.tsx (native)
+                stripper `showPropertyBoundaries` stille, med vilje, fordi
+                react-native-maps aldri fikk en tilsvarende native
+                implementasjon. Å la bryteren stå synlig og ikke-fungerende
+                på native er verre enn å skjule den — en bryter som ikke gjør
+                noe er akkurat den typen "stille ingenting" som har vært
+                kjernen i flere av de andre feltrapportene. Ekte native
+                eiendomsgrenser er et eget, ikke-trivielt arbeid (ny
+                datakilde/rendering for react-native-maps), ikke noe som
+                løses som en del av denne opprydningen. */}
+            {Platform.OS === "web" && (
+              <Toggle label="Eiendomsgrenser" icon="map-outline" active={visEiendomsgrenser} onToggle={() => setVisEiendomsgrenser((v) => !v)} accentColor="#FB923C" />
+            )}
           </Surface>
         )}
 
@@ -2913,10 +2958,15 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: uiGlass.controlBorder,
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 8, elevation: 6,
   },
+  // §rød-tråd-fiks: brukte FØR uiColor.surface/uiColor.border — en SOLID,
+  // opak overflate, mens ALT annet flytende kart-chrome (floatingBackBtn,
+  // controlBtn, filterChip) bruker samme halvtransparente uiGlass-oppskrift.
+  // Denne ene avvikende flaten var en reell, konkret årsak til at kartet så
+  // sammensatt av to ulike stiler i stedet for ett sammenhengende språk.
   mapToggle: {
-    flexDirection: "row", backgroundColor: uiColor.surface,
+    flexDirection: "row", backgroundColor: uiGlass.controlBg,
     borderRadius: uiRadius.md, padding: 3,
-    borderWidth: 1, borderColor: uiColor.border,
+    borderWidth: 1, borderColor: uiGlass.controlBorder,
   },
   // Toggle-pillen flyter nå fritt (samme rad som floatingBackBtn, speilvendt
   // til høyre) i stedet for å ligge innrammet i den gamle baren.
@@ -2960,7 +3010,18 @@ const styles = StyleSheet.create({
   },
   controlBtnActive:   { backgroundColor: uiColor.primary + uiAlpha.soft, borderColor: uiColor.primary },
   controlBtnDisabled: { opacity: 0.5 },
-  compassN: { fontSize: 9, fontWeight: "900", color: uiColor.primary, marginBottom: -2 },
+  compassNeedleNorth: {
+    width: 0, height: 0,
+    borderLeftWidth: 6, borderRightWidth: 6, borderBottomWidth: 15,
+    borderLeftColor: "transparent", borderRightColor: "transparent",
+    borderBottomColor: uiColor.primary,
+  },
+  compassNeedleSouth: {
+    width: 0, height: 0, marginTop: -1,
+    borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 15,
+    borderLeftColor: "transparent", borderRightColor: "transparent",
+    borderTopColor: uiColor.textMuted,
+  },
 
   // Kartlag-panel
   layersPanel: {
@@ -2968,9 +3029,13 @@ const styles = StyleSheet.create({
     width: 240, padding: uiSpacing.lg,
     zIndex: uiZ.panel,
   },
+  layersPanelHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginBottom: uiSpacing.sm,
+  },
   layersPanelTitle: {
     color: uiColor.textPrimary, fontSize: 13, fontWeight: "900",
-    textTransform: "uppercase", letterSpacing: 1, marginBottom: uiSpacing.sm,
+    textTransform: "uppercase", letterSpacing: 1,
   },
   layersGroupTitle: {
     color: uiColor.textFaint, fontSize: 10, fontWeight: "800",
