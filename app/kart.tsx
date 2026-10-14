@@ -1928,11 +1928,21 @@ export default function KartScreen() {
                 hotspot. Strukturen under er nå BOKSTAVELIG identisk mønster
                 som hotspot-markøren: én vanlig (flyt-)View etablerer formen,
                 én absolutt-posisjonert søsken-View legges oppå. */}
+            {/* MIDLERTIDIG DIAGNOSE (4. forsøk feilet, fjernes straks dette er
+                avklart): dead-enkel, umulig-å-overse markør — ingen
+                MarkerBadge, ingen Ionicons-font, ingen ekstra View i det
+                hele tatt. KUN dette avgjør om NOE som helst kan tegnes for
+                et kamera på denne enheten, uavhengig av innholdskompleksitet.
+                Vises den IKKE heller ikke nå, er det 100% bevist at
+                problemet aldri var markør-INNHOLDET (icon/collapsable/
+                wrapping-view-teoriene), men noe FØR det — datoen i
+                `k.latitude/longitude`, eller selve betingelsen
+                `visKameraer && !erJaktplanAktiv` som aldri slipper gjennom. */}
             {visKameraer && !erJaktplanAktiv && kameraer.map((k) => (
               <Marker
                 key={k.id}
                 coordinate={{ latitude: k.latitude, longitude: k.longitude }}
-                anchor={{ x: 0.5, y: 1 }}
+                anchor={{ x: 0.5, y: 0.5 }}
                 tracksViewChanges
                 onPress={() => {
                   setSelectedCamera(k);
@@ -1940,7 +1950,9 @@ export default function KartScreen() {
                   setSelectedPin(null);
                 }}
               >
-                <MarkerBadge kind="kamera" size="md" icon="camera" />
+                <View style={styles.cameraDiagnoseMarker}>
+                  <Text style={styles.cameraDiagnoseMarkerText}>📷</Text>
+                </View>
                 <View style={styles.cameraDirArrowWrap} pointerEvents="none">
                   <Ionicons
                     name="navigate"
@@ -2076,6 +2088,24 @@ export default function KartScreen() {
               Satellitt
             </Text>
           </Pressable>
+        </View>
+
+        {/* MIDLERTIDIG DIAGNOSE (4. forsøk feilet — fjernes straks kamera-
+            markøren er bekreftet synlig på enheten): alltid synlig, ingen
+            meny å åpne først. Skiller tre forskjellige mulige årsaker fra
+            hverandre direkte på skjermen:
+            - "kameraer: 0" → dataen når aldri frem (lagring/synk).
+            - "jaktplan: PÅ" → betingelsen `!erJaktplanAktiv` skjuler ALT,
+              inkludert kameraer — selv om Jaktplan-arket ikke SER åpent ut.
+            - "kameraer: N>0" OG "jaktplan: AV" men fortsatt ingenting synlig
+              → beviser endelig at det aldri var en datafeil, og at selv en
+              dead-enkel rød firkant (se <Marker> over) ikke rendres —
+              peker mot noe i selve kart-/markør-initialiseringen på denne
+              spesifikke enheten/SDK-versjonen, ikke innholdet. */}
+        <View style={styles.diagnoseBanner} pointerEvents="none">
+          <Text style={styles.diagnoseBannerText}>
+            DIAGNOSE: kameraer: {kameraer.length} · jaktplan: {erJaktplanAktiv ? "PÅ" : "AV"} · visKameraer: {visKameraer ? "PÅ" : "AV"}
+          </Text>
         </View>
 
         {/* ── "Analyser dette området" — DEN ENESTE knappen i hele kartet som
@@ -3202,6 +3232,25 @@ const styles = StyleSheet.create({
     position: "absolute", top: -18, left: -20, right: -20,
     alignItems: "center", justifyContent: "center",
   },
+  // MIDLERTIDIG DIAGNOSE — se kommentaren ved selve <Marker>: stor, lyst
+  // farget firkant med emoji i stedet for MarkerBadge/Ionicons, for å teste
+  // ren synlighet uavhengig av innholdskompleksitet.
+  cameraDiagnoseMarker: {
+    width: 52, height: 52, borderRadius: 10,
+    backgroundColor: "#FF3B30", borderWidth: 3, borderColor: "#FFFFFF",
+    alignItems: "center", justifyContent: "center",
+  },
+  cameraDiagnoseMarkerText: { fontSize: 26 },
+  // MIDLERTIDIG DIAGNOSE — se kommentaren ved JSX-bruken. Bevisst skrikende
+  // (gul/svart) i stedet for ViltIQ sin vanlige palett, nettopp for at den
+  // aldri kan forveksles med en permanent del av designet.
+  diagnoseBanner: {
+    position: "absolute", top: 106, left: 14, right: 128,
+    backgroundColor: "#000000", borderWidth: 1, borderColor: "#FFD60A",
+    borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8,
+    zIndex: uiZ.toast,
+  },
+  diagnoseBannerText: { color: "#FFD60A", fontSize: 11, fontWeight: "700", textAlign: "center" },
 
   // HuntPlan-oppdraget §3.16: distinkt "sikte"-markør for det anbefalte
   // punktet — bevisst ULIK sonens egen rangerings-ring (MarkerRing) og
