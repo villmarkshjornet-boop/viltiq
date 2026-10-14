@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useState, type ComponentProps } from "react";
+import type { ComponentProps } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Marker as MapMarker } from "@/components/MapView";
 import { color } from "@/src/design/tokens";
@@ -22,28 +22,51 @@ import { color } from "@/src/design/tokens";
  * manglet FORTSATT ikonet med et enkelt 600ms-vindu — sannsynlig fordi
  * `closePinPanel()` (skjemaet lukkes idet lagringen går gjennom) utløser en
  * egen layout-omveltning SAMTIDIG som markøren mountes, som i verste fall kan
- * skyve selve layout-ferdigstillelsen forbi ett enkelt tidsvindu. Løsningen
- * er IKKE bare å gjette et enda lengre tall (samme race, bare sjeldnere) —
- * i stedet gis SDK-en to uavhengige sjanser til å ta et korrekt bilde: en
- * kort første stabilisering, og en ny, kort re-arming litt senere som fanger
- * opp tilfeller der det aller første vinduet likevel var for tidlig.
+ * skyve selve layout-ferdigstillelsen forbi ett enkelt tidsvindu.
+ *
+ * Feltrapport (fysisk enhet, V1.3, senere runde): etter at markør-INNHOLDET
+ * ble bekreftet synlig igjen (react-native-maps oppgradert til 1.29.11, se
+ * app/kart.tsx), var INGEN markør — verken kamera eller hotspot, altså
+ * uavhengig av innhold — trykkbar lenger. Mistanke: når
+ * `tracksViewChanges` settler på `false` (over), kan selve
+ * BERØRINGS-/hit-test-området fryse på en geometri som ble beregnet FØR et
+ * senere, reelt layout-oppdatering — en snapshot kan se visuelt korrekt ut
+ * uten at det underliggende trykk-området fulgte med. Siden dette kun kan
+ * bekreftes på fysisk enhet (web bruker en helt annen rendering-vei), er
+ * `tracksViewChanges` nå satt PERMANENT `true` for alle markører som en
+ * ren, utvetydig test: dyrere (ett nytt snapshot per re-render), men
+ * fjerner "settling"-tidsvinduet som variabel fullstendig i stedet for å
+ * gjette på enda et tidspunkt.
  */
-// Eksplisitt, lineær tidslinje (ikke utledet/beregnet) nettopp for å holde
-// rekkefølgen lett å verifisere ved øyemål: false (1. forsøk) → true
-// (re-arm) → false (2. og siste forsøk — her den skal lande for godt).
-const SETTLE_SCHEDULE: readonly { ms: number; value: boolean }[] = [
-  { ms: 600,  value: false },
-  { ms: 650,  value: true },
-  { ms: 1500, value: false },
-];
+/**
+ * Feltrapport (fysisk enhet, V1.3): på iOS + Google Maps-provider er
+ * `Marker` sin egen `stopPropagation`-prop IKKE støttet (kun Apple Maps,
+ * se react-native-maps sin egen type-dokumentasjon) — et trykk på en
+ * markør kan derfor ALLEREDE nå rekke å bli videresendt til kartets EGNE
+ * (helt separate, native) trykk-gjenkjenner, som i app/kart.tsx sin
+ * `<MapView onPress={...}>` bl.a. nullstiller `selectedCamera` igjen rett
+ * etter at en markør nettopp satte den. Modulnivå (ikke React-state) med
+ * vilje: dette er ren, synkron bokføring delt på tvers av ALLE
+ * markør-instanser, ikke noe som skal trigge re-render. `wasMarkerJustPressed`
+ * lar kart.tsx sin egen `<MapView onPress>` ignorere seg selv kort tid etter
+ * et ekte markørtrykk, i stedet for blindt å anta at markøren "vant".
+ */
+let lastMarkerPressAt = 0;
+export function wasMarkerJustPressed(windowMs = 400): boolean {
+  return Date.now() - lastMarkerPressAt < windowMs;
+}
 
-export function StableMarker(props: ComponentProps<typeof MapMarker>) {
-  const [tracksViewChanges, setTracksViewChanges] = useState(true);
-  useEffect(() => {
-    const timers = SETTLE_SCHEDULE.map(({ ms, value }) => setTimeout(() => setTracksViewChanges(value), ms));
-    return () => timers.forEach(clearTimeout);
-  }, []);
-  return <MapMarker {...props} tracksViewChanges={tracksViewChanges} />;
+export function StableMarker({ onPress, ...rest }: ComponentProps<typeof MapMarker>) {
+  return (
+    <MapMarker
+      {...rest}
+      tracksViewChanges
+      onPress={(e) => {
+        lastMarkerPressAt = Date.now();
+        onPress?.(e);
+      }}
+    />
+  );
 }
 
 /**

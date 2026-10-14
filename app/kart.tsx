@@ -17,7 +17,6 @@ import MapView, {
   Circle,
   Heatmap,
   HEATMAP_GRADIENT,
-  Marker,
   Polygon,
   PROVIDER_GOOGLE,
 } from "@/components/MapView";
@@ -102,7 +101,7 @@ import BottomSheet, { type SheetSnap } from "@/components/ui/BottomSheet";
 import ModalSheet from "@/components/ui/ModalSheet";
 import EngineStatusPanel from "@/components/ui/EngineStatusPanel";
 import HuntPlanPanel, { MEANINGFUL_MOVEMENT_CONFIDENCE } from "@/components/ui/HuntPlanPanel";
-import { MarkerBadge, MarkerRing, StableMarker } from "@/components/ui/Marker";
+import { MarkerBadge, MarkerRing, StableMarker, wasMarkerJustPressed } from "@/components/ui/Marker";
 import { visAlert } from "@/src/lib/confirmAlert";
 
 // ─── Typer ────────────────────────────────────────────────────────────────────
@@ -1697,7 +1696,18 @@ export default function KartScreen() {
             showsMyLocationButton={false}
             showPropertyBoundaries={visEiendomsgrenser}
             onLongPress={handleMapLongPress}
-            onPress={() => { setSelectedCamera(null); filterOpenSet(false); }}
+            onPress={() => {
+              // Feltrapport (fysisk enhet, V1.3): på iOS + Google Maps kan et
+              // trykk på en markør rekke å nå kartets EGEN (separate, native)
+              // trykk-gjenkjenner også — uten denne vakten ville det
+              // nullstille `selectedCamera` igjen rett etter at en
+              // kamera-markør nettopp satte den, slik at panelet aldri
+              // rekker å vises. Se components/ui/Marker.tsx sin
+              // wasMarkerJustPressed for begrunnelsen.
+              if (wasMarkerJustPressed()) return;
+              setSelectedCamera(null);
+              filterOpenSet(false);
+            }}
             onRegionChangeComplete={handleMapRegionChangeComplete}
           >
             {/* Radius-sirkel — V1.2.2: sentrert på analyseSenter (kartets
@@ -2011,14 +2021,29 @@ export default function KartScreen() {
                       strokeWidth={1.5}
                     />
                   )}
-                <Marker
+                <StableMarker
                   key="huntplan-position"
                   coordinate={huntPlan.recommendedPosition}
                   anchor={{ x: 0.5, y: 0.5 }}
-                  tracksViewChanges={false}
                 >
+                  {/* Feltrapport (fysisk enhet, V1.3): "ikoner er en hashtag
+                      og noe" / "ikke med kodelås" — denne markøren var
+                      ALDRI migrert til StableMarker (brukte fortsatt rå
+                      `tracksViewChanges={false}` fra FØRSTE render), nøyaktig
+                      den opprinnelige timing-buggen Marker.tsx sin egen
+                      StableMarker ble bygget for å løse. Et for tidlig
+                      snapshot kan fange Ionicons-glyffen før den fonten er
+                      ferdig lastet/tegnet, og det ufullstendige resultatet
+                      fryses permanent inn i bildet — derav et vilkårlig,
+                      ulikt utseende hver gang. I tillegg: emoji i stedet for
+                      et ikon-fontnavn her, siden emoji tegnes av systemets
+                      EGEN skrift (alltid tilgjengelig, ingen egen
+                      skrift-innlastingsrace) — samme tilnærming som
+                      MarkerBadge sin `emoji`-prop allerede bruker for andre
+                      markører. 🚩 er en entydig "post/merket sted"-symbol,
+                      ikke en tvetydig siktekors/"locate"-glyff. */}
                   <View style={styles.huntPlanTargetWrap} pointerEvents="none">
-                    <Ionicons name="locate" size={22} color={uiColor.primary} />
+                    <Text style={styles.huntPlanTargetEmoji}>🚩</Text>
                   </View>
                   {/* V1.3 "Anbefalt jaktpost": samme merkelapp-mønster som
                       hotspotAnbefaltWrap/hotspotAnbefaltText over (rank 1-
@@ -2027,15 +2052,18 @@ export default function KartScreen() {
                   <View style={styles.hotspotAnbefaltWrap} pointerEvents="none">
                     <Text style={styles.hotspotAnbefaltText}>ANBEFALT POST</Text>
                   </View>
-                </Marker>
+                </StableMarker>
               </>
             )}
 
-            {/* Valgt ny-pin — der brukeren nettopp trykket for å registrere noe */}
+            {/* Valgt ny-pin — der brukeren nettopp trykket for å registrere noe.
+                Samme fiks som anbefalt-jaktpost-markøren over: aldri migrert
+                til StableMarker (permanent tracksViewChanges={false}) — og
+                emoji i stedet for et ikon-fontnavn, av samme grunn. */}
             {selectedPin && (
-              <Marker coordinate={selectedPin} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
-                <MarkerBadge kind="candidate" size="md" icon="add" />
-              </Marker>
+              <StableMarker coordinate={selectedPin} anchor={{ x: 0.5, y: 1 }}>
+                <MarkerBadge kind="candidate" size="md" emoji="📍" />
+              </StableMarker>
             )}
           </MapView>
         ) : (
@@ -3213,6 +3241,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,14,10,0.55)", borderRadius: minTouchTarget / 2,
     borderWidth: 2, borderColor: uiColor.primary,
   },
+  huntPlanTargetEmoji: { fontSize: 22 },
 
   bottomRow:    { flexDirection: "row", alignItems: "center", gap: 8 },
   bottomMeta:   { ...uiType.caption, color: uiColor.textFaint, marginBottom: 10 },
