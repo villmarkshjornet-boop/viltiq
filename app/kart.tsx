@@ -1914,35 +1914,25 @@ export default function KartScreen() {
             ))}
 
             {/* Kameramarkører */}
-            {/* Feltrapport (fysisk enhet, V1.3), forsøk 4: tre uavhengige,
-                begrunnede fikser (StableMarker-timing, eksplisitt størrelse +
-                collapsable, permanent tracksViewChanges) løste det IKKE.
-                Alle tre delte én antakelse jeg aldri testet: at en EGEN
-                wrapping <View> rundt markørinnholdet er trygt. Den antakelsen
-                er nå forkastet — hotspot-markøren rett over (bevist
-                FUNGERENDE, ingen rapportert feil der) sender flere SØSKEN
-                direkte som Marker sine barn, UTEN noen egen omsluttende View.
-                react-native-maps oppretter sin EGEN native beholder for
-                markør-barna; en ekstra, selvlaget wrapper utenpå det er
-                nettopp den ekstra usikkerhetsfaktoren som skiller kamera fra
-                hotspot. Strukturen under er nå BOKSTAVELIG identisk mønster
-                som hotspot-markøren: én vanlig (flyt-)View etablerer formen,
-                én absolutt-posisjonert søsken-View legges oppå. */}
-            {/* MIDLERTIDIG DIAGNOSE (4. forsøk feilet, fjernes straks dette er
-                avklart): dead-enkel, umulig-å-overse markør — ingen
-                MarkerBadge, ingen Ionicons-font, ingen ekstra View i det
-                hele tatt. KUN dette avgjør om NOE som helst kan tegnes for
-                et kamera på denne enheten, uavhengig av innholdskompleksitet.
-                Vises den IKKE heller ikke nå, er det 100% bevist at
-                problemet aldri var markør-INNHOLDET (icon/collapsable/
-                wrapping-view-teoriene), men noe FØR det — datoen i
-                `k.latitude/longitude`, eller selve betingelsen
-                `visKameraer && !erJaktplanAktiv` som aldri slipper gjennom. */}
+            {/* Feltrapport (fysisk enhet, V1.3) — ROTÅRSAK FUNNET: brukeren
+                bekreftet at INGEN markører i det hele tatt vises (heller ikke
+                hotspot-ringene eller anbefalt jaktpost), mens Heatmap/Circle/
+                Polygon fungerer normalt. Det beviser at fire runder med
+                forsøk på å justere selve markør-INNHOLDET (timing, størrelse,
+                collapsable, struktur) aldri kunne løse dette — react-native-
+                maps sin "render JSX-barn som markørikon"-bro er generelt
+                ustabil under React Native sin New Architecture (Fabric), et
+                kjent samspillsproblem. Reell fix: `newArchEnabled: false` i
+                app.json (se app.config.js sin kommentar for detaljer) — IKKE
+                nok en endring her i markør-strukturen. Denne komponenten
+                beholder likevel sibling-mønsteret fra forrige runde (ingen
+                omsluttende View) siden det uansett er god praksis og ikke
+                skadet noe. */}
             {visKameraer && !erJaktplanAktiv && kameraer.map((k) => (
               <Marker
                 key={k.id}
                 coordinate={{ latitude: k.latitude, longitude: k.longitude }}
-                anchor={{ x: 0.5, y: 0.5 }}
+                anchor={{ x: 0.5, y: 1 }}
                 tracksViewChanges
                 onPress={() => {
                   setSelectedCamera(k);
@@ -1950,9 +1940,7 @@ export default function KartScreen() {
                   setSelectedPin(null);
                 }}
               >
-                <View style={styles.cameraDiagnoseMarker}>
-                  <Text style={styles.cameraDiagnoseMarkerText}>📷</Text>
-                </View>
+                <MarkerBadge kind="kamera" size="md" icon="camera" />
                 <View style={styles.cameraDirArrowWrap} pointerEvents="none">
                   <Ionicons
                     name="navigate"
@@ -2090,18 +2078,13 @@ export default function KartScreen() {
           </Pressable>
         </View>
 
-        {/* MIDLERTIDIG DIAGNOSE (4. forsøk feilet — fjernes straks kamera-
-            markøren er bekreftet synlig på enheten): alltid synlig, ingen
-            meny å åpne først. Skiller tre forskjellige mulige årsaker fra
-            hverandre direkte på skjermen:
-            - "kameraer: 0" → dataen når aldri frem (lagring/synk).
-            - "jaktplan: PÅ" → betingelsen `!erJaktplanAktiv` skjuler ALT,
-              inkludert kameraer — selv om Jaktplan-arket ikke SER åpent ut.
-            - "kameraer: N>0" OG "jaktplan: AV" men fortsatt ingenting synlig
-              → beviser endelig at det aldri var en datafeil, og at selv en
-              dead-enkel rød firkant (se <Marker> over) ikke rendres —
-              peker mot noe i selve kart-/markør-initialiseringen på denne
-              spesifikke enheten/SDK-versjonen, ikke innholdet. */}
+        {/* MIDLERTIDIG DIAGNOSE (fjernes straks markører er bekreftet synlige
+            på enheten igjen, etter newArchEnabled:false-fiksen — se
+            app.config.js): beholdt som billig forsikring i tilfelle
+            arkitektur-fiksen IKKE løser alt alene. Alltid synlig, ingen meny
+            å åpne først — hvis markører FORTSATT ikke vises med "kameraer:
+            N>0" og "jaktplan: AV" her, er det bevist at det finnes en ANNEN,
+            separat årsak i tillegg til Fabric-problemet. */}
         <View style={styles.diagnoseBanner} pointerEvents="none">
           <Text style={styles.diagnoseBannerText}>
             DIAGNOSE: kameraer: {kameraer.length} · jaktplan: {erJaktplanAktiv ? "PÅ" : "AV"} · visKameraer: {visKameraer ? "PÅ" : "AV"}
@@ -3232,15 +3215,6 @@ const styles = StyleSheet.create({
     position: "absolute", top: -18, left: -20, right: -20,
     alignItems: "center", justifyContent: "center",
   },
-  // MIDLERTIDIG DIAGNOSE — se kommentaren ved selve <Marker>: stor, lyst
-  // farget firkant med emoji i stedet for MarkerBadge/Ionicons, for å teste
-  // ren synlighet uavhengig av innholdskompleksitet.
-  cameraDiagnoseMarker: {
-    width: 52, height: 52, borderRadius: 10,
-    backgroundColor: "#FF3B30", borderWidth: 3, borderColor: "#FFFFFF",
-    alignItems: "center", justifyContent: "center",
-  },
-  cameraDiagnoseMarkerText: { fontSize: 26 },
   // MIDLERTIDIG DIAGNOSE — se kommentaren ved JSX-bruken. Bevisst skrikende
   // (gul/svart) i stedet for ViltIQ sin vanlige palett, nettopp for at den
   // aldri kan forveksles med en permanent del av designet.

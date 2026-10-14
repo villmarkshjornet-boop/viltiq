@@ -6,6 +6,21 @@
 //
 // Alt her er tilleggsverdier — ingenting i app.json sin eksisterende
 // konfigurasjon overskrives eller endres.
+//
+// NB — app.json sin `newArchEnabled` ble satt til `false` (V1.3,
+// feltrapport fysisk iOS-enhet): ALLE react-native-maps <Marker>
+// med egendefinert JSX-innhold (kamera, hotspot-ringer, observasjoner,
+// jaktlags-posisjoner, anbefalt jaktpost) var usynlige på enheten, mens
+// enklere lag uten egendefinert innhold (Heatmap, Circle, Polygon) fungerte
+// normalt — et kjent, dokumentert samspillsproblem mellom
+// react-native-maps sin "render JSX-barn som markørikon"-bro og React
+// Native sin New Architecture (Fabric). Fire uavhengige forsøk på å endre
+// SELVE markør-INNHOLDET (snapshot-timing, eksplisitt størrelse,
+// collapsable, identisk struktur som andre markører) endret ingenting,
+// nettopp fordi årsaken aldri lå i innholdet — den lå i selve
+// arkitektur-broen. Skru IKKE denne tilbake til `true` uten at
+// react-native-maps sin Fabric-støtte for egendefinerte markør-barn faktisk
+// er bekreftet fungerende på en ekte enhet først.
 const fs = require("fs");
 const path = require("path");
 

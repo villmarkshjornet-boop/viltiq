@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "viltiq",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "no.viltiq.app",
