@@ -1914,26 +1914,27 @@ export default function KartScreen() {
             ))}
 
             {/* Kameramarkører */}
-            {/* Feltrapport (fysisk enhet, V1.3) — ROTÅRSAK FUNNET: brukeren
-                bekreftet at INGEN markører i det hele tatt vises (heller ikke
-                hotspot-ringene eller anbefalt jaktpost), mens Heatmap/Circle/
-                Polygon fungerer normalt. Det beviser at fire runder med
-                forsøk på å justere selve markør-INNHOLDET (timing, størrelse,
-                collapsable, struktur) aldri kunne løse dette — react-native-
-                maps sin "render JSX-barn som markørikon"-bro er generelt
-                ustabil under React Native sin New Architecture (Fabric), et
-                kjent samspillsproblem. Reell fix: `newArchEnabled: false` i
-                app.json (se app.config.js sin kommentar for detaljer) — IKKE
-                nok en endring her i markør-strukturen. Denne komponenten
-                beholder likevel sibling-mønsteret fra forrige runde (ingen
-                omsluttende View) siden det uansett er god praksis og ikke
-                skadet noe. */}
+            {/* Feltrapport (fysisk enhet, V1.3) — ROTÅRSAK: react-native-maps
+                1.29.2 sin Fabric-håndtering av egendefinert markørinnhold
+                var ødelagt (bekreftet: ALLE markører var usynlige, ikke bare
+                kamera — se historikk). Fikset ved å oppgradere til 1.29.11
+                (§1.29.9-changelog: "sizes the Google marker icon view using
+                Fabric layout metrics"), IKKE ved å endre innholdet her.
+                Markøren er nå BEKREFTET synlig på enhet — men ikke
+                trykkbar, mest sannsynlig fordi permanent
+                `tracksViewChanges={true}` (satt under feilsøkingen, for å
+                utelukke snapshot-timing som variabel) stadig tvinger frem et
+                nytt native snapshot og forstyrrer iOS sin berørings-
+                gjenkjenning. Nå som selve rot-bugen er fjernet, er det ikke
+                lenger noen grunn til at kamera skal avvike fra samme
+                StableMarker-tidsmønster som ALLE andre markører i denne
+                filen (hotspot/observasjon/spor/annet/party) allerede bruker
+                — tilbake til det etablerte mønsteret. */}
             {visKameraer && !erJaktplanAktiv && kameraer.map((k) => (
-              <Marker
+              <StableMarker
                 key={k.id}
                 coordinate={{ latitude: k.latitude, longitude: k.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges
                 onPress={() => {
                   setSelectedCamera(k);
                   setCameraView("info");
@@ -1949,7 +1950,7 @@ export default function KartScreen() {
                     style={{ transform: [{ rotate: `${k.directionDegrees}deg` }] }}
                   />
                 </View>
-              </Marker>
+              </StableMarker>
             ))}
 
             {/* Jaktlag-medlemmers live-posisjoner */}
@@ -2076,19 +2077,6 @@ export default function KartScreen() {
               Satellitt
             </Text>
           </Pressable>
-        </View>
-
-        {/* MIDLERTIDIG DIAGNOSE (fjernes straks markører er bekreftet synlige
-            på enheten igjen, etter newArchEnabled:false-fiksen — se
-            app.config.js): beholdt som billig forsikring i tilfelle
-            arkitektur-fiksen IKKE løser alt alene. Alltid synlig, ingen meny
-            å åpne først — hvis markører FORTSATT ikke vises med "kameraer:
-            N>0" og "jaktplan: AV" her, er det bevist at det finnes en ANNEN,
-            separat årsak i tillegg til Fabric-problemet. */}
-        <View style={styles.diagnoseBanner} pointerEvents="none">
-          <Text style={styles.diagnoseBannerText}>
-            DIAGNOSE: kameraer: {kameraer.length} · jaktplan: {erJaktplanAktiv ? "PÅ" : "AV"} · visKameraer: {visKameraer ? "PÅ" : "AV"}
-          </Text>
         </View>
 
         {/* ── "Analyser dette området" — DEN ENESTE knappen i hele kartet som
@@ -3215,17 +3203,6 @@ const styles = StyleSheet.create({
     position: "absolute", top: -18, left: -20, right: -20,
     alignItems: "center", justifyContent: "center",
   },
-  // MIDLERTIDIG DIAGNOSE — se kommentaren ved JSX-bruken. Bevisst skrikende
-  // (gul/svart) i stedet for ViltIQ sin vanlige palett, nettopp for at den
-  // aldri kan forveksles med en permanent del av designet.
-  diagnoseBanner: {
-    position: "absolute", top: 106, left: 14, right: 128,
-    backgroundColor: "#000000", borderWidth: 1, borderColor: "#FFD60A",
-    borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8,
-    zIndex: uiZ.toast,
-  },
-  diagnoseBannerText: { color: "#FFD60A", fontSize: 11, fontWeight: "700", textAlign: "center" },
-
   // HuntPlan-oppdraget §3.16: distinkt "sikte"-markør for det anbefalte
   // punktet — bevisst ULIK sonens egen rangerings-ring (MarkerRing) og
   // ULIK candidate-pinnen (MarkerBadge), slik at "anbefalt STÅSTED" aldri
