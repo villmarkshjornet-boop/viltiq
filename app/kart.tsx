@@ -2118,28 +2118,35 @@ export default function KartScreen() {
                   anchor={{ x: 0.5, y: 0.5 }}
                   onPress={() => { setValgtHotspotId(zoneIdentity(sone)); setSheetSnap("expanded"); }}
                 >
-                  <View style={styles.hotspotRingWrap}>
-                    <MarkerRing
-                      variant="hotspot"
-                      size={erValgt ? tier.ringSize + 4 : tier.ringSize}
-                      color={tier.ringColor}
-                    />
-                  </View>
-                  <View style={[styles.hotspotScoreBadge, rank > 1 && styles.hotspotScoreBadgeSecondary]} pointerEvents="none">
-                    <Text style={styles.hotspotScoreText}>#{rank} · {Math.round(sone.score)}</Text>
-                  </View>
-                  {/* V1.3: mens Jaktplan-arket er åpent for NETTOPP denne
-                      sonen, viser HuntPlan sin egen markør (under) allerede
-                      en "ANBEFALT POST"-merkelapp på SAMME koordinat
-                      (recommendedPosition = zone.center for primærsonen) —
-                      denne badgen droppes da for å unngå to overlappende
-                      merkelapper på samme punkt. Utenfor jaktplan-visningen
-                      (vanlig hotspot-browsing) vises den som før. */}
-                  {rank === 1 && !(erJaktplanAktiv && zoneIdentity(sone) === huntPlanZoneId) && (
-                    <View style={styles.hotspotAnbefaltWrap} pointerEvents="none">
-                      <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>
+                  <View style={styles.hotspotMarkerOuter} pointerEvents="none">
+                    <View style={styles.hotspotScoreRow}>
+                      <View style={[styles.hotspotScoreBadge, rank > 1 && styles.hotspotScoreBadgeSecondary]}>
+                        <Text style={styles.hotspotScoreText}>#{rank} · {Math.round(sone.score)}</Text>
+                      </View>
                     </View>
-                  )}
+                    <View style={styles.hotspotRingWrap}>
+                      <MarkerRing
+                        variant="hotspot"
+                        size={erValgt ? tier.ringSize + 4 : tier.ringSize}
+                        color={tier.ringColor}
+                      />
+                    </View>
+                    {/* V1.3: mens Jaktplan-arket er åpent for NETTOPP denne
+                        sonen, viser HuntPlan sin egen markør (under) allerede
+                        en "ANBEFALT POST"-merkelapp på SAMME koordinat
+                        (recommendedPosition = zone.center for primærsonen) —
+                        denne badgen droppes da for å unngå to overlappende
+                        merkelapper på samme punkt. Utenfor jaktplan-visningen
+                        (vanlig hotspot-browsing) vises den som før. Raden
+                        reserveres likevel ALLTID (tom når ikke vist) slik at
+                        ringens senter holder seg på samme {`{x:0.5,y:0.5}`}
+                        uansett rank — se hotspotMarkerOuter-kommentaren. */}
+                    <View style={styles.hotspotAnbefaltRow}>
+                      {rank === 1 && !(erJaktplanAktiv && zoneIdentity(sone) === huntPlanZoneId) && (
+                        <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>
+                      )}
+                    </View>
+                  </View>
                 </StableMarker>
               );
             })}
@@ -2161,17 +2168,19 @@ export default function KartScreen() {
                   anchor={{ x: 0.5, y: 0.5 }}
                   onPress={() => apneJaktplanForOmrade(sone)}
                 >
-                  <View style={styles.hotspotRingWrap}>
-                    <MarkerRing variant="hotspot" size={tier.ringSize} color={tier.ringColor} />
-                  </View>
-                  <View style={[styles.hotspotScoreBadge, rank > 1 && styles.hotspotScoreBadgeSecondary]} pointerEvents="none">
-                    <Text style={styles.hotspotScoreText}>#{rank} · {Math.round(sone.score)}</Text>
-                  </View>
-                  {rank === 1 && (
-                    <View style={styles.hotspotAnbefaltWrap} pointerEvents="none">
-                      <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>
+                  <View style={styles.hotspotMarkerOuter} pointerEvents="none">
+                    <View style={styles.hotspotScoreRow}>
+                      <View style={[styles.hotspotScoreBadge, rank > 1 && styles.hotspotScoreBadgeSecondary]}>
+                        <Text style={styles.hotspotScoreText}>#{rank} · {Math.round(sone.score)}</Text>
+                      </View>
                     </View>
-                  )}
+                    <View style={styles.hotspotRingWrap}>
+                      <MarkerRing variant="hotspot" size={tier.ringSize} color={tier.ringColor} />
+                    </View>
+                    <View style={styles.hotspotAnbefaltRow}>
+                      {rank === 1 && <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>}
+                    </View>
+                  </View>
                 </StableMarker>
               );
             })}
@@ -2365,15 +2374,20 @@ export default function KartScreen() {
                       MarkerBadge sin `emoji`-prop allerede bruker for andre
                       markører. 🚩 er en entydig "post/merket sted"-symbol,
                       ikke en tvetydig siktekors/"locate"-glyff. */}
-                  <View style={styles.huntPlanTargetWrap} pointerEvents="none">
-                    <Text style={styles.huntPlanTargetEmoji}>🚩</Text>
-                  </View>
-                  {/* V1.3 "Anbefalt jaktpost": samme merkelapp-mønster som
-                      hotspotAnbefaltWrap/hotspotAnbefaltText over (rank 1-
-                      hotspoten) — gjenbruker eksisterende visuelt språk i
-                      stedet for å finne opp et nytt. */}
-                  <View style={styles.hotspotAnbefaltWrap} pointerEvents="none">
-                    <Text style={styles.hotspotAnbefaltText}>ANBEFALT POST</Text>
+                  {/* Bugrapport (§"merkelige rotete symboler", 2.11.2026):
+                      samme hotspotMarkerOuter-struktur som ring-markørene
+                      over — en tom hotspotScoreRow som ren symmetrisk
+                      avstand (ingen badge her), så 🚩-boksens EGNE senter
+                      fortsatt lander på {`{x:0.5,y:0.5}`} selv med
+                      "ANBEFALT POST"-raden under. */}
+                  <View style={styles.hotspotMarkerOuter} pointerEvents="none">
+                    <View style={styles.hotspotScoreRow} />
+                    <View style={styles.huntPlanTargetWrap}>
+                      <Text style={styles.huntPlanTargetEmoji}>🚩</Text>
+                    </View>
+                    <View style={styles.hotspotAnbefaltRow}>
+                      <Text style={styles.hotspotAnbefaltText}>ANBEFALT POST</Text>
+                    </View>
                   </View>
                 </StableMarker>
               </>
@@ -3553,12 +3567,43 @@ const styles = StyleSheet.create({
     width: minTouchTarget, height: minTouchTarget,
     alignItems: "center", justifyContent: "center",
   },
+  // Bugrapport (§"merkelige rotete symboler på anbefalt post", 2.11.2026):
+  // hotspotScoreBadge og hotspotAnbefaltWrap lå tidligere som ABSOLUTT
+  // posisjonerte SØSKEN til hotspotRingWrap, forskjøvet UTENFOR dennes egne
+  // 44×44-grenser (top:-6/right:-8, og top:44-6/left:-26/right:-26). React-
+  // native-maps tar et NATIVE SNAPSHOT av markør-innholdet og sizer/klipper
+  // det bildet etter innholdets MÅLTE layout-bounds — akkurat den samme
+  // rotårsaken som allerede ble diagnostisert og fikset for kameraets
+  // retningspil (se cameraDirArrowWrap-kommentaren under): innhold utenfor
+  // egne grenser blir klippet/sammenrotet i snapshotet, synlig på enheten
+  // som nettopp disse avkappede "#1 · 3" / "NBEFALT"-fragmentene brukeren
+  // rapporterte skjermbilder av. Fiksen er samme mønster som kameraet:
+  // ÉN eksplisitt, fast stor nok ytre boks (hotspotMarkerOuter) der
+  // score-rad/ring/anbefalt-rad er VANLIGE (ikke absolutte) barn — ingenting
+  // stikker lenger utenfor markørens egne målte grenser. Rad-høydene er like
+  // over og under ringen slik at ringens EGNE senter fortsatt faller nøyaktig
+  // på {x:0.5,y:0.5} — samme ankerpunkt som før, ingen endring i hvor
+  // sonens koordinat faktisk peker.
+  hotspotMarkerOuter: {
+    width: 130,
+    alignItems: "center",
+  },
+  hotspotScoreRow: {
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hotspotAnbefaltRow: {
+    height: 20,
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
   // Hunting-zones-oppdraget §1/§4: "#{rank} · {score}"-merkelapp for ALLE
-  // synlige hotspots (også #1, ikke bare sekundære) — se hotspotRingWrap-
-  // bruken over. Liten, diskret plassert i hjørnet av selve ringen — skal
-  // ALDRI konkurrere visuelt med heatmap-laget, kun bekrefte rangeringen.
+  // synlige hotspots (også #1, ikke bare sekundære) — vises nå sentrert i
+  // hotspotScoreRow rett over ringen i stedet for i selve hjørnet (se
+  // kommentaren over), men samme visuelle språk. Skal ALDRI konkurrere
+  // visuelt med heatmap-laget, kun bekrefte rangeringen.
   hotspotScoreBadge: {
-    position: "absolute", top: -6, right: -8,
     minWidth: 30, height: 16, borderRadius: 8, paddingHorizontal: 4,
     backgroundColor: "rgba(8,14,10,0.9)",
     borderWidth: 1, borderColor: uiColor.levelHøy,
@@ -3568,13 +3613,9 @@ const styles = StyleSheet.create({
     borderColor: uiColor.levelHøy + "99",
   },
   hotspotScoreText: { color: uiColor.textPrimary, fontSize: 9, fontWeight: "800" },
-  // Kun rank 1 — liten grønn "ANBEFALT"-merkelapp under ringen, samme
-  // ViltIQ-grønn (uiColor.primary) som resten av appens primærhandlinger,
-  // ingen ny farge oppfunnet for dette formålet.
-  hotspotAnbefaltWrap: {
-    position: "absolute", top: minTouchTarget - 6, left: -26, right: -26,
-    alignItems: "center",
-  },
+  // Kun rank 1 — liten grønn "ANBEFALT"-merkelapp i hotspotAnbefaltRow under
+  // ringen, samme ViltIQ-grønn (uiColor.primary) som resten av appens
+  // primærhandlinger, ingen ny farge oppfunnet for dette formålet.
   hotspotAnbefaltText: {
     backgroundColor: uiColor.primary, color: uiColor.primaryText,
     fontSize: 8, fontWeight: "900", letterSpacing: 0.5,
