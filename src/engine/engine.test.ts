@@ -73,6 +73,75 @@ test("Scenario 1: én fersk observasjon gir en sone nær observasjonen, uten hø
 });
 
 // ===========================================================================
+// Regresjonstest (2026-11): app/kart.tsx sin lagreObservasjonFraKamera()
+// lagret TIDLIGERE hver kameraobservasjon med latitude/longitude: null —
+// normalizeObservations() dropper (med vilje) enhver observasjon uten
+// gyldig posisjon FØR scoring starter (se normalize.test.ts), så INGEN
+// kameraobservasjon registrert via kart.tsx sitt kamera-panel har
+// noensinne nådd motoren, uansett observationSource/cameraId-kobling.
+// Fikset ved å lagre kameraets EGEN (alltid satte) posisjon i stedet for
+// null. Denne testen speiler det EKSAKTE feltoppsettet
+// lagreObservasjonFraKamera() nå sender (se kart.tsx), som et end-to-end-
+// bevis — ikke bare at normalizeObservations() isolert godtar gyldige
+// koordinater (det beviser normalize.test.ts allerede), men at en
+// kameraobservasjon med kameraets posisjon FAKTISK PÅVIRKER
+// motorresultatet (observationsConsidered > 0, en sone nær kameraet,
+// predictionMode ≠ "environment_only").
+// ===========================================================================
+
+test("Regresjon: kameraobservasjon lagret MED kameraets posisjon (den fiksede lagreObservasjonFraKamera-oppførselen) påvirker motorresultatet", () => {
+  const kameraPos = { latitude: 60.391262, longitude: 5.322054 };
+  // Samme feltoppsett som kart.tsx sin saveObservation(...)-kall i
+  // lagreObservasjonFraKamera() etter fiksen — latitude/longitude er nå
+  // kameraets egne, ikke null.
+  const observations = [
+    obs({
+      dyr: "Rådyr",
+      observationSource: "camera",
+      cameraId: "cam-regresjon-1",
+      latitude: kameraPos.latitude,
+      longitude: kameraPos.longitude,
+      retning: null,
+      antall: 2,
+      tid: hoursAgoIso(0),
+    }),
+  ];
+
+  const result = runEngine(observations as never, "radyr", { now: NOW });
+
+  assert.equal(result.observationsConsidered, 1, "den fiksede kameraobservasjonen skal telles med av motoren");
+  assert.ok(result.zones.length >= 1, "forventet minst én sone fra denne ene ferske kameraobservasjonen");
+  assert.ok(
+    distanceMeters(result.zones[0].center, kameraPos) < 400,
+    "sonen bør ligge nær kameraets faktiske posisjon, ikke et vilkårlig/manglende punkt"
+  );
+  assert.notEqual(
+    result.zones[0].predictionMode,
+    "environment_only",
+    "med en reell, fersk lokal observasjon skal motoren ALDRI falle tilbake til ren miljø-antakelse"
+  );
+});
+
+test("Regresjon (motbevis — dokumenterer BUGGEN selv): samme kameraobservasjon lagret med latitude/longitude: null (den GAMLE, buggy oppførselen) blir stille droppet og gir INGEN sone", () => {
+  const observations = [
+    obs({
+      dyr: "Rådyr",
+      observationSource: "camera",
+      cameraId: "cam-regresjon-1",
+      latitude: null,
+      longitude: null,
+      antall: 2,
+      tid: hoursAgoIso(0),
+    }),
+  ];
+
+  const result = runEngine(observations as never, "radyr", { now: NOW });
+
+  assert.equal(result.observationsConsidered, 0, "en kameraobservasjon uten posisjon (den gamle buggen) blir usynlig for motoren");
+  assert.equal(result.zones.length, 0, "uten noen gyldig observasjon finnes det ingen lokal sone å vise — dette ER nøyaktig symptomet som ble rapportert");
+});
+
+// ===========================================================================
 // V1.3 §N/§O — end-to-end integrasjonstest: engine.ts skal ha koblet
 // buildZoneRecommendation() til HVER sone automatisk (ikke noe kart.tsx må
 // konstruere selv), med rank/id/score/probabilityLabel som faktisk stemmer
