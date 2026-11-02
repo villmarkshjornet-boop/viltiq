@@ -207,12 +207,16 @@ function zoneTierStyle(rank: number, predictionMode: PredictionMode) {
   };
 }
 
-const dyrListe    = ["Rådyr", "Elg", "Hjort", "Rev"];
+// Brukerkrav (2026-11): "Rev" skal ikke vises som eget filter-/analysevalg
+// på kartet — den har aldri hatt en reell artsprofil (ble kun mappet til
+// motorens nøytrale "annet"-profil) og produserte derfor ingen meningsfull
+// heatzone. Ekte, tidligere lagrede Rev-observasjoner forsvinner IKKE fra
+// kartet av dette — de vises fortsatt under "Alle" (se dyrObsMedGps, som
+// filtrerer på den frie aktivtFilter-strengen, ikke på denne listen), bare
+// uten en egen filterknapp/motorkjøring for dem.
+const dyrListe    = ["Rådyr", "Elg", "Hjort"];
 const dyrFilter   = ["Alle", ...dyrListe];
-/** Registrering (nytt pin/spor/kamera) skal IKKE tilby Rev som valg — kun
- * jaktbare arter registreres aktivt. "Rev" beholdes i dyrListe/dyrFilter selv
- * (motorberegning + visningsfilter for evt. allerede lagrede Rev-observasjoner). */
-const dyrRegistrerbar = dyrListe.filter((d) => d !== "Rev");
+const dyrRegistrerbar = dyrListe;
 /** De tre artene Hjem sin art-karusell støtter (§3 i art-karusell-oppdraget) — "Alle"/"Rev" har ingen egen hero der, så et filtervalg av dem skriver ikke selectedSpecies. */
 const KARUSELL_ART_FRA_DYR: Partial<Record<string, EngineSpecies>> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg" };
 
@@ -873,13 +877,23 @@ export default function KartScreen() {
     if (!selectedCamera || savingCameraAction) return;
     try {
       setSavingCameraAction(true);
+      // BUGFIX (2026-11): ble tidligere lagret med latitude/longitude: null
+      // — kameraets EGEN posisjon ble aldri skrevet inn. src/engine/
+      // normalize.ts sin normalizeObservations() dropper (med vilje, §108)
+      // enhver observasjon uten gyldig numerisk posisjon FØR scoring i det
+      // hele tatt starter, så INGEN kameraobservasjon har noensinne nådd
+      // motoren, heatzonen eller Hjem sin "ferske lokale observasjoner"-sjekk
+      // — uavhengig av observationSource/cameraId-kobling. Kameraet er en
+      // FAST, kjent posisjon (selectedCamera.latitude/longitude er alltid
+      // satt, se src/services/cameras.ts) — dyret ble sett DER, så det er
+      // den ærlige, riktige posisjonen å lagre, ikke en stedfortreder.
       const { offline } = await saveObservation({
         dyr:      regDyr,
         type:     "Sett dyr",
         kommentar: regKommentar.trim() || "Registrert fra viltkamera",
         tid:      new Date().toISOString(),
-        latitude:  null,
-        longitude: null,
+        latitude:  selectedCamera.latitude,
+        longitude: selectedCamera.longitude,
         retning:  regRetningKjent ? regRetning : null,
         antall:   regAntall,
         observationSource: "camera",
