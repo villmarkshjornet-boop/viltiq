@@ -1424,8 +1424,19 @@ export default function KartScreen() {
     );
   }, [huntAreaPolygon, huntAreaTooSmall]);
 
-  /** BUG 4 (V1.5): "relevante kameraer/observasjoner" — når et jaktområde er satt, vis kun markører INNENFOR det; uendret (alt vises) når ingen polygon er aktivt. */
+  /**
+   * BUG 4 (V1.5): "relevante kameraer/observasjoner" — når et jaktområde er
+   * satt, vis kun markører INNENFOR det; uendret (alt vises) når ingen
+   * polygon er aktivt. Under selve TEGNINGEN skjules i tillegg ALLE andre
+   * markører helt (ikke bare filtrert på polygon, som ennå ikke finnes) —
+   * en kamera-/observasjonsmarkør der ville, pga. StableMarker sin egen
+   * wasMarkerJustPressed()-bokføring (se Marker.tsx), kunne "stjele" et
+   * tegnetrykk like etterpå (innenfor 400 ms-vinduet) uten at brukeren
+   * forstår hvorfor hjørnet ikke ble lagt til — samme rotårsak som
+   * draft-punktenes tappable={false}-fiks over, bare for andre markørtyper.
+   */
   function erRelevantForJaktomrade(coord: LatLng): boolean {
+    if (isDrawingHuntArea) return false;
     return !huntAreaPolygon || isPointInPolygon(coord, huntAreaPolygon);
   }
 
@@ -1929,7 +1940,7 @@ export default function KartScreen() {
                 Maps' HeatmapTileProvider via react-native-maps på native).
                 Se components/LeafletMapImpl.tsx sin Heatmap-komponent for
                 web-implementasjonen. */}
-            {visPrediksjon && !erJaktplanAktiv && !huntAreaPolygon && heatmapRenderPoints.length > 0 && (
+            {visPrediksjon && !erJaktplanAktiv && !huntAreaPolygon && !isDrawingHuntArea && heatmapRenderPoints.length > 0 && (
               <Heatmap
                 points={heatmapRenderPoints}
                 radius={HEATMAP_POINT_RADIUS}
@@ -2025,7 +2036,7 @@ export default function KartScreen() {
             {/* BUG 4 (V1.5): skjult når et jaktområde-polygon er aktivt — se
                 huntAreaZones-blokken under for den polygon-begrensede
                 ekvivalenten av akkurat denne renderingen. */}
-            {!huntAreaPolygon && (erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
+            {!huntAreaPolygon && !isDrawingHuntArea && (erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
               const hull = smoothedFootprintByZone.get(zoneIdentity(sone));
               if (!hull || hull.length < 3) return null;
               const rank = sone.rank ?? 1;
@@ -2082,7 +2093,7 @@ export default function KartScreen() {
                 soner (også #1), og #1 får i tillegg en liten "ANBEFALT"-
                 merkelapp — rangeringen skal være øyeblikkelig synlig, ikke
                 noe brukeren må trykke seg frem til for å oppdage. */}
-            {!huntAreaPolygon && (erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
+            {!huntAreaPolygon && !isDrawingHuntArea && (erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
               const rank = sone.rank ?? 1;
               const tier = zoneTierStyle(rank, sone.predictionMode);
               const erValgt = sone.id === hotspotSone?.id;
@@ -2153,9 +2164,18 @@ export default function KartScreen() {
 
             {/* BUG 4 (V1.5): hjørnene brukeren har plassert SÅ FAR under
                 tegning — enkle punkt-markører, samme 📍-emoji-språk som
-                resten av kartet (BUG 3). */}
+                resten av kartet (BUG 3). `tappable={false}` (iOS/Google
+                Maps-prop, se react-native-maps' egen MapMarker.d.ts): uten
+                denne fanger StableMarker SITT EGET onPress-wrapper opp et
+                trykk NÆR et allerede plassert hjørne (den setter
+                `lastMarkerPressAt` uansett om noen onPress faktisk ble gitt
+                hit, se Marker.tsx), og MapView sin egen onPress (som ellers
+                ville lagt til NESTE hjørne) hopper over det trykket via
+                wasMarkerJustPressed() — selve tegningen virker da ikke der
+                hjørnene ligger tett. Disse markørene skal aldri selv
+                reagere på trykk, kun vises. */}
             {isDrawingHuntArea && huntAreaDraftPoints.map((p, i) => (
-              <StableMarker key={`huntarea-draft-${i}`} coordinate={p} anchor={{ x: 0.5, y: 0.5 }}>
+              <StableMarker key={`huntarea-draft-${i}`} coordinate={p} anchor={{ x: 0.5, y: 0.5 }} tappable={false}>
                 <MarkerBadge kind="candidate" size="sm" emoji="📍" />
               </StableMarker>
             ))}
