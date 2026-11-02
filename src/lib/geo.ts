@@ -284,6 +284,92 @@ export function gridBoundaryPolygon(points: readonly LatLng[], cellSizeMeters: n
   }));
 }
 
+/**
+ * Punkt-i-polygon (even-odd ray casting, Franklins PNPOLY). Fungerer korrekt
+ * på rå lat/lon uten meter-projeksjon — "er punktet innenfor?" er en topologisk
+ * egenskap som ikke endres av hvilken (konsistent) koordinat-mapping polygonet
+ * og testpunktet begge er uttrykt i, i motsetning til f.eks. arealberegning.
+ *
+ * Grensetilfeller (polygon-hjørne, polygon-kant, duplikat-/null-lengde-kant)
+ * gir et DETERMINISTISK, men ikke nødvendigvis "intuitivt definert" svar —
+ * se geo.test.ts for hvilket svar algoritmen faktisk gir i disse tilfellene.
+ * Under 3 punkter er intet meningsfullt polygon — returnerer alltid `false`.
+ */
+export function isPointInPolygon(point: LatLng, polygon: readonly LatLng[]): boolean {
+  if (polygon.length < 3) return false;
+  const x = point.longitude;
+  const y = point.latitude;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].longitude;
+    const yi = polygon[i].latitude;
+    const xj = polygon[j].longitude;
+    const yj = polygon[j].latitude;
+    const crosses = yi !== yj && y >= Math.min(yi, yj) && y < Math.max(yi, yj) && x < xi + ((y - yi) / (yj - yi)) * (xj - xi);
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function segmentsCross(p1: LatLng, p2: LatLng, p3: LatLng, p4: LatLng): boolean {
+  const orient = (a: LatLng, b: LatLng, c: LatLng) =>
+    (b.longitude - a.longitude) * (c.latitude - a.latitude) - (b.latitude - a.latitude) * (c.longitude - a.longitude);
+  const o1 = orient(p1, p2, p3);
+  const o2 = orient(p1, p2, p4);
+  const o3 = orient(p3, p4, p1);
+  const o4 = orient(p3, p4, p2);
+  // Streng tegn-ulikhet med vilje: kolineære/berørende kanter (o==0) telles
+  // ALDRI som en kryssing her — et jaktområde-polygon der to kanter akkurat
+  // berører hverandre i et punkt (uten å skjære) er fortsatt et gyldig,
+  // ikke-selvskjærende polygon. Se isSimplePolygon() sin doc for hvorfor
+  // dette er riktig for denne brukssammenhengen (brukertegnet område), ikke
+  // en generell robust polygon-kryssing-algoritme for alle formål.
+  return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0);
+}
+
+/**
+ * Sjekker om et brukertegnet polygon er "enkelt" (ikke-selvskjærende) —
+ * forutsetningen isPointInPolygon() over stilltiende krever for å gi et
+ * meningsfullt svar (en "bowtie"-form har ingen entydig inni/utenfor).
+ * Ment brukt ved TEGNING (avvis et nytt hjørne som ville krysset en
+ * eksisterende kant), ikke som en generell polygon-rettelse — denne
+ * funksjonen klassifiserer, den reparerer ikke et ugyldig polygon.
+ */
+export function isSimplePolygon(polygon: readonly LatLng[]): boolean {
+  const n = polygon.length;
+  if (n < 3) return false;
+  for (let i = 0; i < n; i++) {
+    const a1 = polygon[i];
+    const a2 = polygon[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      const adjacent = j === i + 1 || (i === 0 && j === n - 1);
+      if (adjacent) continue;
+      const b1 = polygon[j];
+      const b2 = polygon[(j + 1) % n];
+      if (segmentsCross(a1, a2, b1, b2)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Minste sirkel (tyngdepunkt + lengste avstand til et hjørne) som omslutter
+ * et polygon — IKKE den matematisk minimale omsluttende sirkelen (det ville
+ * kreve Welzls algoritme), men god nok for et lite, brukertegnet jaktområde:
+ * brukes KUN til å utlede en `AreaOfInterest`-sirkel (center+radius) for
+ * `buildGridCells()` i grid.ts, som allerede forventer akkurat denne formen
+ * og selv legger på ytterligere margin — se engine.ts sin bruk av dette.
+ */
+export function boundingCircle(polygon: readonly LatLng[]): { center: LatLng; radiusMeters: number } {
+  if (polygon.length === 0) return { center: { latitude: 0, longitude: 0 }, radiusMeters: 0 };
+  const center: LatLng = {
+    latitude: polygon.reduce((sum, p) => sum + p.latitude, 0) / polygon.length,
+    longitude: polygon.reduce((sum, p) => sum + p.longitude, 0) / polygon.length,
+  };
+  const radiusMeters = polygon.reduce((max, p) => Math.max(max, distanceMeters(center, p)), 0);
+  return { center, radiusMeters };
+}
+
 /** Sektor (kakestykke) rundt et senterpunkt — brukt til å vise kamera-/dyreretning i kart. */
 export function buildSector(
   center: LatLng,

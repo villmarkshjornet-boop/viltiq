@@ -5,7 +5,7 @@
 // forklaring → sett sammen resultat. Ingen tilfeldighet, ingen eksternt
 // kall, ingen AI — samme input gir alltid samme output (§27).
 
-import { distanceMeters } from "@/src/lib/geo";
+import { distanceMeters, isPointInPolygon } from "@/src/lib/geo";
 import type { Observasjon } from "@/src/types/observation";
 import { CONFIG_VERSION, DEFAULT_ENGINE_CONFIG, ENGINE_VERSION, type EngineConfig } from "./config";
 import { computeFallbackConfidence, computeZoneConfidence, confidenceLevelFromScore } from "./confidence";
@@ -58,6 +58,15 @@ export type RunEngineOptions = {
   debug?: boolean;
   /** Delvis overstyring av DEFAULT_ENGINE_CONFIG. */
   config?: Partial<EngineConfig>;
+  /**
+   * Jaktområde (BUG 4, V1.5): et brukertegnet polygon som begrenser HVILKE
+   * allerede scorede ruter som får bli til soner/heatmap-punkter — satt inn
+   * mellom `scoreGrid()` og `extractZones()` i `runPipeline` under, ikke en
+   * egen parallell motor. Scoring selv (scoreGrid) er UENDRET; kun hvilke
+   * celler som når frem til klyngingen endres. Under 3 punkter tolkes som
+   * "ikke satt" (identisk med å utelate feltet helt) — se runPipeline.
+   */
+  huntAreaPolygon?: readonly LatLng[];
 };
 
 function mergeConfig(overrides: Partial<EngineConfig> | undefined): EngineConfig {
@@ -314,7 +323,8 @@ function runPipeline(
   areaOfInterest?: AreaOfInterest,
   ecologyScoreAt?: (point: LatLng) => number,
   ecologyExplanationAt?: (point: LatLng) => EcologyExplanationContext,
-  ecologyValidityAt?: (point: LatLng) => SpatialValidity
+  ecologyValidityAt?: (point: LatLng) => SpatialValidity,
+  huntAreaPolygon?: readonly LatLng[]
 ): EngineResult {
   const normalizedAll = normalizeObservations(rawObservations);
   const observations = normalizedAll.filter((o) => o.species === species);
@@ -326,10 +336,27 @@ function runPipeline(
   const { cells, cellSizeMeters } = buildGridCells(observations, profile, cfg, areaOfInterest);
   const corridors = computeMovementCorridors(observations, cfg.reinforcement);
   const scoredCells = scoreGrid(cells, observations, profile, cfg, nowMs, corridors, ecologyScoreAt, ecologyValidityAt);
+
+  // BUG 4 (V1.5): et gyldig jaktområde-polygon filtrerer HER — ETTER scoring,
+  // FØR klynging — ikke etter at extractZones() allerede har tegnet
+  // sone-hull basert på et annet (ufiltrert) kandidatsett. Se grid.ts sin
+  // gridBoundaryPolygon()-dokumentasjon for hvorfor å klippe celler EFTER at
+  // et hull allerede er sporet gir feilaktige "avbitte" soner — riktig sted
+  // å klippe er FØR extractZones() i det hele tatt ser kandidatsettet, slik
+  // at klyngingen/hull-sporingen (helt uendret) selv jobber med et sett som
+  // allerede bare består av polygon-interne celler. Under 3 punkter er intet
+  // meningsfullt polygon (se isPointInPolygon) og behandles identisk med at
+  // feltet ikke var satt i det hele tatt — INGEN filtrering, byte-identisk
+  // med funksjonens oppførsel før denne featuren fantes.
+  const validHuntAreaPolygon = huntAreaPolygon && huntAreaPolygon.length >= 3 ? huntAreaPolygon : undefined;
+  const cellsForZones = validHuntAreaPolygon
+    ? scoredCells.filter((c) => isPointInPolygon(c.center, validHuntAreaPolygon))
+    : scoredCells;
+
   // Merge-radius skalert med artens egen baseRadius — se extractZones' dokumentasjon
   // for hvorfor en fast global verdi kan fragmentere én observasjon til flere soner.
   const mergeRadiusMeters = Math.max(cfg.zones.mergeRadiusMeters, profile.baseRadiusMeters * 1.5);
-  const rawZones = extractZones(scoredCells, cellSizeMeters, mergeRadiusMeters, cfg);
+  const rawZones = extractZones(cellsForZones, cellSizeMeters, mergeRadiusMeters, cfg);
 
   // V1.3 §N/§O: hver sone sin buildZoneRecommendation() trenger den SAMME
   // ZoneExplanationInput som buildZoneExplanation() allerede bygger — lagres
@@ -464,8 +491,12 @@ function runPipeline(
     summary,
     signals: zones.length > 0 ? zones[0].dominantSignals : [],
     observationsConsidered: observations.length,
-    heatmapPoints: buildHeatmapPoints(scoredCells, cfg),
+    // Samme filtrerte sett som extractZones() over — heatmap-gradienten skal
+    // ALDRI synlig blø utenfor et satt jaktområde mens sonene selv holder
+    // seg innenfor, se huntArea-feltets dokumentasjon i types.ts.
+    heatmapPoints: buildHeatmapPoints(cellsForZones, cfg),
     debug: debugInfo,
+    huntArea: validHuntAreaPolygon ? { matchedCellCount: cellsForZones.length, cellSizeMeters } : undefined,
   };
 }
 
@@ -485,7 +516,7 @@ export function runEngine(
   const nowMs = options.now ?? Date.now();
   const debug = options.debug ?? false;
   const profile = getSpeciesProfile(species);
-  return runPipeline(rawObservations, species, profile, cfg, nowMs, debug);
+  return runPipeline(rawObservations, species, profile, cfg, nowMs, debug, undefined, undefined, undefined, undefined, options.huntAreaPolygon);
 }
 
 export type RunEcologicalEngineOptions = RunEngineOptions & {
@@ -572,7 +603,19 @@ export function runEcologicalEngine(
   };
 
   const areaOfInterest: AreaOfInterest = { center: options.areaCenter, radiusMeters: options.areaRadiusMeters };
-  const result = runPipeline(rawObservations, species, profile, cfg, nowMs, debug, areaOfInterest, ecologyScoreAt, ecologyExplanationAt, ecologyValidityAt);
+  const result = runPipeline(
+    rawObservations,
+    species,
+    profile,
+    cfg,
+    nowMs,
+    debug,
+    areaOfInterest,
+    ecologyScoreAt,
+    ecologyExplanationAt,
+    ecologyValidityAt,
+    options.huntAreaPolygon
+  );
 
   // V1.3 (§Q): resolveEnvironmentContext() (environment/resolve.ts) satte
   // denne som en EKSTRA egenskap på selve resolver-funksjonen (se

@@ -327,4 +327,16 @@ export type EngineResult = {
   debug?: EngineDebugInfo;
   /** V1.3 §Q — undefined for ren runEngine (ingen miljøresolver i det hele tatt ble brukt, se DataSourceStatus sin "fallback"). */
   dataQuality?: EngineDataQuality;
+  /**
+   * BUG 4 (V1.5) — kun satt når et gyldig (≥3 punkter) `huntAreaPolygon` ble
+   * gitt til runEngine/runEcologicalEngine. `matchedCellCount` er antall
+   * ALLEREDE SCOREDE ruter (uavhengig av om de nådde sone-terskelen) som
+   * falt innenfor polygonet. `matchedCellCount === 0` betyr IKKE "ingen
+   * dyreaktivitet" — det betyr at polygonet var for lite/tynt relativt til
+   * `cellSizeMeters` (som skalerer opp automatisk for store områder, se
+   * grid.ts sin buildGridCells) til at NOEN rutesenter traff det i det hele
+   * tatt. UI-laget MÅ skille disse to tilfellene eksplisitt — ellers ser en
+   * geometrisk uløselig oppløsning identisk ut som "ingen funn".
+   */
+  huntArea?: { matchedCellCount: number; cellSizeMeters: number };
 };

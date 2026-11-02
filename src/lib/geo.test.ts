@@ -7,8 +7,19 @@ import { register } from "node:module";
 // extensionless relative specifier below on its own.
 register("../testSupport/nodeEsmTestLoader.mjs", import.meta.url);
 
-const { distanceMeters, calcBearing, movePoint, vindRetningLabel, anonymiserPosisjon, buildSector, convexHull, gridBoundaryPolygon } =
-  await import("./geo");
+const {
+  distanceMeters,
+  calcBearing,
+  movePoint,
+  vindRetningLabel,
+  anonymiserPosisjon,
+  buildSector,
+  convexHull,
+  gridBoundaryPolygon,
+  isPointInPolygon,
+  isSimplePolygon,
+  boundingCircle,
+} = await import("./geo");
 
 // ---------------------------------------------------------------------------
 // distanceMeters
@@ -394,4 +405,123 @@ test("gridBoundaryPolygon: en hantel-formet (konkav) klynge — to tette blokker
   const newArea = shoelaceAreaM2(newHull);
   const oldArea = shoelaceAreaM2(oldHull);
   assert.ok(newArea < oldArea, `forventet at rutenett-konturens areal (${newArea.toFixed(0)} m²) er mindre enn det konvekse skrogets (${oldArea.toFixed(0)} m²)`);
+});
+
+// ---------------------------------------------------------------------------
+// isPointInPolygon (BUG 4 — jaktområde-polygon)
+// ---------------------------------------------------------------------------
+
+const square = [
+  { latitude: 60.0, longitude: 10.0 },
+  { latitude: 60.0, longitude: 10.1 },
+  { latitude: 60.1, longitude: 10.1 },
+  { latitude: 60.1, longitude: 10.0 },
+];
+
+test("isPointInPolygon: punkt midt i en firkant er innenfor", () => {
+  assert.equal(isPointInPolygon({ latitude: 60.05, longitude: 10.05 }, square), true);
+});
+
+test("isPointInPolygon: punkt klart utenfor firkanten er utenfor", () => {
+  assert.equal(isPointInPolygon({ latitude: 61, longitude: 11 }, square), false);
+});
+
+test("isPointInPolygon: under 3 punkter er alltid false, uansett testpunkt", () => {
+  assert.equal(isPointInPolygon({ latitude: 60.05, longitude: 10.05 }, []), false);
+  assert.equal(isPointInPolygon({ latitude: 60.05, longitude: 10.05 }, [square[0]]), false);
+  assert.equal(isPointInPolygon({ latitude: 60.05, longitude: 10.05 }, [square[0], square[1]]), false);
+});
+
+test("isPointInPolygon: duplikat (null-lengde) kant krasjer ikke og endrer ikke svaret", () => {
+  const withDuplicate = [square[0], square[0], square[1], square[2], square[3]];
+  const inside = { latitude: 60.05, longitude: 10.05 };
+  const outside = { latitude: 61, longitude: 11 };
+  assert.equal(isPointInPolygon(inside, withDuplicate), isPointInPolygon(inside, square));
+  assert.equal(isPointInPolygon(outside, withDuplicate), isPointInPolygon(outside, square));
+});
+
+test("isPointInPolygon: konkav polygon (L-form) utelater korrekt hjørnet som er kuttet bort", () => {
+  const lShape = [
+    { latitude: 60.0, longitude: 10.0 },
+    { latitude: 60.0, longitude: 10.2 },
+    { latitude: 60.1, longitude: 10.2 },
+    { latitude: 60.1, longitude: 10.1 },
+    { latitude: 60.2, longitude: 10.1 },
+    { latitude: 60.2, longitude: 10.0 },
+  ];
+  // Innenfor selve L-en:
+  assert.equal(isPointInPolygon({ latitude: 60.05, longitude: 10.15 }, lShape), true);
+  assert.equal(isPointInPolygon({ latitude: 60.15, longitude: 10.05 }, lShape), true);
+  // I det utskårne "hakket" (hadde vært innenfor en konveks innhylling, men ikke i L-en selv):
+  assert.equal(isPointInPolygon({ latitude: 60.15, longitude: 10.15 }, lShape), false);
+});
+
+test("isPointInPolygon: grensetilfeller (hjørne/kant) gir et deterministisk svar, samme svar hver gang", () => {
+  const corner = square[0];
+  const onEdge = { latitude: 60.0, longitude: 10.05 };
+  const r1 = isPointInPolygon(corner, square);
+  const r2 = isPointInPolygon(corner, square);
+  assert.equal(r1, r2, "samme input skal alltid gi samme svar (determinisme)");
+  const e1 = isPointInPolygon(onEdge, square);
+  const e2 = isPointInPolygon(onEdge, square);
+  assert.equal(e1, e2, "samme input skal alltid gi samme svar (determinisme)");
+});
+
+// ---------------------------------------------------------------------------
+// isSimplePolygon
+// ---------------------------------------------------------------------------
+
+test("isSimplePolygon: en vanlig firkant er enkel (ikke-selvskjærende)", () => {
+  assert.equal(isSimplePolygon(square), true);
+});
+
+test("isSimplePolygon: en 'bowtie' (kryssende kanter) er IKKE enkel", () => {
+  const bowtie = [
+    { latitude: 60.0, longitude: 10.0 },
+    { latitude: 60.1, longitude: 10.1 },
+    { latitude: 60.0, longitude: 10.1 },
+    { latitude: 60.1, longitude: 10.0 },
+  ];
+  assert.equal(isSimplePolygon(bowtie), false);
+});
+
+test("isSimplePolygon: under 3 punkter er aldri et enkelt polygon", () => {
+  assert.equal(isSimplePolygon([]), false);
+  assert.equal(isSimplePolygon([square[0]]), false);
+  assert.equal(isSimplePolygon([square[0], square[1]]), false);
+});
+
+test("isSimplePolygon: en konkav (L-formet), men ikke-selvskjærende form er enkel", () => {
+  const lShape = [
+    { latitude: 60.0, longitude: 10.0 },
+    { latitude: 60.0, longitude: 10.2 },
+    { latitude: 60.1, longitude: 10.2 },
+    { latitude: 60.1, longitude: 10.1 },
+    { latitude: 60.2, longitude: 10.1 },
+    { latitude: 60.2, longitude: 10.0 },
+  ];
+  assert.equal(isSimplePolygon(lShape), true);
+});
+
+// ---------------------------------------------------------------------------
+// boundingCircle
+// ---------------------------------------------------------------------------
+
+test("boundingCircle: alle hjørner i en firkant ligger innenfor den returnerte sirkelen", () => {
+  const { center, radiusMeters } = boundingCircle(square);
+  for (const p of square) {
+    assert.ok(distanceMeters(center, p) <= radiusMeters + 0.01, `hjørne ${JSON.stringify(p)} skal ligge innenfor radius ${radiusMeters}`);
+  }
+});
+
+test("boundingCircle: tomt polygon gir radius 0 i stedet for NaN/krasj", () => {
+  const { radiusMeters } = boundingCircle([]);
+  assert.equal(radiusMeters, 0);
+});
+
+test("boundingCircle: et polygon med ett punkt gir radius 0 og senter i punktet selv", () => {
+  const p = { latitude: 60.1, longitude: 10.1 };
+  const { center, radiusMeters } = boundingCircle([p]);
+  assert.equal(radiusMeters, 0);
+  assert.deepEqual(center, p);
 });

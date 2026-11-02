@@ -59,7 +59,10 @@ import {
 } from "@/src/lib/aktivitet";
 import {
   anonymiserPosisjon,
+  boundingCircle,
   buildSector,
+  isPointInPolygon,
+  isSimplePolygon,
   movePoint,
 } from "@/src/lib/geo";
 import { applyHeatmapRenderWeight } from "@/src/lib/heatmapRender";
@@ -1029,6 +1032,89 @@ export default function KartScreen() {
     [obsMedGps]
   );
 
+  // BUG 4 (V1.5) — jaktområde-polygon. Følger NØYAKTIG samme disiplin som
+  // `analysisAnchor` under: settes KUN av et eksplisitt brukertrykk
+  // ("Analyser området", se bekreftHuntArea() under), ALDRI av panorering/
+  // zoom. `huntAreaDraftPoints` er hjørnene brukeren har plassert SÅ FAR
+  // under selve tegningen (tømmes når tegningen avsluttes/avbrytes/
+  // bekreftes); `huntAreaPolygon` er det FERDIGE, bekreftede området en
+  // motorkjøring faktisk ble begrenset til. Adskilt fra `analysisAnchor` med
+  // vilje — de har forskjellig livssyklus og form (sirkel vs. polygon), og
+  // den ambiente viewport-/anker-drevne analysen skal fortsette å fungere
+  // helt uendret når ingen jaktområde er satt.
+  const [huntAreaPolygon, setHuntAreaPolygon] = useState<LatLng[] | null>(null);
+  const [huntAreaDraftPoints, setHuntAreaDraftPoints] = useState<LatLng[]>([]);
+  const [isDrawingHuntArea, setIsDrawingHuntArea] = useState(false);
+  const [huntAreaError, setHuntAreaError] = useState<string | null>(null);
+  /** Hvilken sone (blant de polygon-begrensede) en åpen jaktplan gjelder for — se huntPlanZone under. Separat fra den ambiente huntPlanZoneId: et nytt jaktområde gir alltid en FERSK motorkjøring, se reset-effekten under. */
+  const [huntAreaPlanZoneId, setHuntAreaPlanZoneId] = useState<string | null>(null);
+
+  function startTegnJaktomrade() {
+    setHuntAreaPolygon(null);
+    setHuntAreaDraftPoints([]);
+    setHuntAreaError(null);
+    setHuntAreaPlanZoneId(null);
+    setIsDrawingHuntArea(true);
+  }
+
+  function avbrytTegnJaktomrade() {
+    setIsDrawingHuntArea(false);
+    setHuntAreaDraftPoints([]);
+    setHuntAreaError(null);
+  }
+
+  function leggTilJaktomradeHjorne(punkt: LatLng) {
+    setHuntAreaDraftPoints((prev) => {
+      if (prev.length > 0) {
+        const forrige = prev[prev.length - 1];
+        // Ignorer trykk for nær forrige hjørne — en null-lengde kant gir
+        // ingen meningsfull form og kan forvirre isSimplePolygon() under.
+        const dist = Math.hypot(punkt.latitude - forrige.latitude, punkt.longitude - forrige.longitude);
+        if (dist < 0.00002) return prev; // ~under 2 m
+      }
+      const neste = [...prev, punkt];
+      if (neste.length >= 3 && !isSimplePolygon(neste)) {
+        // Et hjørne som ville krysset en eksisterende kant (en "bowtie") gir
+        // ikke et entydig inni/utenfor — avvis hjørnet, behold formen som den var.
+        setHuntAreaError("Det hjørnet ville krysset en kant du allerede har tegnet — prøv et annet punkt.");
+        return prev;
+      }
+      setHuntAreaError(null);
+      return neste;
+    });
+  }
+
+  function fjernSisteJaktomradeHjorne() {
+    setHuntAreaError(null);
+    setHuntAreaDraftPoints((prev) => prev.slice(0, -1));
+  }
+
+  /** Eneste sted huntAreaPolygon settes — se filkommentaren over state-deklarasjonen. */
+  function bekreftJaktomrade() {
+    if (huntAreaDraftPoints.length < 3) return;
+    if (!isSimplePolygon(huntAreaDraftPoints)) {
+      setHuntAreaError("Området er ugyldig (kantene krysser hverandre) — fjern siste hjørne og prøv igjen.");
+      return;
+    }
+    const { radiusMeters } = boundingCircle(huntAreaDraftPoints);
+    if (radiusMeters > MAX_ANALYSIS_RADIUS_METERS) {
+      setHuntAreaError(
+        `Jaktområdet er for stort (maks ca. ${Math.round(MAX_ANALYSIS_RADIUS_METERS / 1000)} km radius) — tegn et mindre område.`
+      );
+      return;
+    }
+    setHuntAreaPolygon(huntAreaDraftPoints);
+    setHuntAreaDraftPoints([]);
+    setIsDrawingHuntArea(false);
+    setHuntAreaError(null);
+  }
+
+  function avsluttJaktomrade() {
+    setHuntAreaPolygon(null);
+    setHuntAreaPlanZoneId(null);
+    setHuntAreaError(null);
+  }
+
   // V1.5 KORRIGERING (produktregel, absolutt — se src/lib/analysisAnchor.ts
   // sin filkommentar for hele historikken): V1.3s geografiske hysterese
   // reduserte "prediksjonen hopper ved panorering" til KUN å skje ved en STOR
@@ -1256,6 +1342,118 @@ export default function KartScreen() {
     return { besteMotorSone: beste, heatmapPerArt: heatmap };
   }, [observasjonerITidsvindu, environmentResolver, analyseSenter, analyseRadiusMeter]);
 
+  // BUG 4 (V1.5) — jaktområde-polygon. EKSAKT samme mønster/motorkall som
+  // heatmapPerArt over (alle fire arter, samme runEngine/runEcologicalEngine,
+  // samme "beste sone vinner"-logikk) — eneste forskjell er at `areaCenter`/
+  // `areaRadiusMeters` kommer fra en omsluttende sirkel rundt POLYGONET (ikke
+  // fra analysisAnchor/viewport) OG at `huntAreaPolygon` sendes med, slik at
+  // engine.ts filtrerer de allerede scorede rutene til polygonets innside
+  // FØR klynging (se engine.ts/huntArea.test.ts). INGEN egen parallell
+  // motor — kun en ekstra, valgfri inngang til den samme. Denne beregningen
+  // kjører KUN når huntAreaPolygon faktisk er satt (eksplisitt brukertrykk,
+  // se bekreftJaktomrade over) — null endring i den ambiente analysen over.
+  const huntAreaBoundingCircle = useMemo(
+    () => (huntAreaPolygon ? boundingCircle(huntAreaPolygon) : null),
+    [huntAreaPolygon]
+  );
+
+  const { huntAreaZones, huntAreaHeatmapPerArt, huntAreaTooSmall } = useMemo(() => {
+    if (!huntAreaPolygon || !huntAreaBoundingCircle) {
+      return { huntAreaZones: [] as PredictionZone[], huntAreaHeatmapPerArt: {} as typeof heatmapPerArt, huntAreaTooSmall: false };
+    }
+    const motorArter: Record<string, EngineSpecies> = { Hjort: "hjort", Rådyr: "radyr", Elg: "elg", Rev: "annet" };
+    const heatmap: typeof heatmapPerArt = {};
+    const zones: PredictionZone[] = [];
+    let noeTraff = false;
+
+    for (const dyr of dyrListe) {
+      const motorArt = motorArter[dyr];
+      const resultat = environmentResolver
+        ? runEcologicalEngine(observasjonerITidsvindu, motorArt, {
+            areaCenter: huntAreaBoundingCircle.center,
+            areaRadiusMeters: huntAreaBoundingCircle.radiusMeters,
+            environment: environmentResolver,
+            huntAreaPolygon,
+            debug: __DEV__,
+          })
+        : runEngine(observasjonerITidsvindu, motorArt, { huntAreaPolygon, debug: __DEV__ });
+
+      if ((resultat.huntArea?.matchedCellCount ?? 0) > 0) noeTraff = true;
+      const sone = resultat.zones[0] ?? null;
+      heatmap[dyr] = { species: motorArt, points: resultat.heatmapPoints, zone: sone, result: resultat };
+      zones.push(...resultat.zones);
+    }
+
+    zones.sort((a, b) => b.score - a.score);
+    return { huntAreaZones: zones.slice(0, MAX_VISIBLE_ZONES), huntAreaHeatmapPerArt: heatmap, huntAreaTooSmall: !noeTraff };
+  }, [huntAreaPolygon, huntAreaBoundingCircle, observasjonerITidsvindu, environmentResolver]);
+
+  // Samme "Alle"/art-filter-logikk som aktivHeatmap over, men for det
+  // polygon-begrensede resultatet.
+  const huntAreaAktivHeatmap = useMemo(() => {
+    if (aktivtFilter !== "Alle") return huntAreaHeatmapPerArt[aktivtFilter] ?? null;
+    const besteDyr = dyrListe.find((d) => huntAreaHeatmapPerArt[d]?.species && huntAreaZones[0]?.species === huntAreaHeatmapPerArt[d]?.species);
+    return besteDyr ? huntAreaHeatmapPerArt[besteDyr] ?? null : null;
+  }, [aktivtFilter, huntAreaHeatmapPerArt, huntAreaZones]);
+
+  const huntAreaHeatmapRenderPoints = useMemo(
+    () => (huntAreaAktivHeatmap ? applyHeatmapRenderWeight(huntAreaAktivHeatmap.points) : []),
+    [huntAreaAktivHeatmap]
+  );
+
+  // Et NYTT jaktområde er alltid en FERSK motorkjøring — en tidligere valgt
+  // sone-id kan (akkurat som analysisAnchor-bytte over) ved et uhell matche
+  // en ny, geografisk helt annerledes sone med samme indeksbaserte id.
+  useEffect(() => {
+    setHuntAreaPlanZoneId(null);
+  }, [huntAreaPolygon]);
+
+  // huntArea.matchedCellCount===0 (se engine/types.ts sin dokumentasjon) MÅ
+  // varsles EKSPLISITT — en stille tom sone-liste her ville sett identisk ut
+  // som "ingen dyreaktivitet", mens den faktiske årsaken er at området er
+  // for lite/tynt for dagens celleoppløsning. Varsler maks én gang per
+  // bekreftet område (ikke per render).
+  const huntAreaTooSmallWarnedForRef = useRef<LatLng[] | null>(null);
+  useEffect(() => {
+    if (!huntAreaPolygon || !huntAreaTooSmall) return;
+    if (huntAreaTooSmallWarnedForRef.current === huntAreaPolygon) return;
+    huntAreaTooSmallWarnedForRef.current = huntAreaPolygon;
+    visAlert(
+      "Området er for lite til å analyseres",
+      "Jaktområdet du tegnet var for lite/tynt til at motoren traff noen rute med dagens oppløsning — ikke et tegn på at det ikke finnes dyr der. Prøv et litt større eller bredere område."
+    );
+  }, [huntAreaPolygon, huntAreaTooSmall]);
+
+  /** BUG 4 (V1.5): "relevante kameraer/observasjoner" — når et jaktområde er satt, vis kun markører INNENFOR det; uendret (alt vises) når ingen polygon er aktivt. */
+  function erRelevantForJaktomrade(coord: LatLng): boolean {
+    return !huntAreaPolygon || isPointInPolygon(coord, huntAreaPolygon);
+  }
+
+  function huntAreaGeneratedAtForSpecies(species: EngineSpecies): number | null {
+    const dyr = dyrListe.find((d) => huntAreaHeatmapPerArt[d]?.species === species);
+    return dyr ? huntAreaHeatmapPerArt[dyr]?.result.generatedAt ?? null : null;
+  }
+
+  // Samme glatting som smoothedFootprintByZone over, for det polygon-
+  // begrensede resultatet. Nøkkelen er rett og slett `sone.id` (ikke en
+  // zoneIdentity()-lignende sammensatt nøkkel) — et nytt jaktområde gir
+  // ALLTID en fersk motorkjøring (se reset-effekten over), så id-kollisjon
+  // på tvers av to ulike polygon-analyser kan ikke oppstå i praksis her.
+  const huntAreaSmoothedFootprintByZone = useMemo(() => {
+    const map = new Map<string, LatLng[]>();
+    for (const sone of huntAreaZones) {
+      const hull = sone.footprint?.hull;
+      if (hull && hull.length >= 3) map.set(sone.id, smoothPolygonRing(hull));
+    }
+    return map;
+  }, [huntAreaZones]);
+
+  /** Åpner jaktplanen for en sone funnet INNENFOR det tegnede jaktområdet — se apneJaktplan() for den ambiente ekvivalenten. */
+  function apneJaktplanForOmrade(sone: PredictionZone) {
+    setHuntAreaPlanZoneId(sone.id);
+    setHuntPlanTargetMs(Date.now());
+  }
+
   // V1.2 Steg 6: Kart er skrive-siden av den delte Intelligence-cachen
   // (resultCache.ts) — Hjem og Jakt leser herfra i stedet for å kjøre sin
   // egen (potensielt avvikende) motor på de samme observasjonene, se §17–19
@@ -1438,13 +1636,20 @@ export default function KartScreen() {
   // ── HuntPlan (§3.1): sonen en åpen jaktplan gjelder for — slått opp i
   // SAMME ferske visteHotspots-liste som hotspotSone over, ikke en frossen
   // kopi fra da knappen ble trykket.
-  const huntPlanZone = useMemo(
-    () => (huntPlanZoneId ? visteHotspots.find((s) => zoneIdentity(s) === huntPlanZoneId) ?? null : null),
-    [huntPlanZoneId, visteHotspots, aktivHeatmap, heatmapPerArt]
-  );
+  //
+  // BUG 4 (V1.5): `huntAreaPlanZoneId` (polygon-begrenset jaktplan, se
+  // apneJaktplanForOmrade over) sjekkes FØRST — når den er satt kommer
+  // sonen fra `huntAreaZones` i stedet for den ambiente `visteHotspots`.
+  // De to er aldri satt samtidig (begge "åpne jaktplan"-settere nuller
+  // alltid den andre, se apneJaktplan/apneJaktplanForOmrade/lukkJaktplan),
+  // men sjekken er eksplisitt uansett — ikke avhengig av den garantien alene.
+  const huntPlanZone = useMemo(() => {
+    if (huntAreaPlanZoneId) return huntAreaZones.find((s) => s.id === huntAreaPlanZoneId) ?? null;
+    return huntPlanZoneId ? visteHotspots.find((s) => zoneIdentity(s) === huntPlanZoneId) ?? null : null;
+  }, [huntPlanZoneId, huntAreaPlanZoneId, visteHotspots, huntAreaZones, aktivHeatmap, heatmapPerArt]);
   // §3.16: styrer kartets "kun ÉN sones detaljer om gangen"-modus mens en
   // jaktplan er åpen — se overlay-filtrene i JSX-en under.
-  const erJaktplanAktiv = huntPlanZoneId !== null;
+  const erJaktplanAktiv = huntPlanZoneId !== null || huntAreaPlanZoneId !== null;
 
   // Motoren krever et løst EnvironmentResolver-oppslag (samme forutsetning
   // som den økologiske motoren over) — når det mangler (f.eks. "Prediksjon"
@@ -1459,17 +1664,18 @@ export default function KartScreen() {
   // huntPlan.ts), ikke Date.now(). aktivHeatmap.result er den kjøringen NÅR
   // artsfilteret matcher; ellers slås heatmapPerArt opp direkte på art
   // (dekker fallback-grenen der visteHotspots kommer fra besteMotorSone).
-  const huntPlanEngineResultGeneratedAt = useMemo(
-    () => (huntPlanZone ? generatedAtForSpecies(huntPlanZone.species) : null),
-    [huntPlanZone, aktivHeatmap, heatmapPerArt]
-  );
+  const huntPlanEngineResultGeneratedAt = useMemo(() => {
+    if (!huntPlanZone) return null;
+    return huntAreaPlanZoneId ? huntAreaGeneratedAtForSpecies(huntPlanZone.species) : generatedAtForSpecies(huntPlanZone.species);
+  }, [huntPlanZone, huntAreaPlanZoneId, aktivHeatmap, heatmapPerArt, huntAreaHeatmapPerArt]);
 
   const huntPlan = useMemo<HuntPlan | null>(() => {
     if (!huntPlanZone || !environmentResolver || huntPlanEngineResultGeneratedAt == null) return null;
+    const alleSonerForPlan = huntAreaPlanZoneId ? huntAreaZones : visteHotspots;
     try {
       return buildHuntPlan(
         huntPlanZone,
-        visteHotspots,
+        alleSonerForPlan,
         environmentResolver(huntPlanZone.center),
         huntPlanTargetMs,
         huntPlanEngineResultGeneratedAt
@@ -1477,7 +1683,7 @@ export default function KartScreen() {
     } catch {
       return null;
     }
-  }, [huntPlanZone, visteHotspots, environmentResolver, huntPlanTargetMs, huntPlanEngineResultGeneratedAt]);
+  }, [huntPlanZone, huntAreaPlanZoneId, visteHotspots, huntAreaZones, environmentResolver, huntPlanTargetMs, huntPlanEngineResultGeneratedAt]);
 
   function apneJaktplan(sone: PredictionZone) {
     setHuntPlanZoneId(zoneIdentity(sone));
@@ -1486,62 +1692,34 @@ export default function KartScreen() {
 
   function lukkJaktplan() {
     setHuntPlanZoneId(null);
+    setHuntAreaPlanZoneId(null);
   }
 
-  // Jaktplan-produktflyt-oppdraget §1/§2: "Planlegg jakten" fra Jakt-fanen
-  // sender `openPlan=1` sammen med de allerede eksisterende focusLat/focusLng/
-  // filter/heatmap-parameterne (se den eksisterende fokuserings-effekten over)
-  // — denne effekten åpner Jaktplan-arket for `hotspotSone` (samme "beste
-  // synlige sone"-kilde som resten av kartet allerede bruker, nå riktig
-  // artsfiltrert siden `aktivtFilter` allerede leses fra `params.filter` ved
-  // mount) automatisk ÉN gang, via SAMME apneJaktplan()/HuntPlanPanel som det
-  // manuelle "Planlegg jakt her"-trykket på en sone bruker — ingen ny
-  // Jaktplan-vei, kun en ekstra automatisk trigger av den eksisterende. Ren
-  // ledningstrekking: ingen ny motor-/utregningslogikk. `autoOpenedPlanRef`
-  // sikrer at dette skjer maks ÉN gang per navigasjon hit — uten den ville
-  // enhver senere re-render (f.eks. etter at brukeren selv lukker arket)
-  // risikere å åpne det på nytt av seg selv, som ville vært uventet/irriterende
-  // UX. Uten `openPlan=1` i URL-en (den vanlige "trykk på Kart-fanen"-veien,
-  // eller den eksisterende "Se på kart"-lenken) gjør denne effekten
-  // ingenting — kartet oppfører seg nøyaktig som før.
-  const autoOpenedPlanRef = useRef(false);
+  // BUG 4 (V1.5) — KORRIGERT FLYT: "Planlegg jakten" fra Jakt-fanen sender
+  // `openPlan=1` (se den eksisterende fokuserings-effekten over). Denne
+  // åpnet TIDLIGERE Jaktplan-arket direkte for `hotspotSone` — DEN AMBIENTE,
+  // viewport-/anker-drevne "beste sone i hele det synlige kartutsnittet",
+  // ikke et område brukeren selv har valgt. Per oppdraget ("appen må IKKE
+  // umiddelbart analysere hele det synlige kartet") går denne effekten nå i
+  // stedet inn i jaktområde-TEGNEMODUS — selve jaktplanen åpnes først etter
+  // at brukeren har tegnet et område og trykket "Analyser området" (se
+  // bekreftJaktomrade/apneJaktplanForOmrade over). `autoStartedDrawRef`
+  // sikrer at dette skjer maks ÉN gang per navigasjon hit, av samme grunn
+  // som før: uten den ville en senere re-render (f.eks. etter at brukeren
+  // selv avbryter tegningen) risikere å starte den på nytt av seg selv.
+  // Uten `openPlan=1` i URL-en gjør denne effekten ingenting — den
+  // eksisterende "trykk på en hotspot → Planlegg jakt her"-veien
+  // (apneJaktplan, uendret) er IKKE påvirket av dette.
+  const autoStartedDrawRef = useRef(false);
   useEffect(() => {
     if (params.openPlan !== "1") return;
-    if (autoOpenedPlanRef.current) return;
-    if (!hotspotSone) return;
-    autoOpenedPlanRef.current = true;
-    // Feltrapport (fysisk enhet, V1.3): "Planlegg jakten stenger med en
-    // gang" — arket blinket opp og lukket seg selv momentant. Mistenkt
-    // årsak: samme trykk som navigerte HIT (fra "Planlegg jakten"-knappen
-    // på forrige skjerm) kan rekke å bli levert en gang til idet
-    // ModalSheet sin fullskjerm-bakgrunn (`onPress={onClose}`, se
-    // ModalSheet.tsx) monteres rett oppå samme skjermposisjon — en kjent
-    // kategori "touch bleed-through"-feil ved navigasjon+auto-åpnet modal i
-    // samme gest. En kort forsinkelse før selve åpningen lar det opprinnelige
-    // trykket rekke å avslutte før bakgrunnen blir trykkbar.
-    const t = setTimeout(() => apneJaktplan(hotspotSone), 400);
-    return () => clearTimeout(t);
-  }, [params.openPlan, hotspotSone]);
-
-  // Feltrapport (fysisk enhet, V1.3): "Planlegg jakten" ga verken feilmelding
-  // eller noe merket på kartet — ingen indikasjon på HVORFOR (f.eks. manglende
-  // posisjon/miljødata gjør at `hotspotSone` aldri blir noe, se visteHotspots/
-  // besteMotorSone over). Stille ingenting er alltid en dårlig sluttilstand,
-  // uansett underliggende årsak — denne varsler ÆRLIG (ikke en oppdiktet
-  // forklaring) hvis ingen sone dukket opp innen rimelig tid, i stedet for at
-  // brukeren står igjen uten noe å gå videre på. Varsler maks ÉN gang per
-  // navigasjon hit, og ALDRI hvis planen faktisk åpnet seg i mellomtiden.
-  const openPlanTimeoutWarnedRef = useRef(false);
-  useEffect(() => {
-    if (params.openPlan !== "1") return;
-    const t = setTimeout(() => {
-      if (autoOpenedPlanRef.current || openPlanTimeoutWarnedRef.current) return;
-      openPlanTimeoutWarnedRef.current = true;
-      visAlert(
-        "Fant ingen sone ennå",
-        "ViltIQ har ikke nok grunnlag (posisjon/miljødata/observasjoner) til å foreslå en jaktplan for området akkurat nå. Sjekk at posisjon er aktivert, og prøv «Analyser dette området» på kartet."
-      );
-    }, 10000);
+    if (autoStartedDrawRef.current) return;
+    autoStartedDrawRef.current = true;
+    // Samme "touch bleed-through ved navigasjon+modal i samme gest"-fiks som
+    // tidligere versjon av denne effekten brukte (feltrapport, fysisk
+    // enhet, V1.3) — fortsatt relevant: ModalSheet-lignende overlegg kan
+    // fremdeles være involvert i selve banneret under.
+    const t = setTimeout(() => startTegnJaktomrade(), 400);
     return () => clearTimeout(t);
   }, [params.openPlan]);
 
@@ -1695,8 +1873,11 @@ export default function KartScreen() {
             showsUserLocation
             showsMyLocationButton={false}
             showPropertyBoundaries={visEiendomsgrenser}
-            onLongPress={handleMapLongPress}
-            onPress={() => {
+            onLongPress={(e) => {
+              if (isDrawingHuntArea) return; // BUG 4: tegnemodus bruker trykk til hjørner, ikke "legg til nytt punkt"-menyen
+              handleMapLongPress(e);
+            }}
+            onPress={(e) => {
               // Feltrapport (fysisk enhet, V1.3): på iOS + Google Maps kan et
               // trykk på en markør rekke å nå kartets EGEN (separate, native)
               // trykk-gjenkjenner også — uten denne vakten ville det
@@ -1705,6 +1886,13 @@ export default function KartScreen() {
               // rekker å vises. Se components/ui/Marker.tsx sin
               // wasMarkerJustPressed for begrunnelsen.
               if (wasMarkerJustPressed()) return;
+              // BUG 4 (V1.5): i tegnemodus legger hvert kart-trykk til et nytt
+              // polygon-hjørne i stedet for den vanlige "lukk valgt kamera/
+              // panel"-oppførselen.
+              if (isDrawingHuntArea) {
+                leggTilJaktomradeHjorne(e.nativeEvent.coordinate);
+                return;
+              }
               setSelectedCamera(null);
               filterOpenSet(false);
             }}
@@ -1741,7 +1929,7 @@ export default function KartScreen() {
                 Maps' HeatmapTileProvider via react-native-maps på native).
                 Se components/LeafletMapImpl.tsx sin Heatmap-komponent for
                 web-implementasjonen. */}
-            {visPrediksjon && !erJaktplanAktiv && heatmapRenderPoints.length > 0 && (
+            {visPrediksjon && !erJaktplanAktiv && !huntAreaPolygon && heatmapRenderPoints.length > 0 && (
               <Heatmap
                 points={heatmapRenderPoints}
                 radius={HEATMAP_POINT_RADIUS}
@@ -1751,6 +1939,38 @@ export default function KartScreen() {
                 // resultatet — kun dempet ved REN terrengantakelse, se
                 // heatmapErRentTerrengbasert over.
                 opacity={heatmapErRentTerrengbasert ? 0.55 : undefined}
+              />
+            )}
+
+            {/* BUG 4 (V1.5): et bekreftet jaktområde viser KUN sin EGEN,
+                polygon-begrensede heatmap/analyse — den ambiente over er
+                allerede skjult (huntAreaPolygon-sjekken rett over) nøyaktig
+                slik oppdraget krever ("kun området brukeren har definert"). */}
+            {visPrediksjon && huntAreaPolygon && !erJaktplanAktiv && huntAreaHeatmapRenderPoints.length > 0 && (
+              <Heatmap
+                points={huntAreaHeatmapRenderPoints}
+                radius={HEATMAP_POINT_RADIUS}
+                gradient={heatmapGradientProp}
+              />
+            )}
+
+            {/* BUG 4 (V1.5): jaktområdets egen grense — tegnes BÅDE under
+                tegning (foreløpige hjørner, stiplet) og etter bekreftelse
+                (ferdig polygon). */}
+            {isDrawingHuntArea && huntAreaDraftPoints.length >= 2 && (
+              <Polygon
+                coordinates={huntAreaDraftPoints}
+                strokeColor={uiColor.primary}
+                strokeWidth={2.5}
+                fillColor={uiColor.primary + "1F"}
+              />
+            )}
+            {huntAreaPolygon && (
+              <Polygon
+                coordinates={huntAreaPolygon}
+                strokeColor={uiColor.primary}
+                strokeWidth={2.5}
+                fillColor="transparent"
               />
             )}
 
@@ -1802,7 +2022,10 @@ export default function KartScreen() {
             {/* HuntPlan-oppdraget §3.16: mens en plan er åpen vises KUN den
                 planlagte sonens polygon/ring, ikke de andre 1–4 sonene —
                 "ikke vis 25 overlays samtidig". */}
-            {(erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
+            {/* BUG 4 (V1.5): skjult når et jaktområde-polygon er aktivt — se
+                huntAreaZones-blokken under for den polygon-begrensede
+                ekvivalenten av akkurat denne renderingen. */}
+            {!huntAreaPolygon && (erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
               const hull = smoothedFootprintByZone.get(zoneIdentity(sone));
               if (!hull || hull.length < 3) return null;
               const rank = sone.rank ?? 1;
@@ -1814,6 +2037,28 @@ export default function KartScreen() {
                   coordinates={hull}
                   strokeColor={tier.strokeColor}
                   strokeWidth={erValgtFootprint ? tier.strokeWidth + 0.75 : tier.strokeWidth}
+                  fillColor={tier.fillColor}
+                  lineDashPattern={tier.lineDashPattern}
+                />
+              );
+            })}
+
+            {/* BUG 4 (V1.5): polygon-begrensede sone-footprints — samme
+                visuelle språk (zoneTierStyle) som den ambiente ekvivalenten
+                over, kun fra huntAreaZones i stedet for visteHotspots. Mens
+                en jaktplan er åpen for ÉN av disse sonene vises (samme
+                "ikke 25 overlays samtidig"-regel) kun den. */}
+            {(erJaktplanAktiv && huntAreaPlanZoneId ? huntAreaZones.filter((s) => s.id === huntAreaPlanZoneId) : huntAreaPolygon ? huntAreaZones : []).map((sone) => {
+              const hull = huntAreaSmoothedFootprintByZone.get(sone.id);
+              if (!hull || hull.length < 3) return null;
+              const rank = sone.rank ?? 1;
+              const tier = zoneTierStyle(rank, sone.predictionMode);
+              return (
+                <Polygon
+                  key={`huntarea-footprint-${sone.id}`}
+                  coordinates={hull}
+                  strokeColor={tier.strokeColor}
+                  strokeWidth={tier.strokeWidth}
                   fillColor={tier.fillColor}
                   lineDashPattern={tier.lineDashPattern}
                 />
@@ -1837,7 +2082,7 @@ export default function KartScreen() {
                 soner (også #1), og #1 får i tillegg en liten "ANBEFALT"-
                 merkelapp — rangeringen skal være øyeblikkelig synlig, ikke
                 noe brukeren må trykke seg frem til for å oppdage. */}
-            {(erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
+            {!huntAreaPolygon && (erJaktplanAktiv ? visteHotspots.filter((s) => zoneIdentity(s) === huntPlanZoneId) : visteHotspots).map((sone) => {
               const rank = sone.rank ?? 1;
               const tier = zoneTierStyle(rank, sone.predictionMode);
               const erValgt = sone.id === hotspotSone?.id;
@@ -1874,11 +2119,52 @@ export default function KartScreen() {
               );
             })}
 
+            {/* BUG 4 (V1.5): polygon-begrensede hotspot-ringer — ETT trykk
+                åpner jaktplanen direkte for den sonen (apneJaktplanForOmrade),
+                i stedet for den ambiente to-trinns "velg → Planlegg jakt
+                her"-flyten. Enklere UX er riktig her: brukeren har allerede
+                gjort det tyngste valget (tegnet SITT område), og postene
+                vist er allerede garantert innenfor det — se
+                engine/huntArea.test.ts. */}
+            {huntAreaPolygon && !(erJaktplanAktiv && huntAreaPlanZoneId) && huntAreaZones.map((sone) => {
+              const rank = sone.rank ?? 1;
+              const tier = zoneTierStyle(rank, sone.predictionMode);
+              return (
+                <StableMarker
+                  key={`huntarea-ring-${sone.id}`}
+                  coordinate={{ latitude: sone.center.latitude, longitude: sone.center.longitude }}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  onPress={() => apneJaktplanForOmrade(sone)}
+                >
+                  <View style={styles.hotspotRingWrap}>
+                    <MarkerRing variant="hotspot" size={tier.ringSize} color={tier.ringColor} />
+                  </View>
+                  <View style={[styles.hotspotScoreBadge, rank > 1 && styles.hotspotScoreBadgeSecondary]} pointerEvents="none">
+                    <Text style={styles.hotspotScoreText}>#{rank} · {Math.round(sone.score)}</Text>
+                  </View>
+                  {rank === 1 && (
+                    <View style={styles.hotspotAnbefaltWrap} pointerEvents="none">
+                      <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>
+                    </View>
+                  )}
+                </StableMarker>
+              );
+            })}
+
+            {/* BUG 4 (V1.5): hjørnene brukeren har plassert SÅ FAR under
+                tegning — enkle punkt-markører, samme 📍-emoji-språk som
+                resten av kartet (BUG 3). */}
+            {isDrawingHuntArea && huntAreaDraftPoints.map((p, i) => (
+              <StableMarker key={`huntarea-draft-${i}`} coordinate={p} anchor={{ x: 0.5, y: 0.5 }}>
+                <MarkerBadge kind="candidate" size="sm" emoji="📍" />
+              </StableMarker>
+            ))}
+
             {/* Observasjonsmarkører — dyr sett (manuelt/kamera). Sonesenteret
                 over er et beregnet grid-punkt fra motoren, ikke koordinatet
                 til en enkelt observasjon, så det er ikke lenger behov for å
                 filtrere bort en "sådde sonen"-observasjon her. */}
-            {visObservasjoner && !erJaktplanAktiv && dyrObsMedGps.map((o) => (
+            {visObservasjoner && !erJaktplanAktiv && dyrObsMedGps.filter((o) => erRelevantForJaktomrade({ latitude: o.latitude as number, longitude: o.longitude as number })).map((o) => (
               <StableMarker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
@@ -1897,7 +2183,7 @@ export default function KartScreen() {
             ))}
 
             {/* Sporregistreringer */}
-            {visSporAnnet && !erJaktplanAktiv && sporObsMedGps.map((o) => (
+            {visSporAnnet && !erJaktplanAktiv && sporObsMedGps.filter((o) => erRelevantForJaktomrade({ latitude: o.latitude as number, longitude: o.longitude as number })).map((o) => (
               <StableMarker
                 key={o.id}
                 coordinate={{ latitude: o.latitude as number, longitude: o.longitude as number }}
@@ -1911,7 +2197,7 @@ export default function KartScreen() {
             ))}
 
             {/* "Annet"-kartpunkter */}
-            {visSporAnnet && !erJaktplanAktiv && mapPoints.map((p) => (
+            {visSporAnnet && !erJaktplanAktiv && mapPoints.filter((p) => erRelevantForJaktomrade({ latitude: p.latitude, longitude: p.longitude })).map((p) => (
               <StableMarker
                 key={p.id}
                 coordinate={{ latitude: p.latitude, longitude: p.longitude }}
@@ -1940,7 +2226,7 @@ export default function KartScreen() {
                 StableMarker-tidsmønster som ALLE andre markører i denne
                 filen (hotspot/observasjon/spor/annet/party) allerede bruker
                 — tilbake til det etablerte mønsteret. */}
-            {visKameraer && !erJaktplanAktiv && kameraer.map((k) => (
+            {visKameraer && !erJaktplanAktiv && kameraer.filter((k) => erRelevantForJaktomrade({ latitude: k.latitude, longitude: k.longitude })).map((k) => (
               <StableMarker
                 key={k.id}
                 coordinate={{ latitude: k.latitude, longitude: k.longitude }}
@@ -2120,11 +2406,61 @@ export default function KartScreen() {
             denne knappen — trykket er obligatorisk. Skjult mens en jaktplan
             er åpen (samme "kun én sones detaljer om gangen"-filosofi som
             resten av §3.16-overlayene). */}
-        {kanReanalysereHer && !erJaktplanAktiv && !selectedPin && !selectedCamera && (
+        {kanReanalysereHer && !erJaktplanAktiv && !isDrawingHuntArea && !huntAreaPolygon && !selectedPin && !selectedCamera && (
           <View style={styles.reanalyserWrap} pointerEvents="box-none">
             <Pressable style={styles.reanalyserKnapp} onPress={reanalyserHer} hitSlop={4}>
               <Ionicons name="refresh-outline" size={16} color={uiColor.primaryText} />
               <Text style={styles.reanalyserKnappText}>Analyser dette området</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* BUG 4 (V1.5) — Steg 1/2 i den nye jaktplan-flyten: "Planlegg
+            jakten" går IKKE lenger rett til en ambient sone — kartet viser
+            først denne tydelige tilstanden og venter på at brukeren selv
+            definerer området. Trykk på kartet legger til hjørner (se
+            onPress over); banneret og kontrollene under er de ENESTE nye
+            UI-elementene denne featuren legger til. */}
+        {isDrawingHuntArea && (
+          <View style={styles.huntAreaBannerWrap} pointerEvents="box-none">
+            <Surface style={styles.huntAreaBanner} variant="elevated">
+              <Text style={styles.huntAreaBannerTitle}>Sett jaktområdet ditt på kartet</Text>
+              <Text style={styles.huntAreaBannerBody}>
+                {huntAreaError ?? "Trykk på kartet for å plassere hjørner. Minst 3 hjørner, så «Analyser området»."}
+              </Text>
+            </Surface>
+          </View>
+        )}
+        {isDrawingHuntArea && (
+          <View style={styles.huntAreaControlsWrap} pointerEvents="box-none">
+            <Pressable style={styles.huntAreaSecondaryKnapp} onPress={avbrytTegnJaktomrade} hitSlop={4}>
+              <Text style={styles.huntAreaSecondaryKnappText}>Avbryt</Text>
+            </Pressable>
+            {huntAreaDraftPoints.length > 0 && (
+              <Pressable style={styles.huntAreaSecondaryKnapp} onPress={fjernSisteJaktomradeHjorne} hitSlop={4}>
+                <Text style={styles.huntAreaSecondaryKnappText}>Fjern siste</Text>
+              </Pressable>
+            )}
+            <Pressable
+              style={[styles.huntAreaKnapp, huntAreaDraftPoints.length < 3 && styles.huntAreaKnappDisabled]}
+              onPress={bekreftJaktomrade}
+              disabled={huntAreaDraftPoints.length < 3}
+              hitSlop={4}
+            >
+              <Ionicons name="checkmark-outline" size={16} color={uiColor.primaryText} />
+              <Text style={styles.huntAreaKnappText}>Analyser området</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Steg 3+ — jaktområdet er satt: en liten, alltid synlig kontroll
+            for å avslutte det igjen og gå tilbake til det ambiente kartet
+            (samme "kun ÉN ting om gangen"-filosofi som §3.16 ellers). */}
+        {huntAreaPolygon && !erJaktplanAktiv && !selectedPin && !selectedCamera && (
+          <View style={styles.reanalyserWrap} pointerEvents="box-none">
+            <Pressable style={styles.huntAreaSecondaryKnapp} onPress={avsluttJaktomrade} hitSlop={4}>
+              <Ionicons name="close-outline" size={16} color={uiColor.textPrimary} />
+              <Text style={styles.huntAreaSecondaryKnappText}>Avslutt jaktområde</Text>
             </Pressable>
           </View>
         )}
@@ -3295,6 +3631,40 @@ const styles = StyleSheet.create({
     ...uiElevation.floating,
   },
   reanalyserKnappText: { fontSize: 13, fontWeight: "800", color: uiColor.primaryText },
+
+  // BUG 4 (V1.5) — jaktområde-tegning. Banner øverst (samme "flytende
+  // instrument"-språk som reanalyserWrap, bare toppfestet og bredere siden
+  // den bærer en hel instruksjonssetning), kontroller nederst.
+  huntAreaBannerWrap: {
+    position: "absolute", left: 14, right: 14, top: 14,
+    zIndex: uiZ.panel,
+  },
+  huntAreaBanner: { padding: 14, gap: 4 },
+  huntAreaBannerTitle: { fontSize: 15, fontWeight: "800", color: uiColor.textPrimary },
+  huntAreaBannerBody: { fontSize: 13, color: uiColor.textSecondary, lineHeight: 18 },
+  huntAreaControlsWrap: {
+    position: "absolute", left: 0, right: 0, bottom: 92,
+    flexDirection: "row", justifyContent: "center", gap: 10,
+    zIndex: uiZ.panel,
+  },
+  huntAreaKnapp: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: uiColor.primary, borderRadius: uiRadius.pill,
+    paddingVertical: 10, paddingHorizontal: 18,
+    minHeight: minTouchTarget,
+    ...uiElevation.floating,
+  },
+  huntAreaKnappDisabled: { opacity: 0.4 },
+  huntAreaKnappText: { fontSize: 13, fontWeight: "800", color: uiColor.primaryText },
+  huntAreaSecondaryKnapp: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: uiGlass.controlBg, borderRadius: uiRadius.pill,
+    borderWidth: 1, borderColor: uiGlass.controlBorder,
+    paddingVertical: 10, paddingHorizontal: 16,
+    minHeight: minTouchTarget,
+    ...uiElevation.floating,
+  },
+  huntAreaSecondaryKnappText: { fontSize: 13, fontWeight: "800", color: uiColor.textPrimary },
 
   aktivLegend: {
     position: "absolute", left: 14, bottom: 130,

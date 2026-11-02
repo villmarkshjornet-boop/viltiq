@@ -172,7 +172,7 @@ function MapBridge({
 }: {
   onReady: (map: L.Map) => void;
   onLongPress?: (e: LongPressEvent) => void;
-  onPress?: () => void;
+  onPress?: (e: LongPressEvent) => void;
   onRegionChangeComplete?: (region: Region) => void;
 }) {
   const map = useMap();
@@ -243,7 +243,7 @@ function MapBridge({
   }, [map]);
 
   useMapEvents({
-    click: () => onPress?.(),
+    click: (e) => onPress?.({ nativeEvent: { coordinate: { latitude: e.latlng.lat, longitude: e.latlng.lng } } }),
     // Leaflet fyrer "contextmenu" både ved høyreklikk (desktop) og ved
     // langtrykk på berøringsskjermer — dette ER web sin ekvivalent til
     // react-native-maps sin onLongPress, ikke en tilnærming.

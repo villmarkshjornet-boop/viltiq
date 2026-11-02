@@ -21,7 +21,17 @@ export type MapViewProps = {
   showsUserLocation?: boolean;
   showsMyLocationButton?: boolean;
   onLongPress?: (e: LongPressEvent) => void;
-  onPress?: () => void;
+  /**
+   * BUG 4 (V1.5): utvidet fra `() => void` til å også bære koordinaten
+   * (samme `{nativeEvent:{coordinate}}`-form som onLongPress over) —
+   * nødvendig for jaktområde-tegning (hvert trykk legger til et polygon-
+   * hjørne på DET trykte punktet). Rent additivt: eksisterende handlere som
+   * ignorerer argumentet (f.eks. `onPress={() => {...}}` i kart.tsx) er
+   * fortsatt fullt gyldige — ingen eksisterende kallsted er endret av dette.
+   * Native (react-native-maps, se MapView.tsx) har ALLEREDE koordinaten i
+   * sitt eget onPress-event; det var kun web/Leaflet-siden som manglet den.
+   */
+  onPress?: (e: LongPressEvent) => void;
   /**
    * V1.2.2: fyres når brukeren er FERDIG å panorere/zoome (ikke per pixel
    * under selve draget) — native (react-native-maps) har dette innebygget,
