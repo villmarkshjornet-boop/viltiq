@@ -1906,7 +1906,7 @@ export default function KartScreen() {
                 description={o.kommentar || undefined}
                 onPress={() => bekreftSlettObservasjonFraKart(o)}
               >
-                <MarkerBadge kind="spor" size="sm" icon="paw-outline" />
+                <MarkerBadge kind="spor" size="sm" emoji="🐾" />
               </StableMarker>
             ))}
 
@@ -1919,7 +1919,7 @@ export default function KartScreen() {
                 title={p.label || p.pointType}
                 description={p.kommentar || undefined}
               >
-                <MarkerBadge kind="annet" size="sm" icon="pricetag-outline" />
+                <MarkerBadge kind="annet" size="sm" emoji="🏷️" />
               </StableMarker>
             ))}
 
@@ -1951,14 +1951,17 @@ export default function KartScreen() {
                   setSelectedPin(null);
                 }}
               >
-                <MarkerBadge kind="kamera" size="md" icon="camera" />
+                <MarkerBadge kind="kamera" size="md" emoji="📷" />
+                {/* §bugrapport "ikke med kodelås og sånt": samme begrunnelse
+                    som resten av markørene over — Unicode-pil i stedet for
+                    en Ionicons-glyff her, for å unngå den samme
+                    skrift-i-snapshot-risikoen inni en markør. */}
                 <View style={styles.cameraDirArrowWrap} pointerEvents="none">
-                  <Ionicons
-                    name="navigate"
-                    size={14}
-                    color={uiColor.info}
-                    style={{ transform: [{ rotate: `${k.directionDegrees}deg` }] }}
-                  />
+                  <Text
+                    style={[styles.cameraDirArrowText, { transform: [{ rotate: `${k.directionDegrees}deg` }] }]}
+                  >
+                    ⬆
+                  </Text>
                 </View>
               </StableMarker>
             ))}
@@ -3231,6 +3234,7 @@ const styles = StyleSheet.create({
     position: "absolute", top: -18, left: -20, right: -20,
     alignItems: "center", justifyContent: "center",
   },
+  cameraDirArrowText: { fontSize: 14, fontWeight: "900", color: uiColor.info },
   // HuntPlan-oppdraget §3.16: distinkt "sikte"-markør for det anbefalte
   // punktet — bevisst ULIK sonens egen rangerings-ring (MarkerRing) og
   // ULIK candidate-pinnen (MarkerBadge), slik at "anbefalt STÅSTED" aldri
