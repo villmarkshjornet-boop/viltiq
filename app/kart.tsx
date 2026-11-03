@@ -89,7 +89,7 @@ import {
   logIntelligenceDebug,
 } from "@/src/engine";
 import { setCachedIntelligenceResult, getCachedIntelligenceResult } from "@/src/engine/resultCache";
-import { zoneVisualWeight, scaleHexAlpha, smoothPolygonRing } from "@/src/lib/zonePresentation";
+import { zoneVisualWeight, scaleHexAlpha, smoothPolygonRing, PREDICTION_MODE_LABEL } from "@/src/lib/zonePresentation";
 import { savePredictionSnapshot } from "@/src/services/predictions";
 // HuntPlan-oppdraget (§3): buildHuntPlan()/HuntPlan bygges av en parallell
 // motoroppgave i src/engine/huntPlan.ts (NY fil — kart.tsx eier kun
@@ -1636,6 +1636,17 @@ export default function KartScreen() {
     [visteHotspots]
   );
 
+  // Launch-poleringsoppdraget §4: SAMME prinsipp som heatmapErRentTerrengbasert
+  // over, kun for det polygon-begrensede jaktområde-resultatet — denne fantes
+  // ikke før, og var derfor en reell inkonsistens: et jaktområde uten lokale
+  // data viste heatmapet sitt med FULL styrke mens det ambiente kartet
+  // allerede dempet akkurat samme situasjon. Ingen ny "confidence"-logikk —
+  // gjenbruker predictionMode, som motoren allerede klassifiserer per sone.
+  const huntAreaErRentTerrengbasert = useMemo(
+    () => huntAreaZones.length > 0 && huntAreaZones.every((s) => s.predictionMode === "environment_only"),
+    [huntAreaZones]
+  );
+
   // Kold-start-visningsoppdraget §8/§13: glatter det rå rutenett-omrisset
   // (zone.footprint.hull, se grid.ts sin gridBoundaryPolygon) til en rundere
   // kontur for RENDERING — samme geografiske utstrekning, ikke et nytt
@@ -1976,6 +1987,11 @@ export default function KartScreen() {
                 points={huntAreaHeatmapRenderPoints}
                 radius={HEATMAP_POINT_RADIUS}
                 gradient={heatmapGradientProp}
+                // Launch-poleringsoppdraget §4: samme demping som den ambiente
+                // heatmapen over (heatmapErRentTerrengbasert) — tidligere
+                // manglet denne helt her, så et jaktområde uten lokale data
+                // viste full styrke selv om det var ren terrenggjetning.
+                opacity={huntAreaErRentTerrengbasert ? 0.55 : undefined}
               />
             )}
 
@@ -2074,6 +2090,19 @@ export default function KartScreen() {
                 en jaktplan er åpen for ÉN av disse sonene vises (samme
                 "ikke 25 overlays samtidig"-regel) kun den. */}
             {(erJaktplanAktiv && huntAreaPlanZoneId ? huntAreaZones.filter((s) => s.id === huntAreaPlanZoneId) : huntAreaPolygon ? huntAreaZones : []).map((sone) => {
+              // Launch-poleringsoppdraget §3: en environment_only-sone i et
+              // tegnet jaktområde dekker i praksis nesten alltid størstedelen
+              // av området selv (se grid.ts sin extractZones()-dokumentasjon
+              // om flate miljø-platåer) — en EKSTRA taggete beregnet
+              // sonegrense oppå brukerens EGEN rene jaktområdegrense (tegnet
+              // lenger ned) skaper da to konkurrerende grenselinjer uten å
+              // tilføre informasjon. Brukerens egen grense + det dempede
+              // heatmap-fyllet (huntAreaErRentTerrengbasert over) er nok i
+              // dette tilfellet. En sone som faktisk er lokalt drevet
+              // (local_dominant/environment_plus_local) beholder konturen
+              // uendret — denne undertrykkingen er BEVISST betinget på
+              // predictionMode, ikke en generell fjerning av konturer.
+              if (sone.predictionMode === "environment_only") return null;
               const hull = huntAreaSmoothedFootprintByZone.get(sone.id);
               if (!hull || hull.length < 3) return null;
               const rank = sone.rank ?? 1;
@@ -2143,7 +2172,14 @@ export default function KartScreen() {
                         uansett rank — se hotspotMarkerOuter-kommentaren. */}
                     <View style={styles.hotspotAnbefaltRow}>
                       {rank === 1 && !(erJaktplanAktiv && zoneIdentity(sone) === huntPlanZoneId) && (
-                        <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>
+                        <Text
+                          style={[
+                            styles.hotspotAnbefaltText,
+                            sone.predictionMode === "environment_only" && styles.hotspotEnvOnlyText,
+                          ]}
+                        >
+                          {sone.predictionMode === "environment_only" ? PREDICTION_MODE_LABEL.environment_only : "ANBEFALT"}
+                        </Text>
                       )}
                     </View>
                   </View>
@@ -2178,7 +2214,16 @@ export default function KartScreen() {
                       <MarkerRing variant="hotspot" size={tier.ringSize} color={tier.ringColor} />
                     </View>
                     <View style={styles.hotspotAnbefaltRow}>
-                      {rank === 1 && <Text style={styles.hotspotAnbefaltText}>ANBEFALT</Text>}
+                      {rank === 1 && (
+                        <Text
+                          style={[
+                            styles.hotspotAnbefaltText,
+                            sone.predictionMode === "environment_only" && styles.hotspotEnvOnlyText,
+                          ]}
+                        >
+                          {sone.predictionMode === "environment_only" ? PREDICTION_MODE_LABEL.environment_only : "ANBEFALT"}
+                        </Text>
+                      )}
                     </View>
                   </View>
                 </StableMarker>
@@ -2386,7 +2431,16 @@ export default function KartScreen() {
                       <Text style={styles.huntPlanTargetEmoji}>🚩</Text>
                     </View>
                     <View style={styles.hotspotAnbefaltRow}>
-                      <Text style={styles.hotspotAnbefaltText}>ANBEFALT POST</Text>
+                      <Text
+                        style={[
+                          styles.hotspotAnbefaltText,
+                          huntPlanZone?.predictionMode === "environment_only" && styles.hotspotEnvOnlyText,
+                        ]}
+                      >
+                        {huntPlanZone?.predictionMode === "environment_only"
+                          ? `${PREDICTION_MODE_LABEL.environment_only} · post`
+                          : "ANBEFALT POST"}
+                      </Text>
                     </View>
                   </View>
                 </StableMarker>
@@ -3621,6 +3675,17 @@ const styles = StyleSheet.create({
     fontSize: 8, fontWeight: "900", letterSpacing: 0.5,
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
     overflow: "hidden",
+  },
+  // Launch-poleringsoppdraget §2/§6: en environment_only-sone skal ALDRI se
+  // like selvsikker ut som en observasjonsbekreftet "ANBEFALT" — samme
+  // merkelapp-plass og -form, men nøytral (ikke ViltIQ-grønn) farge og
+  // PREDICTION_MODE_LABEL sin egen, allerede eksisterende tekst ("Terreng")
+  // i stedet for en ny, oppfunnet streng.
+  hotspotEnvOnlyText: {
+    backgroundColor: "rgba(8,14,10,0.82)",
+    color: uiColor.textSecondary,
+    borderWidth: 1,
+    borderColor: uiColor.textMuted + "66",
   },
   // Feltrapport (fysisk enhet, V1.3): kameramarkøren viste ALDRI noe ikon,
   // selv etter StableMarker sin to-forsøks timing-fiks — diagnosen endte på

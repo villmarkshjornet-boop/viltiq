@@ -9,7 +9,7 @@ import { getSpeciesProfile, type PredictionZone } from "@/src/engine";
 import type { RecommendedTimeWindow, ZoneRecommendation } from "@/src/engine/types";
 import { color, confidenceColor, levelColor, motion, spacing, typography } from "@/src/design/tokens";
 import { avstandLabel, calcBearing, distanceMeters, retningNavn, type LatLng } from "@/src/lib/geo";
-import { PREDICTION_MODE_DESCRIPTION } from "@/src/lib/zonePresentation";
+import { PREDICTION_MODE_DESCRIPTION, PREDICTION_MODE_LABEL } from "@/src/lib/zonePresentation";
 import Badge from "./Badge";
 
 type EngineStatusPanelProps = {
@@ -176,7 +176,19 @@ export default function EngineStatusPanel({ zone, recommendation, compact = fals
           <Text style={styles.rankHeaderText}>
             Sone #{recommendation.rank} · {Math.round(recommendation.score)}/100
           </Text>
-          {erBesteSone && <Badge label="ANBEFALT" color={color.primary} size="sm" />}
+          {/* Launch-poleringsoppdraget §2/§6: samme regel som kart.tsx sine
+              post-markører — en environment_only-sone (ren terrenggjetning,
+              ingen bidragende observasjoner) skal ALDRI bære den samme
+              selvsikre, grønne "ANBEFALT"-merkelappen som en faktisk
+              observasjonsbekreftet sone. Gjenbruker PREDICTION_MODE_LABEL
+              (samme kilde som modeNote-teksten under), ikke en ny streng. */}
+          {erBesteSone && (
+            <Badge
+              label={zone.predictionMode === "environment_only" ? PREDICTION_MODE_LABEL.environment_only : "ANBEFALT"}
+              color={zone.predictionMode === "environment_only" ? color.textMuted : color.primary}
+              size="sm"
+            />
+          )}
         </View>
         {!!bearingDistanceLabel && <Text style={styles.bearingText}>{bearingDistanceLabel}</Text>}
 
